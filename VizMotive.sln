@@ -56,7 +56,7 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Example_ImGui", "Example_Im
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Example_ImGui_Docking", "Example_ImGui_Docking\Example_ImGui_Docking.vcxproj", "{5646F9FB-C9E3-4DA4-8AAA-EB7A46DD777E}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "StartUp", "Viewer_SeparatedEngine\Viewer_SeparatedEngine.vcxproj", "{E6996B15-A296-4C69-90EA-7F1787FF69DC}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Viewer_SeparatedEngine", "Viewer_SeparatedEngine\Viewer_SeparatedEngine.vcxproj", "{E6996B15-A296-4C69-90EA-7F1787FF69DC}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Common Source Code", "Common Source Code", "{44178708-8CD6-4FDC-83CF-120DE4CCAE7E}"
 EndProject
@@ -190,6 +190,7 @@ Global
 		SolutionGuid = {E3FF044A-B72E-4ED5-BE05-AB641BA048CD}
 	EndGlobalSection
 	GlobalSection(SharedMSBuildProjectFiles) = preSolution
+		Editor\Editor_SOURCE.vcxitems*{06163dcb-b183-4ed9-9c62-13ef1658e049}*SharedItemsImports = 4
 		WickedEngine\WickedEngine_SOURCE.vcxitems*{06163dcb-b183-4ed9-9c62-13ef1658e049}*SharedItemsImports = 4
 		WickedEngine\WickedEngine_SOURCE.vcxitems*{45d41acc-2c3c-43d2-bc10-02aa73ffc7c7}*SharedItemsImports = 9
 		Editor\Editor_SOURCE.vcxitems*{5fe97b9b-a445-4eea-a42d-9de60b891d48}*SharedItemsImports = 4

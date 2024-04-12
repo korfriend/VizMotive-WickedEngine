@@ -228,5 +228,4 @@ wiShaderdump.h
 *.a
 *.elf
 *.prx
-/Editor/config.ini
-/Viewer_SeparatedEngine/imgui.ini
+*.ini

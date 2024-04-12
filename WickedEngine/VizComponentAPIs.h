@@ -37,9 +37,9 @@ constexpr float VZ_PIDIV4 = 0.785398163f;
 
 using uint = uint32_t;
 
-// mesh and material ... why geometry 를 별도로 분리 안 했나?
-// mesh and material 을 why resource pool 로 별도 관리 안 하고, scene 의 구성 요소로 두었나? (resource 공유 이슈)
-
+// DOJO TO DO (or suggestion)
+// 1. separate mesh and material (mesh to geometry... and material is an option for objectcomponent)
+// 2. set up a resource pool (or a scene for this?! for the geometry anbd material, animations,....)
 
 namespace vzm
 {
