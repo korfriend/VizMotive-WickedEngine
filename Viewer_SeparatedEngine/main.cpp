@@ -163,7 +163,7 @@ int main(int, char**)
 
 		{
 			static VID sid = 0, cid = 0, cid_ani = 0;
-			static VID eid = 0;
+			static VID eid = 0, mid = 0;
 			static vzm::ArcBall arcball;
 			static ImVec2 wh(512, 512);
 			if (sid == 0)
@@ -204,6 +204,8 @@ int main(int, char**)
 				if (eid != INVALID_VID)
 				{
 					vzm::VmEmitter* vEmitter = (vzm::VmEmitter*)vzm::GetComponent(vzm::COMPONENT_TYPE::EMITTER, eid);
+					mid = vzm::GetVidByName("back_tire");
+					vEmitter->SetMeshVid(mid);
 				}
 				//vzm::LoadMeshModel(sid, "D:\\VisMotive\\data\\obj files\\skull\\12140_Skull_v3_L2.obj", "my obj");
 			}
@@ -317,7 +319,7 @@ int main(int, char**)
 			}
 			ImGui::End();
 
-			ImGui::Begin("Hello, world!");
+			ImGui::Begin("Controls");
 			{
 				if (ImGui::Button("PLAY"))
 				{
@@ -331,6 +333,110 @@ int main(int, char**)
 						}
 					}
 
+				}
+
+
+				if (eid != INVALID_VID)
+				{
+					vzm::VmEmitter* vEmitter = (vzm::VmEmitter*)vzm::GetComponent(vzm::COMPONENT_TYPE::EMITTER, eid);
+
+					ImGui::Separator();
+					ImGui::Text("Emitter System");
+					static bool initialized = false;
+
+					static float LifeSpan = vEmitter->GetLife();
+					ImGui::SliderFloat("LifeSpan", &LifeSpan, 0.f, 100.f);
+					vEmitter->SetLife(LifeSpan);
+					static float LifeSpanRandomness = vEmitter->GetRandomLife();
+					ImGui::SliderFloat("LifeSpanRandomness", &LifeSpanRandomness, 0.f, 1.f);
+					vEmitter->SetRandomLife(LifeSpanRandomness);
+					static float NormFactor = vEmitter->GetNormalFactor();
+					ImGui::SliderFloat("NormFactor", &NormFactor, 0.f, 1.f);
+					vEmitter->SetNormalFactor(NormFactor);
+					static float RandomFactor = vEmitter->GetRandomFactor();
+					ImGui::SliderFloat("RandomFactor", &RandomFactor, 0.f, 1.f);
+					vEmitter->SetRandomFactor(RandomFactor);
+					static float ScaleX = -1.f, ScaleY = -1.f;
+					if (!initialized)
+						vEmitter->GetScaleXY(&ScaleX, &ScaleY);
+					ImGui::SliderFloat("ScaleX", &ScaleX, 0.00001f, 1.f, "%.4f");
+					ImGui::SliderFloat("ScaleY", &ScaleY, 0.00001f, 1.f, "%.4f");
+					vEmitter->SetScaleXY(ScaleX, ScaleY);
+					static float Size = vEmitter->GetSize();
+					ImGui::SliderFloat("Size", &Size, 0.00001f, 1.f, "%.4f");
+					vEmitter->SetSize(Size);
+					static float MotionBlurAmount = vEmitter->GetMotionBlurAmount();
+					ImGui::SliderFloat("MotionBlurAmount", &MotionBlurAmount, 0.0f, 0.3f);
+					vEmitter->SetMotionBlurAmount(MotionBlurAmount);
+					static float Rotation = vEmitter->GetRotation();
+					ImGui::SliderFloat("Rotation", &Rotation, 0.0f, 1.f);
+					vEmitter->SetRotation(Rotation);
+					static float Mass = vEmitter->GetMass();
+					ImGui::SliderFloat("Mass", &Mass, 0.0f, 100.f);
+					vEmitter->SetMass(Mass);
+					static float Restitution = vEmitter->GetRestitution();
+					ImGui::SliderFloat("Restitution", &Restitution, -1.0f, 1.f);
+					vEmitter->SetRestitution(Restitution);
+					static float ParticleDrag = vEmitter->GetDrag();
+					ImGui::SliderFloat("ParticleDrag", &ParticleDrag, 0.0f, 10.f);
+					vEmitter->SetDrag(ParticleDrag);
+					static float Gravity[3] = { -1.f };
+					if (!initialized)
+						vEmitter->GetGravity(Gravity);
+					ImGui::SliderFloat3("Gravity", Gravity, -1.0f, 1.f);
+					vEmitter->SetGravity(Gravity);
+					static float Velocity[3];
+					if (!initialized)
+						vEmitter->GetVelocity(Velocity);
+					ImGui::SliderFloat3("Velocity", Velocity, -1.0f, 1.f);
+					vEmitter->SetVelocity(Velocity);
+					static float ParticleCount = vEmitter->GetCount();
+					ImGui::SliderFloat("ParticleCount", &ParticleCount, 0.0f, vEmitter->GetMaxParticleCount());
+					vEmitter->SetCount(ParticleCount);
+					static int ParticleBurst = 100;
+					ImGui::SliderInt("ParticleBurst", &ParticleBurst, 0, 1000);
+					if (ImGui::Button("Particle Burst")) {
+						vEmitter->Burst(ParticleBurst);
+					}
+
+					static bool isDebug = vEmitter->IsDebug();
+					ImGui::Checkbox("Debug", &isDebug);
+					vEmitter->SetDebug(isDebug);
+					static bool isPaused = vEmitter->IsPaused();
+					ImGui::Checkbox("Paused", &isPaused);
+					vEmitter->SetPaused(isPaused);
+					static bool isSort = vEmitter->IsSorted();
+					ImGui::Checkbox("Sort", &isSort);
+					vEmitter->SetSorted(isSort);
+					static bool isDepthCollisionEnabled = vEmitter->IsDepthCollisionEnabled();
+					ImGui::Checkbox("DepthCollisionEnabled", &isDepthCollisionEnabled);
+					vEmitter->SetDepthCollisionEnabled(isDepthCollisionEnabled);
+					static bool isSPHEnabled = vEmitter->IsSPHEnabled();
+					ImGui::Checkbox("SPHEnabled", &isSPHEnabled);
+					vEmitter->SetSPHEnabled(isSPHEnabled);
+					static bool isVolumeEnabled = vEmitter->IsVolumeEnabled();
+					ImGui::Checkbox("VolumeEnabled", &isVolumeEnabled);
+					vEmitter->SetVolumeEnabled(isVolumeEnabled);
+					static bool isFrameBlendingEnabled = vEmitter->IsFrameBlendingEnabled();
+					ImGui::Checkbox("FrameBlendingEnabled", &isFrameBlendingEnabled);
+					vEmitter->SetFrameBlendingEnabled(isFrameBlendingEnabled);
+					static bool isCollidersDisabled = vEmitter->IsCollidersDisabled();
+					ImGui::Checkbox("CollidersDisabled", &isCollidersDisabled);
+					vEmitter->SetCollidersDisabled(isCollidersDisabled);
+					static bool isTakeColorFromMesh = vEmitter->IsTakeColorFromMesh();
+					ImGui::Checkbox("TakeColorFromMesh", &isTakeColorFromMesh);
+					vEmitter->SetSorted(isTakeColorFromMesh);
+
+					initialized = true;
+
+					vzm::VmEmitter::ParticleCounters pc;
+					vEmitter->GetStatistics(pc);
+					ImGui::Text("aliveCount %d", pc.aliveCount);
+					ImGui::Text("deadCount %d", pc.deadCount);
+					ImGui::Text("realEmitCount %d", pc.realEmitCount);
+					ImGui::Text("aliveCount_afterSimulation %d", pc.aliveCount_afterSimulation);
+					ImGui::Text("culledCount %d", pc.culledCount);
+					ImGui::Text("cellAllocator %d", pc.cellAllocator);
 				}
 				ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
 			}
