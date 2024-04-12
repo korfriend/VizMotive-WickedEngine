@@ -1308,10 +1308,10 @@ namespace vzm // VmEmitter
 		emitter->random_color = random_color;
 		timeStamp = std::chrono::high_resolution_clock::now();
 	}
-	float* VmEmitter::GetVelocity()
+	void VmEmitter::GetVelocity(float velocity[3])
 	{
-		COMP_GET(EmittedParticleSystem, emitter, nullptr);
-		return __FP emitter->velocity;
+		COMP_GET(EmittedParticleSystem, emitter, );
+		*(XMFLOAT3*)velocity = emitter->velocity;
 	}
 	void VmEmitter::SetVelocity(const float velocity[3])
 	{
@@ -1319,10 +1319,10 @@ namespace vzm // VmEmitter
 		emitter->velocity = *(XMFLOAT3*)velocity;
 		timeStamp = std::chrono::high_resolution_clock::now();
 	}
-	float* VmEmitter::GetGravity()
+	void VmEmitter::GetGravity(float gravity[3])
 	{
-		COMP_GET(EmittedParticleSystem, emitter, nullptr);
-		return __FP emitter->gravity;
+		COMP_GET(EmittedParticleSystem, emitter, );
+		*(XMFLOAT3*)gravity = emitter->gravity;
 	}
 	void VmEmitter::SetGravity(const float gravity[3])
 	{

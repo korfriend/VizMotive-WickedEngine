@@ -215,9 +215,9 @@ namespace vzm
 		float GetRandomColor();
 		void SetRandomColor(const float random_color);
 
-		float* GetVelocity();
+		void GetVelocity(float velocity[3]);
 		void SetVelocity(const float velocity[3]);
-		float* GetGravity();
+		void GetGravity(float gravity[3]);
 		void SetGravity(const float gravity[3]);
 		float GetDrag();
 		void SetDrag(const float drag);
