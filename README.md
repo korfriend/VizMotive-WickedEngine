@@ -9,7 +9,9 @@
 VizMotive Engine is an open-source 3D engine for scientific data visualizations based on <a href="https://github.com/turanszkij/WickedEngine/">Wicked Engine</a>.
 
 ### Main Contribution Features
-- High-end (COM-based) APIs 
+- High-end (COM-based) APIs
+	- "VizEngineAPIs.h" for main COM-based high-end APIs
+ 	- "VizComponentAPIs.h" for data structure for referring to Wicked Engine components 
 - New scene structure based on actors and their components and systems
 	- Mesh actor having mesh component (w/ external material component) with transform system
 	- Particle actor having emitter component (w/ internal material component) with transform system
@@ -27,7 +29,7 @@ VizMotive Engine is an open-source 3D engine for scientific data visualizations 
 #### Basics (C++):
 ```cpp
 // Include engine headers:
-#include "VizEngineAPIs.h"
+#include "VizEngineAPIs.h"	// this reauires "VizComponentAPIs.h", none external dependencies
 
 // Start the Engine APIs:
 vzm::InitEngineLib();
