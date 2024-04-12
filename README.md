@@ -2,14 +2,14 @@
 - This project starts with the compact version of Wicked Engine (first milestone)
 - And adding my previous rendering engine features to this project while refactoring/compacting the underlying datastructures
 - Jobsystem as Thread manager will be modified for supporting MD project
-- High-level (COM-based) APIs (not exposing the core datastructures, auto-generation for a unified header incluing underlying components)
+- High-level (COM-based) APIs (not exposing the core datastructures)
 
 ## Our Engine (based on Wicked Engine)
 
 VizMotive Engine is an open-source 3D engine for scientific data visualizations based on <a href="https://github.com/turanszkij/WickedEngine/">Wicked Engine</a>.
 
 ### Main Contribution Features
-- High-end (COM-based) APIs
+- High-level (COM-based) APIs
 	- "VizEngineAPIs.h" for main COM-based high-end APIs
  	- "VizComponentAPIs.h" for data structures referring to Wicked Engine components 
 - New scene structure based on actors and their components and systems
