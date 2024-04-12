@@ -1,4 +1,4 @@
-# New Vizualization Framework Engine
+# Scientific Vizualization Framework Engine
 - This project starts with the compact version of Wicked Engine (first milestone)
 - And adding my previous rendering engine features to this project while refactoring/compacting the underlying datastructures
 - Jobsystem as Thread manager will be modified for supporting MD project
@@ -6,9 +6,15 @@
 
 ## Our Engine (based on Wicked Engine)
 
-VizMotive Engine is an open-source 3D engine for scientific data visualizations. Use this as a C++ framework for your own graphics projects.<br/>
-This project is based on <a href="https://github.com/turanszkij/WickedEngine/">Wicked Engine</a>.
+VizMotive Engine is an open-source 3D engine for scientific data visualizations based on <a href="https://github.com/turanszkij/WickedEngine/">Wicked Engine</a>.
 
+### Main Contribution Features
+- High-end (COM-based) APIs 
+- New scene structure based on actors and their components and systems
+	- Mesh actor having mesh component (w/ external material component) with transform system
+	- Particle actor having emitter component (w/ internal material component) with transform system
+	- (TO DO) Volume actor having volume component (w/ external material having OTF) with transform system
+ 
 ### Platforms:
 - Windows 10 or newer
 - Linux
@@ -18,59 +24,49 @@ This project is based on <a href="https://github.com/turanszkij/WickedEngine/">W
 
 ### Examples:
 
-#### Initialization (C++):
-```cpp
-// Include engine headers:
-#include "WickedEngine.h"
-
-// Create the Wicked Engine application:
-wi::Application application;
-
-// Assign window that you will render to:
-application.SetWindow(hWnd);
-
-// Run the application:
-while(true) {
-   application.Run(); 
-}
-```
-
 #### Basics (C++):
 ```cpp
-application.Initialize(); // application will start initializing at this point (asynchronously). If you start calling engine functionality immediately before application.Run() gets called, then you must first initialize the application yourself.
+// Include engine headers:
+#include "VizEngineAPIs.h"
 
-wi::initializer::InitializeComponentsImmediate(); // (Optional) allows to initialize all components immediately and block the application until finished. Otherwise the initialization will take place at the first application.Run() asynchronously. This is useful if you want to start using other parts of the engine before application.Run() is called.
+// Start the Engine APIs:
+vzm::InitEngineLib();
 
-wi::RenderPath3D myGame; // Declare a game screen component, aka "RenderPath" (you could also override its Update(), Render() etc. functions). 
-application.ActivatePath(&myGame); // Register your game to the application. It will call Start(), Update(), Render(), etc. from now on...
+// Create a scene
+VID sid = vzm::NewScene("my scene");
 
-wi::scene::LoadModel("myModel.wiscene"); // Simply load a model into the current global scene
-wi::scene::GetScene(); // Get the current global scene
+// Load local scene structure
+vzm::LoadMeshModel(sid, [filename], "my obj");
 
-wi::scene::Scene scene2; // create a separate scene
-wi::scene::LoadModel(scene2, "myModel2.wiscene"); // Load model into a separate scene
-wi::scene::GetScene().Merge(scene2); // Combine separate scene with global scene
+// Run the application:
+while(true)
+{
+	...
 
-myGame.setFXAAEnabled(true); // You can enable post process effects this way...
+	vzm::VmCamera* vCam = nullptr;
+	static int cid = vzm::NewSceneComponent(vzm::COMPONENT_TYPE::CAMERA, sid, "my camera", 0, CMPP(vCam));
 
-wi::RenderPath2D myMenuScreen; // This is an other render path, but now a simple 2D one. It can only render 2D graphics by default (like a menu for example)
-application.ActivatePath(&myMenuScreen); // activate the menu, the previous path (myGame) will be stopped
+	// wh is float2 type for rendertarget width and height 
+	vCam->SetCanvasSize(wh.x, wh.y, 96.f);
 
-wi::Sprite mySprite("image.png"); // There are many utilities, such as a "sprite" helper class
-myMenuScreen.AddSprite(&mySprite); // The 2D render path is ready to handle sprite and font rendering for you
+	float3 pos(0, 2, 2), up(0, 1, 0), at(0, 0, 0);
+	float3 view = at - pos;
+	vCam->SetPose(__FP pos, __FP view, __FP up);
+	vCam->SetPerspectiveProjection(0.1f, 5000.f, glm::pi<float>() * 0.4f, 1.f);
 
-wi::audio::Sound mySound;
-wi::audio::CreateSound("explosion.wav", &mySound); // Loads a sound file
-wi::audio::SoundInstance mySoundInstance;
-wi::audio::CreateSoundInstance(&mySound, &mySoundInstance); // Instances the sound file, it can be played now
-wi::audio::Play(&mySoundInstance); // Play the sound instance
-wi::audio::SetVolume(0.6, &mySoundInstance); // Set the volume of this soundinstance
-wi::audio::SetVolume(0.2); // Set the master volume
+	vzm::Render(cid);
+	uint32_t w, h;
+	// ImGui (DX12 version) example 
+	ImTextureID texId = vzm::GetGraphicsSharedRenderTarget(cid, g_pd3dDevice, g_pd3dSrvDescHeap, 1, &w, &h);
+	// https://github.com/ocornut/imgui/wiki/Image-Loading-and-Displaying-Examples
+	ImGui::Image(texId, ImVec2((float)w, (float)h));			
 
-if (wi::input::Press(wi::input::KEYBOARD_BUTTON_SPACE)) { wi::audio::Stop(&mySoundInstance); } // You can check if a button is pressed or not (this only triggers once)
-if (wi::input::Down(wi::input::KEYBOARD_BUTTON_SPACE)) { wi::audio::Play(&mySoundInstance); } // You can check if a button is pushed down or not (this triggers repeatedly)
+	...
+}
+
+// Finish the Engine APIs:
+vzm::DeinitEngineLib();
 ```
-
 
 ### Graphics API:
 The default renderer is `DirectX 12` on Windows and `Vulkan` on Linux. The `DirectX 11` renderer is no longer available starting from version 0.57.0, but it can be found on the <a href="https://github.com/turanszkij/WickedEngine/tree/dx11-backup">dx11-backup branch</a>.
