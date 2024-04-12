@@ -24,8 +24,6 @@ VizMotive Engine is an open-source 3D engine for scientific data visualizations 
 - Windows 10 or newer
 - Linux
 - UWP
-- Xbox Series X|S
-- PlayStation 5 [in progress]
 
 ### Examples:
 
