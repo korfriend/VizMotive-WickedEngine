@@ -13,7 +13,8 @@ VizMotive Engine is an open-source 3D engine for scientific data visualizations 
 	- "VizEngineAPIs.h" for main COM-based high-end APIs
  	- "VizComponentAPIs.h" for data structures referring to Wicked Engine components 
 - New scene structure based on actors and their components and systems
-	- Mesh actor having mesh component (w/ external material component) with transform system
+	- Camera having renderer (as a canvas) with transform system
+ 	- Mesh actor having mesh component (w/ external material component) with transform system
 	- Particle actor having emitter component (w/ internal material component) with transform system
 	- (TO DO) Volume actor having volume component (w/ external material having OTF) with transform system
  
