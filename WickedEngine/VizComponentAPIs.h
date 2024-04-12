@@ -165,7 +165,7 @@ namespace vzm
 			uint aliveCount_afterSimulation;
 			uint culledCount;
 			uint cellAllocator;
-		} statistics = {};	// just for information
+		};
 
 		enum PARTICLESHADERTYPE
 		{
@@ -177,88 +177,84 @@ namespace vzm
 			ENUM_FORCE_UINT32 = 0xFFFFFFFF,
 		};
 
-		enum FLAGS
-		{
-			FLAG_EMPTY = 0,
-			FLAG_DEBUG = 1 << 0,
-			FLAG_PAUSED = 1 << 1,
-			FLAG_SORTING = 1 << 2,
-			FLAG_DEPTHCOLLISION = 1 << 3,
-			FLAG_SPH_FLUIDSIMULATION = 1 << 4,
-			FLAG_HAS_VOLUME = 1 << 5,
-			FLAG_FRAME_BLENDING = 1 << 6,
-			FLAG_COLLIDERS_DISABLED = 1 << 7,
-			FLAG_USE_RAIN_BLOCKER = 1 << 8,
-			FLAG_TAKE_COLOR_FROM_MESH = 1 << 9,
-		};
+		void Burst(int num);
+		void Restart();
 
-		uint32_t _flags = FLAG_EMPTY;
+		void GetStatistics(ParticleCounters& statistics);
 
-		PARTICLESHADERTYPE shaderType = SOFT;
+		PARTICLESHADERTYPE GetShaderType();
+		void SetShaderType(const PARTICLESHADERTYPE shaderType);
 
-		VID meshID = INVALID_VID;
+		VID GetMeshVid();
+		void SetMeshVid(const VID vid);
 
-		float FIXED_TIMESTEP = -1.0f; // -1 : variable timestep; >=0 : fixed timestep
+		// -1 : variable timestep; >=0 : fixed timestep
+		float GetFixedTimeStep();
+		void SetFixedTimeStep(const float FIXED_TIMESTEP);
 
-		float size = 1.0f;
-		float random_factor = 1.0f;
-		float normal_factor = 1.0f;
-		float count = 0.0f;
-		float life = 1.0f;
-		float random_life = 1.0f;
-		float scaleX = 1.0f;
-		float scaleY = 1.0f;
-		float rotation = 0.0f;
-		float motionBlurAmount = 0.0f;
-		float mass = 1.0f;
-		float random_color = 0;
+		float GetSize();
+		void SetSize(const float size);
+		float GetRandomFactor();
+		void SetRandomFactor(const float random_factor);
+		float GetNormalFactor();
+		void SetNormalFactor(const float normal_factor);
+		float GetCount();
+		void SetCount(const float count);
+		float GetLife();
+		void SetLife(const float life);
+		float GetRandomLife();
+		void SetRandomLife(const float random_life);
+		void GetScaleXY(float* scaleX, float* scaleY);
+		void SetScaleXY(const float scaleX, const float scaleY);
+		float GetRotation();
+		void SetRotation(const float rotation);
+		float GetMotionBlurAmount();
+		void SetMotionBlurAmount(const float motionBlurAmount);
+		float GetMass();
+		void SetMass(const float mass);
+		float GetRandomColor();
+		void SetRandomColor(const float random_color);
 
-		XMFLOAT3 velocity = {}; // starting velocity of all new particles
-		XMFLOAT3 gravity = {}; // constant gravity force
-		float drag = 1.0f; // constant drag (per frame velocity multiplier, reducing it will make particles slow down over time)
-		float restitution = 0.98f; // if the particles have collision enabled, then after collision this is a multiplier for their bouncing velocities
+		float* GetVelocity();
+		void SetVelocity(const float velocity[3]);
+		float* GetGravity();
+		void SetGravity(const float gravity[3]);
+		float GetDrag();
+		void SetDrag(const float drag);
+		float GetRestitution();
+		void SetRestitution(const float restitution);
 
-		float SPH_h = 1.0f;		// smoothing radius
-		float SPH_K = 250.0f;	// pressure constant
-		float SPH_p0 = 1.0f;	// reference density
-		float SPH_e = 0.018f;	// viscosity constant
+		// smoothing radius, pressure constant, reference density, viscosity constant
+		void GetSPHProps(float* SPH_h, float* SPH_K, float* SPH_p0, float* SPH_e);
+		void SetSPHProps(const float SPH_h, const float SPH_K, const float SPH_p0, const float SPH_e);
 
-		// Sprite sheet properties:
-		uint32_t framesX = 1;
-		uint32_t framesY = 1;
-		uint32_t frameCount = 1;
-		uint32_t frameStart = 0;
-		float frameRate = 0; // frames per second
+		void GetSpriteSheetProps(uint32_t* framesX, uint32_t* framesY, uint32_t* frameCount, uint32_t* frameStart);
+		void SetSpriteSheetProps(const uint32_t framesX, const uint32_t framesY, const uint32_t frameCount, const uint32_t frameStart);
 
+		// Core Component Intrinsics
 		void SetMaxParticleCount(uint32_t value);
-		uint32_t GetMaxParticleCount() const { return MAX_PARTICLES; }
-		uint64_t GetMemorySizeInBytes() const;
+		uint32_t GetMaxParticleCount();
+		uint64_t GetMemorySizeInBytes();
 
-		// Non-serialized attributes:
-		XMFLOAT3 center;
-		uint32_t layerMask = ~0u;
-		XMFLOAT4X4 worldMatrix = wi::math::IDENTITY_MATRIX;
+		bool IsDebug();
+		bool IsPaused();
+		bool IsSorted();
+		bool IsDepthCollisionEnabled();
+		bool IsSPHEnabled();
+		bool IsVolumeEnabled();
+		bool IsFrameBlendingEnabled();
+		bool IsCollidersDisabled();
+		bool IsTakeColorFromMesh();
 
-		bool IsDebug() const { return _flags & FLAG_DEBUG; }
-		bool IsPaused() const { return _flags & FLAG_PAUSED; }
-		bool IsSorted() const { return _flags & FLAG_SORTING; }
-		bool IsDepthCollisionEnabled() const { return _flags & FLAG_DEPTHCOLLISION; }
-		bool IsSPHEnabled() const { return _flags & FLAG_SPH_FLUIDSIMULATION; }
-		bool IsVolumeEnabled() const { return _flags & FLAG_HAS_VOLUME; }
-		bool IsFrameBlendingEnabled() const { return _flags & FLAG_FRAME_BLENDING; }
-		bool IsCollidersDisabled() const { return _flags & FLAG_COLLIDERS_DISABLED; }
-		bool IsTakeColorFromMesh() const { return _flags & FLAG_TAKE_COLOR_FROM_MESH; }
-
-		void SetDebug(bool value) { if (value) { _flags |= FLAG_DEBUG; } else { _flags &= ~FLAG_DEBUG; } }
-		void SetPaused(bool value) { if (value) { _flags |= FLAG_PAUSED; } else { _flags &= ~FLAG_PAUSED; } }
-		void SetSorted(bool value) { if (value) { _flags |= FLAG_SORTING; } else { _flags &= ~FLAG_SORTING; } }
-		void SetDepthCollisionEnabled(bool value) { if (value) { _flags |= FLAG_DEPTHCOLLISION; } else { _flags &= ~FLAG_DEPTHCOLLISION; } }
-		void SetSPHEnabled(bool value) { if (value) { _flags |= FLAG_SPH_FLUIDSIMULATION; } else { _flags &= ~FLAG_SPH_FLUIDSIMULATION; } }
-		void SetVolumeEnabled(bool value) { if (value) { _flags |= FLAG_HAS_VOLUME; } else { _flags &= ~FLAG_HAS_VOLUME; } }
-		void SetFrameBlendingEnabled(bool value) { if (value) { _flags |= FLAG_FRAME_BLENDING; } else { _flags &= ~FLAG_FRAME_BLENDING; } }
-		void SetCollidersDisabled(bool value) { if (value) { _flags |= FLAG_COLLIDERS_DISABLED; } else { _flags &= ~FLAG_COLLIDERS_DISABLED; } }
-		void SetTakeColorFromMesh(bool value) { if (value) { _flags |= FLAG_TAKE_COLOR_FROM_MESH; } else { _flags &= ~FLAG_TAKE_COLOR_FROM_MESH; } }
-		/**/
+		void SetDebug(const bool value);
+		void SetPaused(const bool value);
+		void SetSorted(const bool value);
+		void SetDepthCollisionEnabled(const bool value);
+		void SetSPHEnabled(const bool value);
+		void SetVolumeEnabled(const bool value);
+		void SetFrameBlendingEnabled(const bool value);
+		void SetCollidersDisabled(const bool value);
+		void SetTakeColorFromMesh(const bool value);
 	};
 	struct VmLight : VmBaseComponent
 	{

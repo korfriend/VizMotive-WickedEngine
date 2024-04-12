@@ -1049,9 +1049,11 @@ namespace vzm
 	SceneManager sceneManager;
 }
 
-namespace vzm
+
+#define COMP_GET(COMP, PARAM, RET) COMP* PARAM = sceneManager.GetEngineComp<COMP>(componentVID); if (!PARAM) return RET;
+
+namespace vzm // VmCamera
 {
-	// VmCamera
 	void VmCamera::SetPose(const float pos[3], const float view[3], const float up[3])
 	{
 		CameraComponent* camComponent = sceneManager.GetEngineComp<CameraComponent>(componentVID);
@@ -1064,7 +1066,7 @@ namespace vzm
 		XMVECTOR _right = XMVector3Cross(_view, _up);
 		_up = XMVector3Normalize(XMVector3Cross(_right, _view));
 
-		
+
 		TransformComponent* transform = ((VzmRenderer*)renderer)->scene->transforms.GetComponent(componentVID);
 		if (transform)
 		{
@@ -1128,11 +1130,380 @@ namespace vzm
 		if (h) *h = (float)((VzmRenderer*)renderer)->height;
 		if (dpi) *dpi = ((VzmRenderer*)renderer)->dpi;
 	}
-
-	// VmActor
-	// VmLight
-
-	// VmWeather
+}
+namespace vzm // VmActor
+{
+}
+namespace vzm // VmLight
+{
+}
+namespace vzm // VmLight
+{
+}
+namespace vzm // VmEmitter
+{
+	void VmEmitter::Burst(int num)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->Burst(num);
+	}
+	void VmEmitter::Restart()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->Restart();
+	}
+	void VmEmitter::GetStatistics(ParticleCounters& statistics)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		::ParticleCounters pc = emitter->GetStatistics();
+		statistics = *(VmEmitter::ParticleCounters*)&pc;
+	}
+	VmEmitter::PARTICLESHADERTYPE VmEmitter::GetShaderType()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, VmEmitter::PARTICLESHADERTYPE::SOFT);
+		return (PARTICLESHADERTYPE)emitter->shaderType;
+	}
+	VID VmEmitter::GetMeshVid()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, INVALID_VID);
+		return emitter->meshID;
+	}
+	void VmEmitter::SetMeshVid(const VID vid)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->meshID = vid;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	float VmEmitter::GetFixedTimeStep()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, -1.f);
+		return emitter->FIXED_TIMESTEP;
+	}
+	void VmEmitter::SetFixedTimeStep(const float FIXED_TIMESTEP)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->FIXED_TIMESTEP = FIXED_TIMESTEP;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	float VmEmitter::GetSize()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, 0.f);
+		return emitter->size;
+	}
+	void VmEmitter::SetSize(const float size)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->size = size;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	float VmEmitter::GetRandomFactor()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, 0.f);
+		return emitter->random_factor;
+	}
+	void VmEmitter::SetRandomFactor(const float random_factor)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->random_factor = random_factor;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	float VmEmitter::GetNormalFactor()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, 0.f);
+		return emitter->normal_factor;
+	}
+	void VmEmitter::SetNormalFactor(const float normal_factor)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->normal_factor = normal_factor;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	float VmEmitter::GetCount()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, 0.f);
+		return emitter->count;
+	}
+	void VmEmitter::SetCount(const float count)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->count = count;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	float VmEmitter::GetLife()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, 0.f);
+		return emitter->life;
+	}
+	void VmEmitter::SetLife(const float life)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->life = life;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	float VmEmitter::GetRandomLife()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, 0.f);
+		return emitter->random_life;
+	}
+	void VmEmitter::SetRandomLife(const float random_life)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->random_life = random_life;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmEmitter::GetScaleXY(float* scaleX, float* scaleY)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		if (scaleX) *scaleX = emitter->scaleX;
+		if (scaleY) *scaleY = emitter->scaleY;
+	}
+	void VmEmitter::SetScaleXY(const float scaleX, const float scaleY)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->scaleX = scaleX;
+		emitter->scaleY = scaleY;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	float VmEmitter::GetRotation()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, 0.f);
+		return emitter->rotation;
+	}
+	void VmEmitter::SetRotation(const float rotation)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->rotation = rotation;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	float VmEmitter::GetMotionBlurAmount()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, 0.f);
+		return emitter->motionBlurAmount;
+	}
+	void VmEmitter::SetMotionBlurAmount(const float motionBlurAmount)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->motionBlurAmount = motionBlurAmount;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	float VmEmitter::GetMass()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, 0.f);
+		return emitter->mass;
+	}
+	void VmEmitter::SetMass(const float mass)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->mass = mass;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	float VmEmitter::GetRandomColor()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, 0.f);
+		return emitter->random_color;
+	}
+	void VmEmitter::SetRandomColor(const float random_color)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->random_color = random_color;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	float* VmEmitter::GetVelocity()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, nullptr);
+		return __FP emitter->velocity;
+	}
+	void VmEmitter::SetVelocity(const float velocity[3])
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->velocity = *(XMFLOAT3*)velocity;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	float* VmEmitter::GetGravity()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, nullptr);
+		return __FP emitter->gravity;
+	}
+	void VmEmitter::SetGravity(const float gravity[3])
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->gravity = *(XMFLOAT3*)gravity;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	float VmEmitter::GetDrag()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, 0.f);
+		return emitter->drag;
+	}
+	void VmEmitter::SetDrag(const float drag)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->drag = drag;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	float VmEmitter::GetRestitution()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, 0.f);
+		return emitter->restitution;
+	}
+	void VmEmitter::SetRestitution(const float restitution)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->restitution = restitution;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmEmitter::GetSPHProps(float* SPH_h, float* SPH_K, float* SPH_p0, float* SPH_e)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		if (SPH_h) *SPH_h = emitter->SPH_h;
+		if (SPH_K) *SPH_K = emitter->SPH_K;
+		if (SPH_p0) *SPH_p0 = emitter->SPH_p0;
+		if (SPH_e) *SPH_e = emitter->SPH_e;
+	}
+	void VmEmitter::SetSPHProps(const float SPH_h, const float SPH_K, const float SPH_p0, const float SPH_e)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->SPH_h = SPH_h;
+		emitter->SPH_K = SPH_K;
+		emitter->SPH_p0 = SPH_p0;
+		emitter->SPH_e = SPH_e;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmEmitter::GetSpriteSheetProps(uint32_t* framesX, uint32_t* framesY, uint32_t* frameCount, uint32_t* frameStart)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		if (framesX) *framesX = emitter->framesX;
+		if (framesY) *framesY = emitter->framesY;
+		if (frameCount) *frameCount = emitter->frameCount;
+		if (frameStart) *frameStart = emitter->frameStart;
+	}
+	void VmEmitter::SetSpriteSheetProps(const uint32_t framesX, const uint32_t framesY, const uint32_t frameCount, const uint32_t frameStart)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->framesX = framesX;
+		emitter->framesY = framesY;
+		emitter->frameCount = frameCount;
+		emitter->frameStart = frameStart;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmEmitter::SetMaxParticleCount(uint32_t value)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->SetMaxParticleCount(value);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	uint32_t VmEmitter::GetMaxParticleCount()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, 0u);
+		return emitter->GetMaxParticleCount();
+	}
+	uint64_t VmEmitter::GetMemorySizeInBytes()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, 0u);
+		return emitter->GetMemorySizeInBytes();
+	}
+	bool VmEmitter::IsDebug()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, false);
+		return emitter->IsDebug();
+	}
+	bool VmEmitter::IsPaused()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, false);
+		return emitter->IsPaused();
+	}
+	bool VmEmitter::IsSorted()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, false);
+		return emitter->IsSorted();
+	}
+	bool VmEmitter::IsDepthCollisionEnabled()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, false);
+		return emitter->IsDepthCollisionEnabled();
+	}
+	bool VmEmitter::IsSPHEnabled()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, false);
+		return emitter->IsSPHEnabled();
+	}
+	bool VmEmitter::IsVolumeEnabled()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, false);
+		return emitter->IsVolumeEnabled();
+	}
+	bool VmEmitter::IsFrameBlendingEnabled()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, false);
+		return emitter->IsFrameBlendingEnabled();
+	}
+	bool VmEmitter::IsCollidersDisabled()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, false);
+		return emitter->IsCollidersDisabled();
+	}
+	bool VmEmitter::IsTakeColorFromMesh()
+	{
+		COMP_GET(EmittedParticleSystem, emitter, false);
+		return emitter->IsTakeColorFromMesh();
+	}
+	void VmEmitter::SetDebug(const bool value)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->SetDebug(value);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmEmitter::SetPaused(const bool value)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->SetPaused(value);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmEmitter::SetSorted(const bool value)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->SetSorted(value);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmEmitter::SetDepthCollisionEnabled(const bool value)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->SetDepthCollisionEnabled(value);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmEmitter::SetSPHEnabled(const bool value)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->SetSPHEnabled(value);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmEmitter::SetVolumeEnabled(const bool value)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->SetVolumeEnabled(value);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmEmitter::SetFrameBlendingEnabled(const bool value)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->SetFrameBlendingEnabled(value);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmEmitter::SetCollidersDisabled(const bool value)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->SetCollidersDisabled(value);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmEmitter::SetTakeColorFromMesh(const bool value)
+	{
+		COMP_GET(EmittedParticleSystem, emitter, );
+		emitter->SetTakeColorFromMesh(value);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+}
+namespace vzm // VmWeather
+{
 	void VmWeather::SetWeatherPreset(const uint32_t index)
 	{
 		VzmScene* scene = sceneManager.GetScene(componentVID);
@@ -1140,7 +1511,7 @@ namespace vzm
 		{
 			return;
 		}
-		
+
 		if (scene->weathers.GetComponentArray().size() <= index)
 		{
 			return;
@@ -1148,8 +1519,9 @@ namespace vzm
 		scene->weather = scene->weathers.GetComponentArray()[index];
 		timeStamp = std::chrono::high_resolution_clock::now();
 	}
-	 
-	// VmAnimation
+}
+namespace vzm // VmAnimation
+{
 	void VmAnimation::Play()
 	{
 		AnimationComponent* aniComponent = sceneManager.GetEngineComp<AnimationComponent>(componentVID);
