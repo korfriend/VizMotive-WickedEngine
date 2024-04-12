@@ -699,7 +699,7 @@ namespace vzm
 
 	struct VzmScene : Scene
 	{
-		VID sceneId = INVALID_VID;
+		VID sceneVid = INVALID_VID;
 		VmWeather vmWeather;
 		std::string name;
 	};
@@ -832,7 +832,7 @@ namespace vzm
 					scene.vmWeather.compType = COMPONENT_TYPE::WEATHER;
 				}
 				scene.name = name;
-				scene.sceneId = ett;
+				scene.sceneVid = ett;
 				nameMap[name] = ett;
 			}
 
@@ -874,7 +874,7 @@ namespace vzm
 				}
 				if (it->second.name == name)
 				{
-					return it->second.sceneId;
+					return it->second.sceneVid;
 				}
 			}
 			return INVALID_VID;
@@ -909,9 +909,9 @@ namespace vzm
 		{
 			return GetScene(GetVidByName(name));
 		}
-		inline std::map<VID, VzmScene>& GetScenes()
+		inline std::map<VID, VzmScene>* GetScenes()
 		{
-			return scenes;
+			return &scenes;
 		}
 		inline VzmRenderer* GetRenderer(const VID camEntity)
 		{
@@ -1622,7 +1622,7 @@ namespace vzm
 		return sceneManager.CreateSceneEntity(sceneName);
 	}
 
-	void MoveToParent(const Entity entity, const Entity parentEntity, Scene* scene)
+	bool MoveToParent(const Entity entity, const Entity parentEntity, Scene* scene)
 	{
 		assert(entity != parentEntity);
 		if (parentEntity != INVALID_ENTITY)
@@ -1632,10 +1632,11 @@ namespace vzm
 				if (entry.second.component_manager->Contains(parentEntity))
 				{
 					scene->hierarchy.Create(entity).parentID = parentEntity;
-					return;
+					return true;
 				}
 			}
 		}
+		return false;
 	}
 
 	VID NewSceneComponent(const COMPONENT_TYPE compType, const VID sceneId, const std::string& compName, const VID parentVid, VmBaseComponent** baseComp)
@@ -1706,6 +1707,16 @@ namespace vzm
 
 	VID AppendComponentTo(const VID vid, const VID parentVid)
 	{
+		auto scenes = sceneManager.GetScenes();
+		bool ret = false;
+		for (auto it = scenes->begin(); it != scenes->end(); it++)
+		{
+			VzmScene* scene = &it->second;
+			if (MoveToParent(vid, parentVid, scene))
+			{
+				return scene->sceneVid;
+			}
+		}
 		return INVALID_VID;
 	}
 
