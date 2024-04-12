@@ -444,7 +444,7 @@ void FlipZAxis(LoaderState& state)
 	}
 }
 
-void ImportModel_GLTF(const std::string& fileName, Scene& scene)
+Entity ImportModel_GLTF(const std::string& fileName, Scene& scene)
 {
 	std::string directory = wi::helper::GetDirectoryFromPath(fileName);
 	std::string name = wi::helper::GetFileNameFromPath(fileName);
@@ -2021,6 +2021,8 @@ void ImportModel_GLTF(const std::string& fileName, Scene& scene)
 	// Update the scene, to have up to date values immediately after loading:
 	//	For example, snap to camera functionality relies on this
 	scene.Update(0);
+
+	return state.rootEntity;
 }
 
 void Import_Extension_VRM(LoaderState& state)

@@ -1,26 +1,35 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <Filter Include="HF">
-      <UniqueIdentifier>{be5e3922-0e61-434a-92c8-bfaf03c26fb4}</UniqueIdentifier>
+    <Filter Include="compressonator">
+      <UniqueIdentifier>{913dd8d5-7a4e-4a41-9737-4c690309165e}</UniqueIdentifier>
     </Filter>
     <Filter Include="CS">
       <UniqueIdentifier>{c23b3c81-afad-4c4d-a0fd-598f01477820}</UniqueIdentifier>
     </Filter>
-    <Filter Include="VS">
-      <UniqueIdentifier>{1ef621ed-feeb-4b4c-aa96-8dc5f9933634}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="PS">
-      <UniqueIdentifier>{993b685a-191e-4ffa-a5e4-66b00eb3eb35}</UniqueIdentifier>
-    </Filter>
     <Filter Include="DS">
       <UniqueIdentifier>{bdf0867b-8819-4456-998f-296fed10d958}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ffx-fsr">
+      <UniqueIdentifier>{a0f04960-eae7-45c2-a6d8-c0c25ec3b333}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ffx-fsr2">
+      <UniqueIdentifier>{902ab028-5d33-4517-a981-4b5adc0f7031}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ffx-shadows-dnsr">
+      <UniqueIdentifier>{2bb6f2d6-f3e1-4501-95bc-bd4a0ca64c4b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="GS">
+      <UniqueIdentifier>{9f327310-fe88-414c-a23a-22839ea58475}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="HF">
+      <UniqueIdentifier>{be5e3922-0e61-434a-92c8-bfaf03c26fb4}</UniqueIdentifier>
     </Filter>
     <Filter Include="HS">
       <UniqueIdentifier>{d69144c2-e3a3-45c1-b66a-caec6dc22a93}</UniqueIdentifier>
     </Filter>
-    <Filter Include="GS">
-      <UniqueIdentifier>{9f327310-fe88-414c-a23a-22839ea58475}</UniqueIdentifier>
+    <Filter Include="interop">
+      <UniqueIdentifier>{d43cceda-5146-4e72-92e4-e97b4b91fd6e}</UniqueIdentifier>
     </Filter>
     <Filter Include="LIB">
       <UniqueIdentifier>{1c9fec3c-c842-4bb0-9e03-69baf6cc090e}</UniqueIdentifier>
@@ -28,20 +37,11 @@
     <Filter Include="MS">
       <UniqueIdentifier>{92e70786-aab6-48dd-9d04-277448eaa897}</UniqueIdentifier>
     </Filter>
-    <Filter Include="interop">
-      <UniqueIdentifier>{d43cceda-5146-4e72-92e4-e97b4b91fd6e}</UniqueIdentifier>
+    <Filter Include="PS">
+      <UniqueIdentifier>{993b685a-191e-4ffa-a5e4-66b00eb3eb35}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ffx-fsr2">
-      <UniqueIdentifier>{902ab028-5d33-4517-a981-4b5adc0f7031}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="compressonator">
-      <UniqueIdentifier>{913dd8d5-7a4e-4a41-9737-4c690309165e}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="ffx-fsr">
-      <UniqueIdentifier>{a0f04960-eae7-45c2-a6d8-c0c25ec3b333}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="ffx-shadows-dnsr">
-      <UniqueIdentifier>{2bb6f2d6-f3e1-4501-95bc-bd4a0ca64c4b}</UniqueIdentifier>
+    <Filter Include="VS">
+      <UniqueIdentifier>{1ef621ed-feeb-4b4c-aa96-8dc5f9933634}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>

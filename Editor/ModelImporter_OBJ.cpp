@@ -68,7 +68,7 @@ private:
 // Transform the data from OBJ space to engine-space:
 static const bool transform_to_LH = true;
 
-void ImportModel_OBJ(const std::string& fileName, Scene& scene)
+Entity ImportModel_OBJ(const std::string& fileName, Scene& scene)
 {
 	std::string directory = wi::helper::GetDirectoryFromPath(fileName);
 	std::string name = wi::helper::GetFileNameFromPath(fileName);
@@ -98,9 +98,10 @@ void ImportModel_OBJ(const std::string& fileName, Scene& scene)
 		wi::backlog::post(obj_errors, wi::backlog::LogLevel::Error);
 	}
 
+	Entity rootEntity = INVALID_ENTITY;
 	if (success)
 	{
-		Entity rootEntity = CreateEntity();
+		rootEntity = CreateEntity();
 		scene.transforms.Create(rootEntity);
 		scene.names.Create(rootEntity) = name;
 
@@ -255,4 +256,6 @@ void ImportModel_OBJ(const std::string& fileName, Scene& scene)
 	{
 		wi::helper::messageBox("OBJ import failed! Check backlog for errors!", "Error!");
 	}
+
+	return rootEntity;
 }

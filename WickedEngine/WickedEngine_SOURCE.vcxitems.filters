@@ -55,6 +55,9 @@
     <Filter Include="ENGINE\Video">
       <UniqueIdentifier>{7cb35feb-169d-4eb9-b90c-61418a8e99df}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Engine Wrapper">
+      <UniqueIdentifier>{32b642fd-4b0d-4b4e-8df3-a75ad738564a}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="$(MSBuildThisFileDirectory)LUA\lapi.h">
@@ -1143,6 +1146,15 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)wiTrailRenderer_BindLua.h">
       <Filter>ENGINE\Scripting\LuaBindings</Filter>
     </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)VizComponentAPIs.h">
+      <Filter>Engine Wrapper</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)VizEngineAPIs.h">
+      <Filter>Engine Wrapper</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)vzArcBall.h">
+      <Filter>ENGINE\Helpers</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(MSBuildThisFileDirectory)LUA\lapi.c">
@@ -1915,6 +1927,9 @@
     </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)wiTrailRenderer_BindLua.cpp">
       <Filter>ENGINE\Scripting\LuaBindings</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)VizEngineAPIs.cpp">
+      <Filter>Engine Wrapper</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

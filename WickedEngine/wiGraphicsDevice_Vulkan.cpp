@@ -6810,6 +6810,13 @@ using namespace vulkan_internal;
 		return -1;
 	}
 
+	// DOJO adds for offscreen rendering option
+	void* GraphicsDevice_Vulkan::OpenSharedResource(const void* _device2, const void* _srv_desc_heap2, const int descriptor_index, Texture* texture)
+	{
+		// DOJO TO DO
+		return nullptr;
+	}
+
 	int GraphicsDevice_Vulkan::GetDescriptorIndex(const GPUResource* resource, SubresourceType type, int subresource) const
 	{
 		if (resource == nullptr || !resource->IsValid())

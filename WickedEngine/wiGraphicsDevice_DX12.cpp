@@ -5139,6 +5139,66 @@ using namespace dx12_internal;
 		return -1;
 	}
 
+	// DOJO adds for offscreen rendering option
+	void* GraphicsDevice_DX12::OpenSharedResource(const void* _device2, const void* _srv_desc_heap2, const int descriptor_index, Texture* texture)
+	{
+		if (texture->shared_handle == nullptr)
+		{
+			return nullptr;
+		}
+
+		ID3D12Device* device2 = (ID3D12Device*)_device2;
+		UINT handle_increment_gpu2 = device2->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+		struct Res {
+			ComPtr<ID3D12Resource> shared_texture;
+			UINT64 shared_srv_ptr = 0;
+			void* old_shared_handle = nullptr; // do not release this!
+		};
+		static std::unordered_map<void*, std::unordered_map<Texture*, Res>> devResMap;
+		std::unordered_map<Texture*, Res>& texResMap = devResMap[device2];
+		Res& _res = texResMap[texture];
+		if (texture->shared_handle == _res.old_shared_handle)
+		{
+			return (void*)_res.shared_srv_ptr;
+		}
+
+		HRESULT hr = device2->OpenSharedHandle(texture->shared_handle, PPV_ARGS(_res.shared_texture));
+		if (FAILED(hr)) {
+			return nullptr;
+		}
+
+		D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+		srv_desc.Format = _ConvertFormat(texture->desc.format);
+		if (texture->desc.sample_count > 1)
+		{
+			srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMS;
+		}
+		else
+		{
+			srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+			srv_desc.Texture2D.MostDetailedMip = 0;
+			srv_desc.Texture2D.MipLevels = 1;
+		}
+		srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+
+		// Get CPU/GPU handles for the shader resource view
+		// Normally your engine will have some sort of allocator for these - here we assume that there's an SRV descriptor heap in
+		// g_pd3dSrvDescHeap with at least two descriptors allocated, and descriptor 1 is unused
+
+		ID3D12DescriptorHeap* srv_desc_heap2 = (ID3D12DescriptorHeap*)_srv_desc_heap2;
+		D3D12_CPU_DESCRIPTOR_HANDLE cpu_descriptor_handler = srv_desc_heap2->GetCPUDescriptorHandleForHeapStart();
+		cpu_descriptor_handler.ptr += (handle_increment_gpu2 * descriptor_index);
+		device2->CreateShaderResourceView(_res.shared_texture.Get(), &srv_desc, cpu_descriptor_handler);
+
+		D3D12_GPU_DESCRIPTOR_HANDLE gpu_descriptor_handler = srv_desc_heap2->GetGPUDescriptorHandleForHeapStart();
+		gpu_descriptor_handler.ptr += (handle_increment_gpu2 * descriptor_index);
+		_res.shared_srv_ptr = gpu_descriptor_handler.ptr;
+		_res.old_shared_handle = texture->shared_handle;
+		return (void*)gpu_descriptor_handler.ptr;
+	}
+
+
 	int GraphicsDevice_DX12::GetDescriptorIndex(const GPUResource* resource, SubresourceType type, int subresource) const
 	{
 		if (resource == nullptr || !resource->IsValid())

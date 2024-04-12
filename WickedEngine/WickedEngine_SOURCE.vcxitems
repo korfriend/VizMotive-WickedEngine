@@ -236,6 +236,9 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)Utility\minimp4.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Utility\pugiconfig.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Utility\pugixml.hpp" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)VizComponentAPIs.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)VizEngineAPIs.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)vzArcBall.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)wiBVH.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)wiAllocator.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)wiConfig.h" />
@@ -521,6 +524,7 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)BULLET\LinearMath\btVector3.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)Utility\lodepng.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)Utility\pugixml.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)VizEngineAPIs.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)wiConfig.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)wiLocalization.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)wiPathQuery.cpp" />
