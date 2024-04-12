@@ -58,6 +58,7 @@ enum class CompType
 	CameraComponent_,
 	EnvironmentProbeComponent_,
 	AnimationComponent_,
+	EmittedParticleSystem_,
 };
 static wi::unordered_map<std::string, CompType> comptypes = {
 	{typeid(wi::scene::NameComponent).name(), CompType::NameComponent_},
@@ -71,6 +72,7 @@ static wi::unordered_map<std::string, CompType> comptypes = {
 	{typeid(wi::scene::CameraComponent).name(), CompType::CameraComponent_},
 	{typeid(wi::scene::EnvironmentProbeComponent).name(), CompType::EnvironmentProbeComponent_},
 	{typeid(wi::scene::AnimationComponent).name(), CompType::AnimationComponent_},
+	{typeid(wi::EmittedParticleSystem).name(), CompType::EmittedParticleSystem_},
 };
 
 
@@ -994,6 +996,8 @@ namespace vzm
 					comp = (COMP*)scene->lights.GetComponent(vid); break;
 				case CompType::AnimationComponent_:
 					comp = (COMP*)scene->animations.GetComponent(vid); break;
+				case CompType::EmittedParticleSystem_:
+					comp = (COMP*)scene->emitters.GetComponent(vid); break;
 				default: assert(0 && "Not allowed GetComponent");  return nullptr;
 				}
 				if (comp) break;
