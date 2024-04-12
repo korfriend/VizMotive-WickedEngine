@@ -1030,7 +1030,19 @@ namespace vzm
 				}
 				scenes.erase(entity);
 				removeName(entity);
-			};
+			}
+			else
+			{
+
+				for (auto it = scenes.begin(); it != scenes.end(); it++)
+				{
+					VzmScene* scene = &it->second;
+					scene->Entity_Remove(entity);
+				}
+				removeName(entity);
+				renderers.erase(entity);
+				vmComponents.erase(entity);
+			}
 		}
 	};
 
@@ -1222,7 +1234,7 @@ namespace vzm
 		return name != "";
 	}
 
-	void RemoveEntity(const VID vid)
+	void RemoveComponent(const VID vid)
 	{
 		sceneManager.RemoveEntity(vid);
 	}
@@ -1372,11 +1384,17 @@ namespace vzm
 
 	void MergeVzmSceneSystem(Scene* srcScene, Scene* dstScene)
 	{
+		// camera wirh renderer
 		wi::vector<Entity> camEntities = srcScene->cameras.GetEntityArray();
+		// actors
 		wi::vector<Entity> aniEntities = srcScene->animations.GetEntityArray();
 		wi::vector<Entity> objEntities = srcScene->lights.GetEntityArray();
 		wi::vector<Entity> lightEntities = srcScene->objects.GetEntityArray();
 		wi::vector<Entity> emitterEntities = srcScene->emitters.GetEntityArray();
+
+		// resources
+		wi::vector<Entity> meshEntities = srcScene->meshes.GetEntityArray();
+		wi::vector<Entity> materialEntities = srcScene->materials.GetEntityArray();
 
 		dstScene->Merge(*srcScene);
 
@@ -1396,21 +1414,36 @@ namespace vzm
 			renderer->Load(); // Calls renderer->Start()
 		}
 
-		for (Entity& ett : aniEntities)
+		// actors
 		{
-			sceneManager.CreateVmComp<VmAnimation>(ett);
+			for (Entity& ett : aniEntities)
+			{
+				sceneManager.CreateVmComp<VmAnimation>(ett);
+			}
+			for (Entity& ett : objEntities)
+			{
+				sceneManager.CreateVmComp<VmActor>(ett);
+			}
+			for (Entity& ett : lightEntities)
+			{
+				sceneManager.CreateVmComp<VmLight>(ett);
+			}
+			for (Entity& ett : emitterEntities)
+			{
+				sceneManager.CreateVmComp<VmEmitter>(ett);
+			}
 		}
-		for (Entity& ett : objEntities)
+
+		// resources
 		{
-			sceneManager.CreateVmComp<VmActor>(ett);
-		}
-		for (Entity& ett : lightEntities)
-		{
-			sceneManager.CreateVmComp<VmLight>(ett);
-		}
-		for (Entity& ett : emitterEntities)
-		{
-			sceneManager.CreateVmComp<VmEmitter>(ett);
+			for (Entity& ett : meshEntities)
+			{
+				sceneManager.CreateVmComp<VmMesh>(ett);
+			}
+			for (Entity& ett : materialEntities)
+			{
+				sceneManager.CreateVmComp<VmMaterial>(ett);
+			}
 		}
 	}
 

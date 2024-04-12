@@ -15,7 +15,7 @@ namespace vzm
 	//  - return name string if entity's name exists, if not, return "" 
 	__dojostatic bool GetNameByVid(const VID vid, std::string& name);
 	// Remove an entity (scene, scene components, renderer) 
-	__dojostatic void RemoveEntity(const VID vid);
+	__dojostatic void RemoveComponent(const VID vid);
 	// Create new scene and return scene (NOT a scene item) ID, a scene 
 	//  - return zero in case of failure (the name is already registered or overflow VID)
 	__dojostatic VID NewScene(const std::string& sceneName);

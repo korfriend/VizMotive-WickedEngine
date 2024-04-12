@@ -157,7 +157,6 @@ namespace vzm
 	};
 	struct VmEmitter : VmBaseComponent
 	{
-		/*
 		struct ParticleCounters
 		{
 			uint aliveCount;
@@ -166,7 +165,7 @@ namespace vzm
 			uint aliveCount_afterSimulation;
 			uint culledCount;
 			uint cellAllocator;
-		};
+		} statistics = {};	// just for information
 
 		enum PARTICLESHADERTYPE
 		{
@@ -177,8 +176,6 @@ namespace vzm
 			PARTICLESHADERTYPE_COUNT,
 			ENUM_FORCE_UINT32 = 0xFFFFFFFF,
 		};
-
-		ParticleCounters statistics = {};	// just for information
 
 		enum FLAGS
 		{
@@ -194,6 +191,7 @@ namespace vzm
 			FLAG_USE_RAIN_BLOCKER = 1 << 8,
 			FLAG_TAKE_COLOR_FROM_MESH = 1 << 9,
 		};
+
 		uint32_t _flags = FLAG_EMPTY;
 
 		PARTICLESHADERTYPE shaderType = SOFT;
