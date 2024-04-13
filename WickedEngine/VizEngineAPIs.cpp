@@ -717,8 +717,6 @@ namespace vzm
 		std::map<VID, VzmRenderer> renderers;				// <CamEntity, VzmRenderer> (including camera and scene)
 		wi::unordered_map<VID, std::unique_ptr<VmBaseComponent>> vmComponents;
 
-		std::map<std::string, VID> nameMap;				// not allowed redundant name
-
 	public:
 
 		void Initialize(::vzm::ParamMap<std::string>& argument)
@@ -1005,6 +1003,19 @@ namespace vzm
 
 			return comp;
 		}
+		inline TransformComponent* GetEngineTransformComponent(const VID vid)
+		{
+			for (auto it = scenes.begin(); it != scenes.end(); it++)
+			{
+				VzmScene* scene = &it->second;
+				TransformComponent* tc = scene->transforms.GetComponent(vid);
+				if (tc)
+				{
+					return tc;
+				}
+			}
+			return nullptr;
+		}
 
 		inline void RemoveEntity(Entity entity)
 		{
@@ -1055,6 +1066,30 @@ namespace vzm
 
 
 #define COMP_GET(COMP, PARAM, RET) COMP* PARAM = sceneManager.GetEngineComp<COMP>(componentVID); if (!PARAM) return RET;
+
+namespace vzm // VmBaseComponent
+{
+	void VmBaseComponent::GetLocalTransform(float mat[16], const bool rowMajor)
+	{
+		TransformComponent* transform = sceneManager.GetEngineTransformComponent(componentVID);
+		if (transform == nullptr) return;
+	}
+	void VmBaseComponent::GetWorldTransform(float mat[16], const bool rowMajor)
+	{
+		TransformComponent* transform = sceneManager.GetEngineTransformComponent(componentVID);
+		if (transform == nullptr) return;
+	}
+	void VmBaseComponent::GetLocalInvTransform(float mat[16], const bool rowMajor)
+	{
+		TransformComponent* transform = sceneManager.GetEngineTransformComponent(componentVID);
+		if (transform == nullptr) return;
+	}
+	void VmBaseComponent::GetWorldInvTransform(float mat[16], const bool rowMajor)
+	{
+		TransformComponent* transform = sceneManager.GetEngineTransformComponent(componentVID);
+		if (transform == nullptr) return;
+	}
+}
 
 namespace vzm // VmCamera
 {
@@ -1643,9 +1678,9 @@ namespace vzm
 		return false;
 	}
 
-	VID NewSceneComponent(const COMPONENT_TYPE compType, const VID sceneId, const std::string& compName, const VID parentVid, VmBaseComponent** baseComp)
+	VID NewSceneComponent(const COMPONENT_TYPE compType, const VID sceneVid, const std::string& compName, const VID parentVid, VmBaseComponent** baseComp)
 	{
-		VzmScene* scene = sceneManager.GetScene(sceneId);
+		VzmScene* scene = sceneManager.GetScene(sceneVid);
 		if (scene == nullptr)
 		{
 			return INVALID_ENTITY;
@@ -1739,9 +1774,9 @@ namespace vzm
 		return nullptr;
 	}
 
-	uint32_t GetSceneCompoenentVids(const COMPONENT_TYPE compType, const VID sceneId, std::vector<VID>& vids)
+	uint32_t GetSceneCompoenentVids(const COMPONENT_TYPE compType, const VID sceneVid, std::vector<VID>& vids)
 	{
-		Scene* scene = sceneManager.GetScene(sceneId);
+		Scene* scene = sceneManager.GetScene(sceneVid);
 		if (scene == nullptr)
 		{
 			return 0u;
@@ -1759,9 +1794,9 @@ namespace vzm
 		return (uint32_t)vids.size();
 	}
 
-	VmWeather* GetSceneActivatedWeather(const VID sceneId)
+	VmWeather* GetSceneActivatedWeather(const VID sceneVid)
 	{
-		VzmScene* scene = sceneManager.GetScene(sceneId);
+		VzmScene* scene = sceneManager.GetScene(sceneVid);
 		if (scene == nullptr)
 		{
 			return nullptr;
@@ -1834,9 +1869,60 @@ namespace vzm
 		}
 	}
 
-	VID LoadMeshModel(const VID sceneId, const std::string& file, const std::string& rootName)
+	void LoadMeshModelAsync(const VID sceneVid, const std::string& file, const std::string& rootName, const std::function<void(VID rootVid)>& callback)
 	{
-		Scene* scene = sceneManager.GetScene(sceneId);
+		struct loadingJob
+		{
+			wi::Timer timer;
+			wi::jobsystem::context ctx;
+			// input param
+			VID sceneVid;
+			std::string rootName;
+			std::string file;
+			std::function<void(VID rootVid)> callback;
+
+			bool isFinished = false;
+		};
+
+		static uint32_t jobIndex = 0;
+		static std::map<uint32_t, loadingJob> loadingJobStore;
+		bool isBusy = false;
+		for (auto& it : loadingJobStore)
+		{
+			if (!it.second.isFinished)
+			{
+				isBusy = true;
+				break;
+			}
+		}
+		if (!isBusy)
+		{
+			loadingJobStore.clear();
+			jobIndex = 0;
+		}
+
+		loadingJob& jobInfo = loadingJobStore[jobIndex++];
+		jobInfo.sceneVid = sceneVid;
+		jobInfo.file = file;
+		jobInfo.rootName = rootName;
+		jobInfo.callback = callback;
+
+		wi::backlog::post("");
+		wi::jobsystem::Execute(jobInfo.ctx, [&](wi::jobsystem::JobArgs args) {
+			VID rootEntity = LoadMeshModel(jobInfo.sceneVid, jobInfo.file, jobInfo.rootName);
+			if (jobInfo.callback != nullptr)
+			{
+				jobInfo.callback(rootEntity);
+			}
+			});
+		std::thread([&jobInfo] {
+			wi::jobsystem::Wait(jobInfo.ctx);
+			wi::backlog::post("\n[vzm::LoadMeshModelAsync] GLTF Loading (" + std::to_string((int)std::round(jobInfo.timer.elapsed())) + " ms)");
+			}).detach();
+	}
+	VID LoadMeshModel(const VID sceneVid, const std::string& file, const std::string& rootName)
+	{
+		Scene* scene = sceneManager.GetScene(sceneVid);
 		if (scene == nullptr)
 		{
 			return INVALID_ENTITY;

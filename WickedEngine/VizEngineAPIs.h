@@ -22,7 +22,7 @@ namespace vzm
 	// Create new scene component and return its component (scene item) ID (global entity)
 	//  - Must belong to a scene
 	//  - return zero in case of failure (invalid sceneID, the name is already registered, or overflow VID)
-	__dojostatic VID NewSceneComponent(const COMPONENT_TYPE compType, const VID sceneId, const std::string& compName, const VID parentVid = 0u, VmBaseComponent** baseComp = nullptr);
+	__dojostatic VID NewSceneComponent(const COMPONENT_TYPE compType, const VID sceneVid, const std::string& compName, const VID parentVid = 0u, VmBaseComponent** baseComp = nullptr);
 	// Append Component to the parent component
 	//  - return sceneId containing the parent component 
 	__dojostatic VID AppendComponentTo(const VID vid, const VID parentVid);
@@ -31,21 +31,23 @@ namespace vzm
 	__dojostatic VmBaseComponent* GetComponent(const COMPONENT_TYPE compType, const VID vid);
 	// Get Component IDs in a scene
 	//  - return # of scene Components 
-	__dojostatic uint32_t GetSceneCompoenentVids(const COMPONENT_TYPE compType, const VID sceneId, std::vector<VID>& vids);	// Get CameraParams and return its pointer registered in renderer
+	__dojostatic uint32_t GetSceneCompoenentVids(const COMPONENT_TYPE compType, const VID sceneVid, std::vector<VID>& vids);	// Get CameraParams and return its pointer registered in renderer
 	// Get VmWeather and return its pointer 
 	//  - return nullptr in case of failure 
-	__dojostatic VmWeather* GetSceneActivatedWeather(const VID sceneId);
+	__dojostatic VmWeather* GetSceneActivatedWeather(const VID sceneVid);
 	// Load model component and return resource ID (global entity), resource item
 	//  - Must belong to the internal scene
 	//  - return zero in case of failure (invalid sceneID, the name is already registered, or overflow VID)
-	__dojostatic VID LoadMeshModel(const VID sceneId, const std::string& file, const std::string& rootName);
+	__dojostatic VID LoadMeshModel(const VID sceneVid, const std::string& file, const std::string& rootName);
+	// Async version of LoadMeshModel
+	__dojostatic void LoadMeshModelAsync(const VID sceneVid, const std::string& file, const std::string& rootName, const std::function<void(VID rootVid)>& callback = nullptr);
 	// Render a scene (sceneId) with a camera (camId)
 	//  - Must belong to the internal scene
 	__dojostatic VZRESULT Render(const int camId);
 	//__dojostatic VZRESULT UpdateScene(const int sceneId); // animation or simulation...
 	// Get a graphics render target view 
 	//  - Must belong to the internal scene
-	__dojostatic void* GetGraphicsSharedRenderTarget(const int camId, const void* device2, const void* srv_desc_heap2, const int descriptor_index, uint32_t* w = NULL, uint32_t* h = NULL);
+	__dojostatic void* GetGraphicsSharedRenderTarget(const int camId, const void* device2, const void* srv_desc_heap2, const int descriptor_index, uint32_t* w = nullptr, uint32_t* h = nullptr);
 	__dojostatic void* TEST();
 
 	__dojostatic VZRESULT DeinitEngineLib();
