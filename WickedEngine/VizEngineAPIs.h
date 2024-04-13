@@ -10,7 +10,10 @@ namespace vzm
 	__dojostatic VZRESULT InitEngineLib(const std::string& coreName = "VzmEngine", const std::string& logFileName = "EngineApi.log");
 	// Get Entity ID 
 	//  - return zero in case of failure 
-	__dojostatic VID GetVidByName(const std::string& name);
+	__dojostatic VID GetFirstVidByName(const std::string& name);
+	// Get Entity IDs whose name is the input name (VID is allowed for redundant name)
+	//  - return # of entities
+	__dojostatic uint32_t GetVidsByName(const std::string& name, std::vector<VID>& vids);
 	// Get Entity's name if possible
 	//  - return name string if entity's name exists, if not, return "" 
 	__dojostatic bool GetNameByVid(const VID vid, std::string& name);

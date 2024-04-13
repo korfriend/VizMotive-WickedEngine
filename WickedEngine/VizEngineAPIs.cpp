@@ -807,10 +807,9 @@ namespace vzm
 		// Runtime can create a new entity with this
 		inline Entity CreateSceneEntity(const std::string& name)
 		{
-			auto sid = nameMap.find(name);
-			if (sid != nameMap.end())
+			if (GetFirstSceneByName(name))
 			{
-				wi::backlog::post(name + " is already registered!", backlog::LogLevel::Error);
+				wi::backlog::post(name + " is already registered as a scene!", backlog::LogLevel::Error);
 				return INVALID_ENTITY;
 			}
 
@@ -833,7 +832,6 @@ namespace vzm
 				}
 				scene.name = name;
 				scene.sceneVid = ett;
-				nameMap[name] = ett;
 			}
 
 			return ett;
@@ -854,8 +852,6 @@ namespace vzm
 				{
 					renderer->scene = scene;
 					renderer->camera = camera;
-
-					nameMap[scene->names.GetComponent(camEntity)->name] = camEntity;
 					return renderer;
 				}
 			}
@@ -863,7 +859,23 @@ namespace vzm
 			return nullptr;
 		}
 
-		inline VID GetVidByName(const std::string& name)
+		inline uint32_t GetVidsByName(const std::string& name, std::vector<VID>& vids)
+		{
+			for (auto it = scenes.begin(); it != scenes.end(); it++)
+			{
+				VzmScene& scene = it->second;
+				for (Entity ett : scene.names.GetEntityArray())
+				{
+					NameComponent* nameComp = scene.names.GetComponent(ett);
+					if (nameComp != nullptr)
+					{
+						vids.push_back(ett);
+					}
+				}
+			}
+			return (uint32_t)vids.size();
+		}
+		inline VID GetFirstVidByName(const std::string& name)
 		{
 			for (auto it = scenes.begin(); it != scenes.end(); it++)
 			{
@@ -905,9 +917,17 @@ namespace vzm
 			}
 			return &it->second;
 		}
-		inline VzmScene* GetSceneByName(const std::string& name)
+		inline VzmScene* GetFirstSceneByName(const std::string& name)
 		{
-			return GetScene(GetVidByName(name));
+			for (auto it = scenes.begin(); it != scenes.end(); it++)
+			{
+				VzmScene* scene = &it->second;
+				if (scene->name == name)
+				{
+					return scene;
+				}
+			}
+			return nullptr;
 		}
 		inline std::map<VID, VzmScene>* GetScenes()
 		{
@@ -922,9 +942,9 @@ namespace vzm
 			}
 			return &it->second;
 		}
-		inline VzmRenderer* GetRendererByName(const std::string& name)
+		inline VzmRenderer* GetFirstRendererByName(const std::string& name)
 		{
-			return GetRenderer(GetVidByName(name));
+			return GetRenderer(GetFirstVidByName(name));
 		}
 
 		template <typename VMCOMP>
@@ -952,7 +972,6 @@ namespace vzm
 					vmComp.componentVID = vid;
 					vmComp.compType = compType;
 					vmComponents.insert(std::make_pair(vid, std::make_unique<VMCOMP>(vmComp)));
-					nameMap[scene->names.GetComponent(vid)->name] = vid;
 					return (VMCOMP*)vmComponents[vid].get();
 				}
 			}
@@ -1019,18 +1038,6 @@ namespace vzm
 
 		inline void RemoveEntity(Entity entity)
 		{
-			auto removeName = [&](Entity entity)
-				{
-					for (auto it2 : nameMap)
-					{
-						if (entity == it2.second)
-						{
-							nameMap.erase(it2.first);
-							return;
-						}
-					}
-				};
-
 			VzmScene* scene = GetScene(entity);
 			if (scene)
 			{
@@ -1041,10 +1048,8 @@ namespace vzm
 				{
 					renderers.erase(*it);
 					vmComponents.erase(*it);
-					removeName(*it);
 				}
 				scenes.erase(entity);
-				removeName(entity);
 			}
 			else
 			{
@@ -1054,7 +1059,6 @@ namespace vzm
 					VzmScene* scene = &it->second;
 					scene->Entity_Remove(entity);
 				}
-				removeName(entity);
 				renderers.erase(entity);
 				vmComponents.erase(entity);
 			}
@@ -1634,9 +1638,14 @@ namespace vzm
 		return VZ_OK;
 	}
 
-	VID GetVidByName(const std::string& name)
+	VID GetFirstVidByName(const std::string& name)
 	{
-		return sceneManager.GetVidByName(name);
+		return sceneManager.GetFirstVidByName(name);
+	}
+
+	uint32_t GetVidsByName(const std::string& name, std::vector<VID>& vids)
+	{
+		return sceneManager.GetVidsByName(name, vids);
 	}
 
 	bool GetNameByVid(const VID vid, std::string& name)
@@ -1652,7 +1661,7 @@ namespace vzm
 
 	VID NewScene(const std::string& sceneName)
 	{
-		Scene* scene = sceneManager.GetSceneByName(sceneName);
+		Scene* scene = sceneManager.GetFirstSceneByName(sceneName);
 		if (scene != nullptr)
 		{
 			return INVALID_ENTITY;
@@ -2052,7 +2061,8 @@ namespace vzm
 
 	void* TEST()
 	{
-		return wi::graphics::GetDevice();
+		wi::renderer::ReloadShaders();
+		return nullptr;
 	}
 
 	void* GetGraphicsSharedRenderTarget(const int camId, const void* graphicsDev2, const void* srv_desc_heap2, const int descriptor_index, uint32_t* w, uint32_t* h)
