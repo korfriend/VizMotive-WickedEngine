@@ -23,6 +23,7 @@
 #include <memory>
 #include <algorithm>
 #include <chrono>
+#include <functional>
 
 using VID = uint32_t;
 inline constexpr VID INVALID_VID = 0;
@@ -132,6 +133,11 @@ namespace vzm
 		COMPONENT_TYPE compType = COMPONENT_TYPE::UNDEFINED;
 		TimeStamp timeStamp = {}; // will be automatically set 
 		ParamMap<std::string> attributes;
+
+		void GetLocalTransform(float mat[16], const bool rowMajor = false);
+		void GetWorldTransform(float mat[16], const bool rowMajor = false);
+		void GetLocalInvTransform(float mat[16], const bool rowMajor = false);
+		void GetWorldInvTransform(float mat[16], const bool rowMajor = false);
 	};
 	struct VmRenderer;
 	struct VmCamera : VmBaseComponent
