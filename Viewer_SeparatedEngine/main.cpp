@@ -162,6 +162,7 @@ int main(int, char**)
 		ImGui::NewFrame();
 
 		{
+			static bool callbackLoadModel_Finished = false;
 			static VID sid = 0, cid = 0, cid_ani = 0;
 			static VID eid = 0, mid = 0;
 			static vzm::ArcBall arcball;
@@ -180,33 +181,45 @@ int main(int, char**)
 
 				arcball.Intializer(__FP at, 2.f);
 
-				vzm::LoadMeshModel(sid, "D:\\data\\car_gltf\\ioniq.gltf", "my obj");
-				std::vector<VID> camIds;
-				vzm::GetSceneCompoenentVids(vzm::COMPONENT_TYPE::CAMERA, sid, camIds);
-				for (VID id : camIds)
-				{
-					if (id != cid)
+				auto callbackLoadModel = [&](VID rootVid)
 					{
-						cid_ani = id;
-						vzm::VmCamera* vCamNew = (vzm::VmCamera*)vzm::GetComponent(vzm::COMPONENT_TYPE::CAMERA, id);
-						vCamNew->GetPose(__FP pos, __FP view, __FP up);
-						vCam->SetPose(__FP pos, __FP view, __FP up);
+						std::vector<VID> camIds;
+						vzm::GetSceneCompoenentVids(vzm::COMPONENT_TYPE::CAMERA, sid, camIds);
+						for (VID id : camIds)
+						{
+							if (id != cid)
+							{
+								vzm::VmCamera* vCamNew = (vzm::VmCamera*)vzm::GetComponent(vzm::COMPONENT_TYPE::CAMERA, id);
+								vCamNew->GetPose(__FP pos, __FP view, __FP up);
+								vCam->SetPose(__FP pos, __FP view, __FP up);
+								vCamNew->SetCanvasSize(wh.x, wh.y, 96.f);
+								cid_ani = id;
+								break;
+							}
+						}
 
-						vCamNew->SetCanvasSize(wh.x, wh.y, 96.f);
-						break;
-					}
-				}
+						VID aid_backTire = vzm::GetFirstVidByName("back_tire_d");
+						{
+							eid = vzm::NewSceneComponent(vzm::COMPONENT_TYPE::EMITTER, sid, "grapicar emitter", aid_backTire);
+						}
+						if (eid != INVALID_VID)
+						{
+							vzm::VmEmitter* vEmitter = (vzm::VmEmitter*)vzm::GetComponent(vzm::COMPONENT_TYPE::EMITTER, eid);
+							mid = vzm::GetFirstVidByName("back_tire");
+							vEmitter->SetMeshVid(mid);
 
-				{
-					VID aid_backTire = vzm::GetVidByName("back_tire_d");
-					eid = vzm::NewSceneComponent(vzm::COMPONENT_TYPE::EMITTER, sid, "grapicar emitter", aid_backTire);
-				}
-				if (eid != INVALID_VID)
-				{
-					vzm::VmEmitter* vEmitter = (vzm::VmEmitter*)vzm::GetComponent(vzm::COMPONENT_TYPE::EMITTER, eid);
-					mid = vzm::GetVidByName("back_tire");
-					vEmitter->SetMeshVid(mid);
-				}
+							// add plane collider
+							vzm::VmCollider* collider = nullptr;
+							VID colliderId = vzm::NewSceneComponent(vzm::COMPONENT_TYPE::COLLIDER, sid, "road collider", aid_backTire, CMPP(collider));
+							collider->SetGPUEnabled(true);
+							collider->SetRadius(1000.f);
+							collider->SetShape(vzm::VmCollider::Shape::Plane);
+						}
+						callbackLoadModel_Finished = true;
+					};
+
+				callbackLoadModel(vzm::LoadMeshModel(sid, "D:\\data\\car_gltf\\ioniq.gltf", "my obj"));
+				//vzm::LoadMeshModelAsync(sid, "D:\\data\\car_gltf\\ioniq.gltf", "my obj", callbackLoadModel);
 				//vzm::LoadMeshModel(sid, "D:\\VisMotive\\data\\obj files\\skull\\12140_Skull_v3_L2.obj", "my obj");
 			}
 
@@ -279,7 +292,7 @@ int main(int, char**)
 				}
 				ImGui::SetCursorPos(curItemPos);
 
-				vzm::Render(cid);
+				vzm::Render(cid, true);// cid_ani == 0);
 
 				uint32_t w, h;
 				ImTextureID texId = vzm::GetGraphicsSharedRenderTarget(cid, g_pd3dDevice, g_pd3dSrvDescHeap, 1, &w, &h);
@@ -290,8 +303,20 @@ int main(int, char**)
 
 
 			ImGui::Begin("Animation");
-			if (cid_ani != INVALID_VID)
+			if (callbackLoadModel_Finished)
 			{
+				VID aid = vzm::GetFirstVidByName("back_tire_d");
+				vzm::VmBaseComponent* group = (vzm::VmBaseComponent*)vzm::GetComponent(vzm::COMPONENT_TYPE::BASE, aid);
+				if (group)
+				{
+					glm::fmat4x4 matT;
+					group->GetWorldTransform(__FP matT);
+					glm::fvec4 p = matT * glm::fvec4(0, 0, 0, 1);
+					p.x /= p.w;
+					p.y /= p.w;
+					p.z /= p.w;
+				}
+
 				// Note that we pass the GPU SRV handle here, *not* the CPU handle. We're passing the internal pointer value, cast to an ImTextureID
 
 				static ImVec2 prevWindowSize = ImVec2(0, 0);
@@ -310,7 +335,7 @@ int main(int, char**)
 					wh = canvas_size;
 				}
 
-				vzm::Render(cid_ani);
+				vzm::Render(cid_ani, true);
 
 				uint32_t w, h;
 				ImTextureID texId = vzm::GetGraphicsSharedRenderTarget(cid_ani, g_pd3dDevice, g_pd3dSrvDescHeap, 2, &w, &h);
@@ -321,20 +346,36 @@ int main(int, char**)
 
 			ImGui::Begin("Controls");
 			{
-				if (ImGui::Button("PLAY"))
+				if (ImGui::Button("Shader Reload"))
 				{
-					std::vector<VID> aniComponentes;
-					if (vzm::GetSceneCompoenentVids(vzm::COMPONENT_TYPE::ANIMATION, sid, aniComponentes) > 0u)
-					{
-						for (size_t i = 0; i < aniComponentes.size(); i++)
-						{
-							vzm::VmAnimation* aniComp = (vzm::VmAnimation*)vzm::GetComponent(vzm::COMPONENT_TYPE::ANIMATION, aniComponentes[i]);
-							aniComp->Play();
-						}
-					}
-
+					vzm::ReloadShader();
 				}
-
+				vzm::VmAnimation* aniComp = nullptr;
+				std::vector<VID> aniComponentes;
+				if (vzm::GetSceneCompoenentVids(vzm::COMPONENT_TYPE::ANIMATION, sid, aniComponentes) > 0u)
+				{
+					for (size_t i = 0; i < aniComponentes.size(); i++)
+					{
+						aniComp = (vzm::VmAnimation*)vzm::GetComponent(vzm::COMPONENT_TYPE::ANIMATION, aniComponentes[i]);
+					}
+				}
+				if (aniComp)
+				{
+					if (ImGui::Button("PLAY"))
+					{
+						aniComp->Play();
+					}
+					ImGui::SameLine();
+					if (ImGui::Button("PAUSE"))
+					{
+						aniComp->Pause();
+					}
+					ImGui::SameLine();
+					if (ImGui::Button("STOP"))
+					{
+						aniComp->Stop();
+					}
+				}
 
 				if (eid != INVALID_VID)
 				{
@@ -350,7 +391,7 @@ int main(int, char**)
 					static float LifeSpanRandomness = vEmitter->GetRandomLife();
 					ImGui::SliderFloat("LifeSpanRandomness", &LifeSpanRandomness, 0.f, 1.f);
 					vEmitter->SetRandomLife(LifeSpanRandomness);
-					static float NormFactor = vEmitter->GetNormalFactor();
+					static float NormFactor = 0;// vEmitter->GetNormalFactor();
 					ImGui::SliderFloat("NormFactor", &NormFactor, 0.f, 1.f);
 					vEmitter->SetNormalFactor(NormFactor);
 					static float RandomFactor = vEmitter->GetRandomFactor();
@@ -362,11 +403,11 @@ int main(int, char**)
 					ImGui::SliderFloat("ScaleX", &ScaleX, 0.00001f, 1.f, "%.4f");
 					ImGui::SliderFloat("ScaleY", &ScaleY, 0.00001f, 1.f, "%.4f");
 					vEmitter->SetScaleXY(ScaleX, ScaleY);
-					static float Size = vEmitter->GetSize();
+					static float Size = 0.002f;// vEmitter->GetSize();
 					ImGui::SliderFloat("Size", &Size, 0.00001f, 1.f, "%.4f");
 					vEmitter->SetSize(Size);
 					static float MotionBlurAmount = vEmitter->GetMotionBlurAmount();
-					ImGui::SliderFloat("MotionBlurAmount", &MotionBlurAmount, 0.0f, 0.3f);
+					ImGui::SliderFloat("MotionBlurAmount", &MotionBlurAmount, 0.0f, 100.f);
 					vEmitter->SetMotionBlurAmount(MotionBlurAmount);
 					static float Rotation = vEmitter->GetRotation();
 					ImGui::SliderFloat("Rotation", &Rotation, 0.0f, 1.f);
@@ -375,23 +416,23 @@ int main(int, char**)
 					ImGui::SliderFloat("Mass", &Mass, 0.0f, 100.f);
 					vEmitter->SetMass(Mass);
 					static float Restitution = vEmitter->GetRestitution();
-					ImGui::SliderFloat("Restitution", &Restitution, -1.0f, 1.f);
+					ImGui::SliderFloat("Restitution", &Restitution, -1.0f, 10.f);
 					vEmitter->SetRestitution(Restitution);
 					static float ParticleDrag = vEmitter->GetDrag();
 					ImGui::SliderFloat("ParticleDrag", &ParticleDrag, 0.0f, 10.f);
 					vEmitter->SetDrag(ParticleDrag);
-					static float Gravity[3] = { -1.f };
-					if (!initialized)
-						vEmitter->GetGravity(Gravity);
+					static float Gravity[3] = { 0, -0.7f, 0 };
+					//if (!initialized)
+					//	vEmitter->GetGravity(Gravity);
 					ImGui::SliderFloat3("Gravity", Gravity, -1.0f, 1.f);
 					vEmitter->SetGravity(Gravity);
-					static float Velocity[3];
-					if (!initialized)
-						vEmitter->GetVelocity(Velocity);
+					static float Velocity[3] = { 0, 0, 0.7f};
+					//if (!initialized)
+					//	vEmitter->GetVelocity(Velocity);
 					ImGui::SliderFloat3("Velocity", Velocity, -1.0f, 1.f);
 					vEmitter->SetVelocity(Velocity);
-					static float ParticleCount = vEmitter->GetCount();
-					ImGui::SliderFloat("ParticleCount", &ParticleCount, 0.0f, vEmitter->GetMaxParticleCount());
+					static float ParticleCount = 300.f;// vEmitter->GetCount();
+					ImGui::SliderFloat("ParticleCount", &ParticleCount, 0.0f, (float)vEmitter->GetMaxParticleCount());
 					vEmitter->SetCount(ParticleCount);
 					static int ParticleBurst = 100;
 					ImGui::SliderInt("ParticleBurst", &ParticleBurst, 0, 1000);
