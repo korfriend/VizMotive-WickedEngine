@@ -41,6 +41,7 @@ static wi::unordered_map<std::string, vzm::COMPONENT_TYPE> vmcomptypes = {
 	{typeid(vzm::VmEmitter).name(), vzm::COMPONENT_TYPE::EMITTER},
 	{typeid(vzm::VmWeather).name(), vzm::COMPONENT_TYPE::WEATHER},
 	{typeid(vzm::VmCamera).name(), vzm::COMPONENT_TYPE::CAMERA},
+	{typeid(vzm::VmCollider).name(), vzm::COMPONENT_TYPE::COLLIDER},
 };
 
 enum class CompType
@@ -59,6 +60,7 @@ enum class CompType
 	EnvironmentProbeComponent_,
 	AnimationComponent_,
 	EmittedParticleSystem_,
+	ColliderComponent_,
 };
 static wi::unordered_map<std::string, CompType> comptypes = {
 	{typeid(wi::scene::NameComponent).name(), CompType::NameComponent_},
@@ -67,11 +69,12 @@ static wi::unordered_map<std::string, CompType> comptypes = {
 	{typeid(wi::scene::HierarchyComponent).name(), CompType::HierarchyComponent_},
 	{typeid(wi::scene::MaterialComponent).name(), CompType::MaterialComponent_},
 	{typeid(wi::scene::MeshComponent).name(), CompType::MeshComponent_},
-	//{typeid(wi::scene::ObjectComponent).name(), CompType::ObjectComponent_},
+	{typeid(wi::scene::ObjectComponent).name(), CompType::ObjectComponent_},
 	{typeid(wi::scene::LightComponent).name(), CompType::LightComponent_},
 	{typeid(wi::scene::CameraComponent).name(), CompType::CameraComponent_},
 	{typeid(wi::scene::EnvironmentProbeComponent).name(), CompType::EnvironmentProbeComponent_},
 	{typeid(wi::scene::AnimationComponent).name(), CompType::AnimationComponent_},
+	{typeid(wi::scene::ColliderComponent).name(), CompType::ColliderComponent_},
 	{typeid(wi::EmittedParticleSystem).name(), CompType::EmittedParticleSystem_},
 };
 
@@ -295,6 +298,8 @@ namespace vzm
 			setEyeAdaptionEnabled(true);
 			setEyeAdaptionKey(0.1f);
 			setEyeAdaptionRate(0.5f);
+
+			setSceneUpdateEnabled(false); // for multiple main-cameras support
 
 			wi::font::UpdateAtlas(GetDPIScaling());
 
@@ -596,7 +601,7 @@ namespace vzm
 				else
 				{
 					RenderPassImage rp[] = {
-						RenderPassImage::RenderTarget(&renderResult, RenderPassImage::LoadOp::LOAD),
+						RenderPassImage::RenderTarget(&renderResult, RenderPassImage::LoadOp::CLEAR),
 					};
 					graphicsDevice->RenderPassBegin(rp, arraysize(rp), cmd);
 				}
@@ -615,7 +620,7 @@ namespace vzm
 				else
 				{
 					RenderPassImage rp[] = {
-						RenderPassImage::RenderTarget(&renderResult, RenderPassImage::LoadOp::LOAD),
+						RenderPassImage::RenderTarget(&renderResult, RenderPassImage::LoadOp::CLEAR),
 					};
 					graphicsDevice->RenderPassBegin(rp, arraysize(rp), cmd);
 				}
@@ -1181,6 +1186,9 @@ namespace vzm // VmLight
 {
 }
 namespace vzm // VmLight
+{
+}
+namespace vzm // VmCollider
 {
 }
 namespace vzm // VmEmitter
@@ -1819,8 +1827,8 @@ namespace vzm
 		wi::vector<Entity> camEntities = srcScene->cameras.GetEntityArray();
 		// actors
 		wi::vector<Entity> aniEntities = srcScene->animations.GetEntityArray();
-		wi::vector<Entity> objEntities = srcScene->lights.GetEntityArray();
-		wi::vector<Entity> lightEntities = srcScene->objects.GetEntityArray();
+		wi::vector<Entity> objEntities = srcScene->objects.GetEntityArray();
+		wi::vector<Entity> lightEntities = srcScene->lights.GetEntityArray();
 		wi::vector<Entity> emitterEntities = srcScene->emitters.GetEntityArray();
 
 		// resources
@@ -1966,14 +1974,16 @@ namespace vzm
 		return rootEntity;
 	}
 
-	VZRESULT Render(const int camId)
+	VZRESULT Render(const VID camVid, const bool updateScene)
 	{
-		VzmRenderer* renderer = sceneManager.GetRenderer(camId);
+		VzmRenderer* renderer = sceneManager.GetRenderer(camVid);
 		if (renderer == nullptr)
 		{
 			return VZ_FAIL;
 		}
-		
+
+		renderer->setSceneUpdateEnabled(updateScene);
+
 		wi::font::UpdateAtlas(renderer->GetDPIScaling());
 
 		renderer->UpdateVmCamera();
@@ -1984,20 +1994,6 @@ namespace vzm
 			renderer->WaitRender();
 			return VZ_JOB_WAIT;
 		}
-
-
-		//{
-		//	//Entity ett= wi::scene::GetScene().Entity_FindByName("cam transform");
-		//	TransformComponent* transform = renderer->scene->transforms.GetComponent(renderer->camEntity);
-		//	XMMATRIX matT = XMMatrixTranslation(0, 0.5f, -4.5f);
-		//	static float ii = 0.f;
-		//	XMMATRIX matR = XMMatrixRotationY(XM_PI / 180.f * (ii++));
-		//	transform->ClearTransform();
-		//	transform->MatrixTransform(matT * matR);
-		//	transform->UpdateTransform();
-		//	//wi::scene::GetCamera().TransformCamera(*transform);
-		//}
-
 
 		wi::profiler::BeginFrame();
 		renderer->deltaTime = float(std::max(0.0, renderer->timer.record_elapsed_seconds()));
@@ -2059,15 +2055,14 @@ namespace vzm
 		return VZ_OK;
 	}
 
-	void* TEST()
+	void ReloadShader()
 	{
 		wi::renderer::ReloadShaders();
-		return nullptr;
 	}
 
-	void* GetGraphicsSharedRenderTarget(const int camId, const void* graphicsDev2, const void* srv_desc_heap2, const int descriptor_index, uint32_t* w, uint32_t* h)
+	void* GetGraphicsSharedRenderTarget(const int camVid, const void* graphicsDev2, const void* srv_desc_heap2, const int descriptor_index, uint32_t* w, uint32_t* h)
 	{
-		VzmRenderer* renderer = sceneManager.GetRenderer(camId);
+		VzmRenderer* renderer = sceneManager.GetRenderer(camVid);
 		if (renderer == nullptr)
 		{
 			return nullptr;
@@ -2077,6 +2072,7 @@ namespace vzm
 		if (h) *h = renderer->height;
 
 		wi::graphics::GraphicsDevice* graphicsDevice = wi::graphics::GetDevice();
+		if (graphicsDevice == nullptr) return nullptr;
 		//return graphicsDevice->OpenSharedResource(graphicsDev2, const_cast<wi::graphics::Texture*>(&renderer->GetRenderResult()));
 		//return graphicsDevice->OpenSharedResource(graphicsDev2, &renderer->rtPostprocess);
 		return graphicsDevice->OpenSharedResource(graphicsDev2, srv_desc_heap2, descriptor_index, const_cast<wi::graphics::Texture*>(&renderer->renderResult));

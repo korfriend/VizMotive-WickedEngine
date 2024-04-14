@@ -114,6 +114,13 @@ namespace vzm
 		const_iterator end() const { return __params.end(); }
 	};
 
+	enum class RENDERER_SHADER_GROUP
+	{
+		ALL = 0,
+		EMITTER_SYSTEM,
+		PARTICLE_RENDER,
+	};
+
 	enum class COMPONENT_TYPE
 	{
 		UNDEFINED = 0,
@@ -125,6 +132,7 @@ namespace vzm
 		EMITTER,
 		ANIMATION,
 		WEATHER,
+		COLLIDER
 	};
 
 	struct VmBaseComponent
@@ -152,11 +160,11 @@ namespace vzm
 	};
 	struct VmActor : VmBaseComponent
 	{
-		// mesh 에 rendering 요소가 저장된 구조...
+		// 
 	};
 	struct VmMesh : VmBaseComponent
 	{
-		// mesh 가 material entity 를 갖는 구조...
+		//  
 	};
 	struct VmMaterial : VmBaseComponent
 	{
@@ -275,5 +283,8 @@ namespace vzm
 		void Pause();
 		void Stop();
 		void SetLooped(const bool value);
+	};
+	struct VmCollider : VmBaseComponent
+	{
 	};
 }

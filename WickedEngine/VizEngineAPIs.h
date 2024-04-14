@@ -44,14 +44,15 @@ namespace vzm
 	__dojostatic VID LoadMeshModel(const VID sceneVid, const std::string& file, const std::string& rootName);
 	// Async version of LoadMeshModel
 	__dojostatic void LoadMeshModelAsync(const VID sceneVid, const std::string& file, const std::string& rootName, const std::function<void(VID rootVid)>& callback = nullptr);
-	// Render a scene (sceneId) with a camera (camId)
+	// Render a scene on camera (camVid)
 	//  - Must belong to the internal scene
-	__dojostatic VZRESULT Render(const int camId);
-	//__dojostatic VZRESULT UpdateScene(const int sceneId); // animation or simulation...
+	//  - if updateScene is true, uses the camera for camera-dependent scene updates
+	__dojostatic VZRESULT Render(const VID camVid, const bool updateScene = true);
 	// Get a graphics render target view 
 	//  - Must belong to the internal scene
-	__dojostatic void* GetGraphicsSharedRenderTarget(const int camId, const void* device2, const void* srv_desc_heap2, const int descriptor_index, uint32_t* w = nullptr, uint32_t* h = nullptr);
-	__dojostatic void* TEST();
+	__dojostatic void* GetGraphicsSharedRenderTarget(const int camVid, const void* device2, const void* srv_desc_heap2, const int descriptor_index, uint32_t* w = nullptr, uint32_t* h = nullptr);
+	// Reload shaders
+	__dojostatic void ReloadShader();
 
 	__dojostatic VZRESULT DeinitEngineLib();
 }
