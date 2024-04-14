@@ -33,6 +33,7 @@ static wi::unordered_map<std::string, FileType> filetypes = {
 };
 
 static wi::unordered_map<std::string, vzm::COMPONENT_TYPE> vmcomptypes = {
+	{typeid(vzm::VmBaseComponent).name(), vzm::COMPONENT_TYPE::BASE},
 	{typeid(vzm::VmAnimation).name(), vzm::COMPONENT_TYPE::ANIMATION},
 	{typeid(vzm::VmActor).name(), vzm::COMPONENT_TYPE::ACTOR},
 	{typeid(vzm::VmMesh).name(), vzm::COMPONENT_TYPE::GEOMETRY},
@@ -62,6 +63,7 @@ enum class CompType
 	EmittedParticleSystem_,
 	ColliderComponent_,
 };
+
 static wi::unordered_map<std::string, CompType> comptypes = {
 	{typeid(wi::scene::NameComponent).name(), CompType::NameComponent_},
 	{typeid(wi::scene::LayerComponent).name(), CompType::LayerComponent_},
@@ -78,9 +80,6 @@ static wi::unordered_map<std::string, CompType> comptypes = {
 	{typeid(wi::EmittedParticleSystem).name(), CompType::EmittedParticleSystem_},
 };
 
-
-
-
 static bool g_is_display = true;
 auto fail_ret = [](const std::string& err_str, const bool _warn = false)
 	{
@@ -90,7 +89,6 @@ auto fail_ret = [](const std::string& err_str, const bool _warn = false)
 		}
 		return false;
 	};
-
 
 namespace vzm
 {
@@ -299,7 +297,7 @@ namespace vzm
 			setEyeAdaptionKey(0.1f);
 			setEyeAdaptionRate(0.5f);
 
-			setSceneUpdateEnabled(false); // for multiple main-cameras support
+			//setSceneUpdateEnabled(true); // for multiple main-cameras support
 
 			wi::font::UpdateAtlas(GetDPIScaling());
 
@@ -670,6 +668,10 @@ namespace vzm
 		{
 			// note Scene::Merge... rearrange the components
 			camera = scene->cameras.GetComponent(camEntity);
+			if (!getSceneUpdateEnabled())
+			{
+				scene->camera = *camera;
+			}
 
 			if (_vmCam != nullptr)
 			{
@@ -1020,6 +1022,8 @@ namespace vzm
 					comp = (COMP*)scene->animations.GetComponent(vid); break;
 				case CompType::EmittedParticleSystem_:
 					comp = (COMP*)scene->emitters.GetComponent(vid); break;
+				case CompType::ColliderComponent_:
+					comp = (COMP*)scene->colliders.GetComponent(vid); break;
 				default: assert(0 && "Not allowed GetComponent");  return nullptr;
 				}
 				if (comp) break;
@@ -1082,21 +1086,39 @@ namespace vzm // VmBaseComponent
 	{
 		TransformComponent* transform = sceneManager.GetEngineTransformComponent(componentVID);
 		if (transform == nullptr) return;
+		XMMATRIX _mat = rowMajor? transform->GetLocalMatrix() : XMMatrixTranspose(transform->GetLocalMatrix());
+		XMStoreFloat4x4((XMFLOAT4X4*)mat, _mat);
 	}
 	void VmBaseComponent::GetWorldTransform(float mat[16], const bool rowMajor)
 	{
 		TransformComponent* transform = sceneManager.GetEngineTransformComponent(componentVID);
 		if (transform == nullptr) return;
+		XMMATRIX _mat = XMLoadFloat4x4(&transform->world);
+		if (!rowMajor)
+		{
+			_mat = XMMatrixTranspose(_mat);
+		}
+		XMStoreFloat4x4((XMFLOAT4X4*)mat, _mat);
 	}
 	void VmBaseComponent::GetLocalInvTransform(float mat[16], const bool rowMajor)
 	{
 		TransformComponent* transform = sceneManager.GetEngineTransformComponent(componentVID);
 		if (transform == nullptr) return;
+		XMMATRIX _mat = rowMajor ? transform->GetLocalMatrix() : XMMatrixTranspose(transform->GetLocalMatrix());
+		_mat = XMMatrixInverse(nullptr, _mat);
+		XMStoreFloat4x4((XMFLOAT4X4*)mat, _mat);
 	}
 	void VmBaseComponent::GetWorldInvTransform(float mat[16], const bool rowMajor)
 	{
 		TransformComponent* transform = sceneManager.GetEngineTransformComponent(componentVID);
 		if (transform == nullptr) return;
+		XMMATRIX _mat = XMLoadFloat4x4(&transform->world);
+		if (!rowMajor)
+		{
+			_mat = XMMatrixTranspose(_mat);
+		}
+		_mat = XMMatrixInverse(nullptr, _mat);
+		XMStoreFloat4x4((XMFLOAT4X4*)mat, _mat);
 	}
 }
 
@@ -1190,6 +1212,72 @@ namespace vzm // VmLight
 }
 namespace vzm // VmCollider
 {
+	void VmCollider::SetCPUEnabled(const bool value)
+	{
+		COMP_GET(ColliderComponent, collider, );
+		collider->SetCPUEnabled(value);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmCollider::SetGPUEnabled(const bool value)
+	{
+		COMP_GET(ColliderComponent, collider, );
+		collider->SetGPUEnabled(value);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	bool VmCollider::IsCPUEnabled()
+	{
+		COMP_GET(ColliderComponent, collider, false);
+		return collider->IsCPUEnabled();
+	}
+	bool VmCollider::IsGPUEnabled()
+	{
+		COMP_GET(ColliderComponent, collider, false);
+		return collider->IsGPUEnabled();
+	}
+	float VmCollider::GetRadius()
+	{
+		COMP_GET(ColliderComponent, collider, 0);
+		return collider->radius;
+	}
+	void VmCollider::SetRadius(const float r)
+	{
+		COMP_GET(ColliderComponent, collider, );
+		collider->radius = r;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmCollider::GetOffset(float offset[3])
+	{
+		COMP_GET(ColliderComponent, collider, );
+		*(XMFLOAT3*)offset = collider->offset;
+	}
+	void VmCollider::SetOffset(const float offset[3])
+	{
+		COMP_GET(ColliderComponent, collider, );
+		collider->offset = *(XMFLOAT3*)offset;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmCollider::GetTail(float tail[3])
+	{
+		COMP_GET(ColliderComponent, collider, );
+		*(XMFLOAT3*)tail = collider->tail;
+	}
+	void VmCollider::SetTail(const float tail[3])
+	{
+		COMP_GET(ColliderComponent, collider, );
+		collider->tail = *(XMFLOAT3*)tail;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	VmCollider::Shape VmCollider::GetShape()
+	{
+		COMP_GET(ColliderComponent, collider, VmCollider::Shape::Sphere);
+		return (VmCollider::Shape)collider->shape;
+	}
+	void VmCollider::SetShape(const Shape shape)
+	{
+		COMP_GET(ColliderComponent, collider, );
+		collider->shape = (wi::scene::ColliderComponent::Shape)shape;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
 }
 namespace vzm // VmEmitter
 {
@@ -1752,6 +1840,16 @@ namespace vzm
 			if (baseComp) *baseComp = vmMat;
 			break;
 		}
+		case COMPONENT_TYPE::COLLIDER:
+		{
+			ett = CreateEntity();
+			scene->names.Create(ett) = compName;
+			scene->colliders.Create(ett);
+			scene->transforms.Create(ett);
+			VmCollider* vmCollider = sceneManager.CreateVmComp<VmCollider>(ett);
+			if (baseComp) *baseComp = vmCollider;
+			break;
+		}
 		case COMPONENT_TYPE::WEATHER:
 		case COMPONENT_TYPE::ANIMATION:
 		default:
@@ -1780,6 +1878,7 @@ namespace vzm
 	{
 		switch (compType)
 		{
+		case COMPONENT_TYPE::BASE: return sceneManager.GetVmComp<VmCamera>(vid);
 		case COMPONENT_TYPE::CAMERA: return sceneManager.GetVmComp<VmCamera>(vid);
 		case COMPONENT_TYPE::ACTOR: return sceneManager.GetVmComp<VmActor>(vid);
 		case COMPONENT_TYPE::LIGHT: return sceneManager.GetVmComp<VmLight>(vid);
@@ -1823,6 +1922,9 @@ namespace vzm
 
 	void MergeVzmSceneSystem(Scene* srcScene, Scene* dstScene)
 	{
+		// base
+		wi::vector<Entity> transformEntities = srcScene->transforms.GetEntityArray();
+
 		// camera wirh renderer
 		wi::vector<Entity> camEntities = srcScene->cameras.GetEntityArray();
 		// actors
@@ -1870,6 +1972,15 @@ namespace vzm
 			for (Entity& ett : emitterEntities)
 			{
 				sceneManager.CreateVmComp<VmEmitter>(ett);
+			}
+		}
+
+		// must be posterior to actors
+		for (Entity& ett : transformEntities)
+		{
+			if (!sceneManager.GetVmComp<VmBaseComponent>(ett))
+			{
+				sceneManager.CreateVmComp<VmBaseComponent>(ett);
 			}
 		}
 
@@ -1982,7 +2093,12 @@ namespace vzm
 			return VZ_FAIL;
 		}
 
+		// DOJO TO DO : CHECK updateScene across cameras belonging to a scene and force to use a oldest one...
 		renderer->setSceneUpdateEnabled(updateScene);
+		//if (!updateScene)
+		//{
+		//	renderer->scene->camera = *renderer->camera;
+		//}
 
 		wi::font::UpdateAtlas(renderer->GetDPIScaling());
 

@@ -47,6 +47,7 @@ namespace vzm
 	// Render a scene on camera (camVid)
 	//  - Must belong to the internal scene
 	//  - if updateScene is true, uses the camera for camera-dependent scene updates
+	//  - strongly recommend a single camera-dependent update per a scene 
 	__dojostatic VZRESULT Render(const VID camVid, const bool updateScene = true);
 	// Get a graphics render target view 
 	//  - Must belong to the internal scene

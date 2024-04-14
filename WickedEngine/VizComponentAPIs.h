@@ -124,6 +124,7 @@ namespace vzm
 	enum class COMPONENT_TYPE
 	{
 		UNDEFINED = 0,
+		BASE,
 		CAMERA,
 		ACTOR,
 		GEOMETRY,
@@ -286,5 +287,23 @@ namespace vzm
 	};
 	struct VmCollider : VmBaseComponent
 	{
+		enum class Shape
+		{
+			Sphere,
+			Capsule,
+			Plane,
+		};
+		void SetCPUEnabled(const bool value);
+		void SetGPUEnabled(const bool value);
+		bool IsCPUEnabled();
+		bool IsGPUEnabled();
+		float GetRadius();
+		void SetRadius(const float r);
+		void GetOffset(float offset[3]);
+		void SetOffset(const float offset[3]);
+		void GetTail(float tail[3]);
+		void SetTail(const float tail[3]);
+		Shape GetShape();
+		void SetShape(const Shape shape);
 	};
 }
