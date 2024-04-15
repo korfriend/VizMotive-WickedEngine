@@ -14,11 +14,13 @@ VizMotive Engine is an open-source 3D engine for scientific data visualizations 
  	- "WickedEngine/VizComponentAPIs.h" for data structures referring to Wicked Engine components
   	- Support off-screen rendering to other device's canvas/texture using shared resource graphics
   	- Multi-canvas and Multi-scene visualization
-- New scene structure based on actors and their components and systems
+- Modified scene structure based on actors and their components and systems
 	- Camera having renderer (as a canvas) with transform system
  	- Mesh actor having mesh component (w/ external material component) with transform system
 	- Particle actor having emitter component (w/ internal material component) with transform system
 	- (TO DO) Volume actor having volume component (w/ external material having OTF) with transform system
+ 	- (TO DO) Allowing to assign different MaterialComponent to ObjectComponent (by default, using the MaterialComponent intrinsically assigned in MeshComponent). In other words, use the MeshComponent as GeometryComponent that can be used along with different MaterialComponents)
+ 	- (TO DO) Separate Scene and Resource Pool to share resources across different scenes
  
 ### Platforms:
 - Windows 10 or newer
