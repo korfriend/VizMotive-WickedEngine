@@ -10,7 +10,7 @@ VizMotive Engine is an open-source 3D engine for scientific data visualizations 
 
 ### Main Contribution Features
 - High-level (COM-based) APIs
-	- "WickedEngine/VizEngineAPIs.h" for main COM-based high-end APIs
+	- "WickedEngine/VizEngineAPIs.h" for main COM-based high-level APIs
  	- "WickedEngine/VizComponentAPIs.h" for data structures referring to Wicked Engine components
   	- Support off-screen rendering to other device's canvas/texture using shared resource graphics
   	- Multi-canvas and Multi-scene visualization
