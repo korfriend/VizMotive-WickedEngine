@@ -75,7 +75,7 @@ vzm::DeinitEngineLib();
 ```
 
 ### Graphics API:
-The default renderer is `DirectX 12` on Windows and `Vulkan` on Linux. The `DirectX 11` renderer is no longer available starting from version 0.57.0, but it can be found on the <a href="https://github.com/turanszkij/WickedEngine/tree/dx11-backup">dx11-backup branch</a>.
+Graphics APIs are tightly dependent on the core engine source, <a href="https://github.com/turanszkij/WickedEngine/">Wicked Engine</a>. The default renderer is `DirectX 12` on Windows and `Vulkan` on Linux. I will support `Mobile` Vulkan, which is allowed on Android running in mobile devices. 
 You can specify command line arguments (without any prefix) to switch between render devices or other settings. Currently the list of options:
 <table>
   <tr>
