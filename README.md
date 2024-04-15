@@ -35,6 +35,7 @@ VizMotive Engine is an open-source 3D engine for scientific data visualizations 
 #include "VizEngineAPIs.h"	// this reauires "VizComponentAPIs.h", none external dependencies
 
 // Start the Engine APIs:
+// Note: the engine uses internally-assigned GPU device handler 
 vzm::InitEngineLib();
 
 // Create a scene
