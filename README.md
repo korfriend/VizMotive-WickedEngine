@@ -10,15 +10,17 @@ VizMotive Engine is an open-source 3D engine for scientific data visualizations 
 
 ### Main Contribution Features
 - High-level (COM-based) APIs
-	- "WickedEngine/VizEngineAPIs.h" for main COM-based high-end APIs
+	- "WickedEngine/VizEngineAPIs.h" for main COM-based high-level APIs
  	- "WickedEngine/VizComponentAPIs.h" for data structures referring to Wicked Engine components
   	- Support off-screen rendering to other device's canvas/texture using shared resource graphics
   	- Multi-canvas and Multi-scene visualization
-- New scene structure based on actors and their components and systems
+- Modified scene structure based on actors and their components and systems
 	- Camera having renderer (as a canvas) with transform system
  	- Mesh actor having mesh component (w/ external material component) with transform system
 	- Particle actor having emitter component (w/ internal material component) with transform system
 	- (TO DO) Volume actor having volume component (w/ external material having OTF) with transform system
+ 	- (TO DO) Allowing to assign different MaterialComponent to ObjectComponent (by default, using the MaterialComponent intrinsically assigned in MeshComponent). In other words, use the MeshComponent as GeometryComponent that can be used along with different MaterialComponents)
+ 	- (TO DO) Separate Scene and Resource Pool to share resources across different scenes
  
 ### Platforms:
 - Windows 10 or newer
@@ -33,6 +35,7 @@ VizMotive Engine is an open-source 3D engine for scientific data visualizations 
 #include "VizEngineAPIs.h"	// this reauires "VizComponentAPIs.h", none external dependencies
 
 // Start the Engine APIs:
+// Note: the engine uses internally-assigned GPU device handler 
 vzm::InitEngineLib();
 
 // Create a scene
@@ -72,7 +75,7 @@ vzm::DeinitEngineLib();
 ```
 
 ### Graphics API:
-The default renderer is `DirectX 12` on Windows and `Vulkan` on Linux. The `DirectX 11` renderer is no longer available starting from version 0.57.0, but it can be found on the <a href="https://github.com/turanszkij/WickedEngine/tree/dx11-backup">dx11-backup branch</a>.
+Graphics APIs are tightly dependent on the core engine source, <a href="https://github.com/turanszkij/WickedEngine/">Wicked Engine</a>. The default renderer is `DirectX 12` on Windows and `Vulkan` on Linux. I will support `Mobile` Vulkan, which is allowed on Android running in mobile devices. 
 You can specify command line arguments (without any prefix) to switch between render devices or other settings. Currently the list of options:
 <table>
   <tr>
