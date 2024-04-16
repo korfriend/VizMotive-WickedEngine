@@ -147,6 +147,11 @@ namespace vzm
 		void GetWorldTransform(float mat[16], const bool rowMajor = false);
 		void GetLocalInvTransform(float mat[16], const bool rowMajor = false);
 		void GetWorldInvTransform(float mat[16], const bool rowMajor = false);
+
+		void SetTranslate(const float value[3]);
+		void SetScale(const float value[3]);
+		void SetQuaternion(const float value[4]);
+		void SetMatrix(const float value[16], const bool additiveTransform = false, const bool rowMajor = false);
 	};
 	struct VmRenderer;
 	struct VmCamera : VmBaseComponent
@@ -273,10 +278,88 @@ namespace vzm
 	};
 	struct VmLight : VmBaseComponent
 	{
+		void SetColor(const float value[3]);
+		void SetIntensity(const float value);
+		void SetRange(const float value);
+		void SetConeOuterRange(const float value);
+		void SetConeInnerRange(const float value);
+		void SetRadius(const float value);
+		void SetLength(const float value);
+
+		void SetCastShadow(const bool value);
+		void SetVolumetricsEnabled(const bool value);
+		void SetVisualizerEnabled(const bool value);
+		void SetStatic(const bool value);
+		void SetVolumetricCloudsEnabled(const bool value);
+
+		bool IsCastingShadow();
+		bool IsVolumetricsEnabled();
+		bool IsVisualizerEnabled();
+		bool IsStatic();
+		bool IsVolumetricCloudsEnabled();
+
+		float GetRange();
+
+		enum LightType
+		{
+			DIRECTIONAL = 0,
+			POINT,
+			SPOT,
+			LIGHTTYPE_COUNT,
+			ENUM_FORCE_UINT32 = 0xFFFFFFFF,
+		};
+		void SetType(const LightType val);
+		LightType GetType();
 	};
 	struct VmWeather : VmBaseComponent
 	{
 		void SetWeatherPreset(const uint32_t index);
+
+		bool IsOceanEnabled();
+		bool IsRealisticSky();
+		bool IsVolumetricClouds();
+		bool IsHeightFog();
+		bool IsVolumetricCloudsCastShadow();
+		bool IsOverrideFogColor();
+		bool IsRealisticSkyAerialPerspective();
+		bool IsRealisticSkyHighQuality();
+		bool IsRealisticSkyReceiveShadow();
+		bool IsVolumetricCloudsReceiveShadow();
+
+		void SetOceanEnabled(const bool value);
+		void SetRealisticSky(const bool value);
+		void SetVolumetricClouds(const bool value);
+		void SetHeightFog(const bool value);
+		void SetVolumetricCloudsCastShadow(const bool value);
+		void SetOverrideFogColor(const bool value);
+		void SetRealisticSkyAerialPerspective(const bool value);
+		void SetRealisticSkyHighQuality(const bool value);
+		void SetRealisticSkyReceiveShadow(const bool value);
+		void SetVolumetricCloudsReceiveShadow(const bool value);
+
+		void SetSunColor(const float value[3]);
+		void SetDirectionColor(const float value[3]);
+		void SetSkyExposure(const float value);
+		void SetHorizonColor(const float value[3]);
+		void SetZenithColor(const float value[3]);
+		void SetAmbient(const float value[3]);
+		void SetFogStart(const float value);
+		void SetFogDensity(const float value);
+		void SetFogHightStart(const float value);
+		void SetFogHightEnd(const float value);
+		void SetWindDirection(const float value[3]);
+		void SetWindowRandomness(const float value);
+		void SetWindWaveSize(const float value);
+		void SetWindSpeed(const float value);
+		void SetStars(const float value);
+		void SetGravity(const float value[3]);
+		void SetSkyRotation(const float value);
+		void SetRainAmount(const float value);
+		void SetRainLength(const float value);
+		void SetRainSpeed(const float value);
+		void SetRainScale(const float value);
+		void SetRainSplashScale(const float value);
+		void SetRainColor(const float value[4]);
 	};
 	struct VmAnimation : VmBaseComponent
 	{

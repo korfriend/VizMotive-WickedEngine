@@ -14,6 +14,7 @@ using namespace wi::scene;
 #define CANVAS_INIT_H 16u
 #define CANVAS_INIT_DPI 96.f
 
+#pragma region // global enumerations
 enum class FileType
 {
 	INVALID,
@@ -25,6 +26,7 @@ enum class FileType
 	VIDEO,
 	SOUND,
 };
+
 static wi::unordered_map<std::string, FileType> filetypes = {
 	{"OBJ", FileType::OBJ},
 	{"GLTF", FileType::GLTF},
@@ -62,6 +64,7 @@ enum class CompType
 	AnimationComponent_,
 	EmittedParticleSystem_,
 	ColliderComponent_,
+	WeatherComponent_,
 };
 
 static wi::unordered_map<std::string, CompType> comptypes = {
@@ -77,8 +80,10 @@ static wi::unordered_map<std::string, CompType> comptypes = {
 	{typeid(wi::scene::EnvironmentProbeComponent).name(), CompType::EnvironmentProbeComponent_},
 	{typeid(wi::scene::AnimationComponent).name(), CompType::AnimationComponent_},
 	{typeid(wi::scene::ColliderComponent).name(), CompType::ColliderComponent_},
+	{typeid(wi::scene::WeatherComponent).name(), CompType::WeatherComponent_},
 	{typeid(wi::EmittedParticleSystem).name(), CompType::EmittedParticleSystem_},
 };
+#pragma endregion
 
 static bool g_is_display = true;
 auto fail_ret = [](const std::string& err_str, const bool _warn = false)
@@ -131,6 +136,7 @@ namespace vzm
 
 	using namespace wi;
 
+#pragma region // VZM DATA STRUCTURES
 	class VzmRenderer : public wi::RenderPath3D
 	{
 	private:
@@ -287,13 +293,13 @@ namespace vzm
 			// remove...
 			wi::renderer::SetToDrawGridHelper(true);
 			wi::renderer::SetVXGIReflectionsEnabled(false);
-			wi::renderer::SetTemporalAAEnabled(true);
+			wi::renderer::SetTemporalAAEnabled(false);
 			setSSREnabled(false);
 			setFXAAEnabled(false);
 			setReflectionsEnabled(true);
 			setRaytracedReflectionsEnabled(true);
-			setFSR2Enabled(false);
-			setEyeAdaptionEnabled(true);
+			setFSR2Enabled(true);
+			setEyeAdaptionEnabled(false);
 			setEyeAdaptionKey(0.1f);
 			setEyeAdaptionRate(0.5f);
 
@@ -834,7 +840,7 @@ namespace vzm
 				scene.weather.fogStart = std::numeric_limits<float>::max();
 				scene.weather.fogDensity = 0;
 				{
-					scene.vmWeather.componentVID = INVALID_VID;
+					scene.vmWeather.componentVID = ett;
 					scene.vmWeather.compType = COMPONENT_TYPE::WEATHER;
 				}
 				scene.name = name;
@@ -1024,6 +1030,8 @@ namespace vzm
 					comp = (COMP*)scene->emitters.GetComponent(vid); break;
 				case CompType::ColliderComponent_:
 					comp = (COMP*)scene->colliders.GetComponent(vid); break;
+				case CompType::WeatherComponent_:
+					comp = (COMP*)scene->weathers.GetComponent(vid); break;
 				default: assert(0 && "Not allowed GetComponent");  return nullptr;
 				}
 				if (comp) break;
@@ -1073,6 +1081,7 @@ namespace vzm
 			}
 		}
 	};
+#pragma endregion
 
 	SceneManager sceneManager;
 }
@@ -1080,21 +1089,20 @@ namespace vzm
 
 #define COMP_GET(COMP, PARAM, RET) COMP* PARAM = sceneManager.GetEngineComp<COMP>(componentVID); if (!PARAM) return RET;
 
-namespace vzm // VmBaseComponent
+namespace vzm 
 {
+#pragma region // VmBaseComponent
 	void VmBaseComponent::GetLocalTransform(float mat[16], const bool rowMajor)
 	{
-		TransformComponent* transform = sceneManager.GetEngineTransformComponent(componentVID);
-		if (transform == nullptr) return;
-		XMMATRIX _mat = rowMajor? transform->GetLocalMatrix() : XMMatrixTranspose(transform->GetLocalMatrix());
+		COMP_GET(TransformComponent, transform, );
+		XMMATRIX _mat = !rowMajor? transform->GetLocalMatrix() : XMMatrixTranspose(transform->GetLocalMatrix());
 		XMStoreFloat4x4((XMFLOAT4X4*)mat, _mat);
 	}
 	void VmBaseComponent::GetWorldTransform(float mat[16], const bool rowMajor)
 	{
-		TransformComponent* transform = sceneManager.GetEngineTransformComponent(componentVID);
-		if (transform == nullptr) return;
+		COMP_GET(TransformComponent, transform, );
 		XMMATRIX _mat = XMLoadFloat4x4(&transform->world);
-		if (!rowMajor)
+		if (rowMajor)
 		{
 			_mat = XMMatrixTranspose(_mat);
 		}
@@ -1102,28 +1110,58 @@ namespace vzm // VmBaseComponent
 	}
 	void VmBaseComponent::GetLocalInvTransform(float mat[16], const bool rowMajor)
 	{
-		TransformComponent* transform = sceneManager.GetEngineTransformComponent(componentVID);
-		if (transform == nullptr) return;
-		XMMATRIX _mat = rowMajor ? transform->GetLocalMatrix() : XMMatrixTranspose(transform->GetLocalMatrix());
+		COMP_GET(TransformComponent, transform, );
+		XMMATRIX _mat = !rowMajor ? transform->GetLocalMatrix() : XMMatrixTranspose(transform->GetLocalMatrix());
 		_mat = XMMatrixInverse(nullptr, _mat);
 		XMStoreFloat4x4((XMFLOAT4X4*)mat, _mat);
 	}
 	void VmBaseComponent::GetWorldInvTransform(float mat[16], const bool rowMajor)
 	{
-		TransformComponent* transform = sceneManager.GetEngineTransformComponent(componentVID);
-		if (transform == nullptr) return;
+		COMP_GET(TransformComponent, transform, );
 		XMMATRIX _mat = XMLoadFloat4x4(&transform->world);
-		if (!rowMajor)
+		if (rowMajor)
 		{
 			_mat = XMMatrixTranspose(_mat);
 		}
 		_mat = XMMatrixInverse(nullptr, _mat);
 		XMStoreFloat4x4((XMFLOAT4X4*)mat, _mat);
 	}
-}
+	void VmBaseComponent::SetTranslate(const float value[3])
+	{
+		COMP_GET(TransformComponent, transform, );
+		transform->Translate(*(XMFLOAT3*)value);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmBaseComponent::SetScale(const float value[3])
+	{
+		COMP_GET(TransformComponent, transform, );
+		transform->Scale(*(XMFLOAT3*)value);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmBaseComponent::SetQuaternion(const float value[4])
+	{
+		COMP_GET(TransformComponent, transform, );
+		transform->Rotate(*(XMFLOAT4*)value);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmBaseComponent::SetMatrix(const float value[16], const bool additiveTransform, const bool rowMajor)
+	{
+		COMP_GET(TransformComponent, transform, );
+		if (!additiveTransform)
+		{
+			transform->ClearTransform();
+		}
+		XMMATRIX mat = XMLoadFloat4x4((XMFLOAT4X4*)value);
+		if (rowMajor)
+		{
+			mat = XMMatrixTranspose(mat);
+		}
+		transform->MatrixTransform(mat);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+#pragma endregion 
 
-namespace vzm // VmCamera
-{
+#pragma region // VmCamera
 	void VmCamera::SetPose(const float pos[3], const float view[3], const float up[3])
 	{
 		CameraComponent* camComponent = sceneManager.GetEngineComp<CameraComponent>(componentVID);
@@ -1200,18 +1238,131 @@ namespace vzm // VmCamera
 		if (h) *h = (float)((VzmRenderer*)renderer)->height;
 		if (dpi) *dpi = ((VzmRenderer*)renderer)->dpi;
 	}
-}
-namespace vzm // VmActor
-{
-}
-namespace vzm // VmLight
-{
-}
-namespace vzm // VmLight
-{
-}
-namespace vzm // VmCollider
-{
+#pragma endregion 
+
+#pragma region // VmActor
+#pragma endregion
+
+#pragma region // VmLight
+	void VmLight::SetColor(const float value[3])
+	{
+		COMP_GET(LightComponent, light, );
+		light->color = *(XMFLOAT3*)value;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmLight::SetIntensity(const float value)
+	{
+		COMP_GET(LightComponent, light, );
+		light->intensity = value;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmLight::SetRange(const float value)
+	{
+		COMP_GET(LightComponent, light, );
+		light->range = value;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmLight::SetConeOuterRange(const float value)
+	{
+		COMP_GET(LightComponent, light, );
+		light->outerConeAngle = value;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmLight::SetConeInnerRange(const float value)
+	{
+		COMP_GET(LightComponent, light, );
+		light->innerConeAngle = value;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmLight::SetRadius(const float value)
+	{
+		COMP_GET(LightComponent, light, );
+		light->radius = value;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmLight::SetLength(const float value)
+	{
+		COMP_GET(LightComponent, light, );
+		light->length = value;
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+
+	void VmLight::SetCastShadow(const bool value)
+	{
+		COMP_GET(LightComponent, light, );
+		light->SetCastShadow(value);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmLight::SetVolumetricsEnabled(const bool value)
+	{
+		COMP_GET(LightComponent, light, );
+		light->SetVolumetricsEnabled(value);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmLight::SetVisualizerEnabled(const bool value)
+	{
+		COMP_GET(LightComponent, light, );
+		light->SetVisualizerEnabled(value);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmLight::SetStatic(const bool value)
+	{
+		COMP_GET(LightComponent, light, );
+		light->SetStatic(value);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmLight::SetVolumetricCloudsEnabled(const bool value)
+	{
+		COMP_GET(LightComponent, light, );
+		light->SetVolumetricCloudsEnabled(value);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+
+	bool VmLight::IsCastingShadow()
+	{
+		COMP_GET(LightComponent, light, false);
+		return light->IsCastingShadow();
+	}
+	bool VmLight::IsVolumetricsEnabled()
+	{
+		COMP_GET(LightComponent, light, false);
+		return light->IsVolumetricsEnabled();
+	}
+	bool VmLight::IsVisualizerEnabled()
+	{
+		COMP_GET(LightComponent, light, false);
+		return light->IsVisualizerEnabled();
+	}
+	bool VmLight::IsStatic()
+	{
+		COMP_GET(LightComponent, light, false);
+		return light->IsStatic();
+	}
+	bool VmLight::IsVolumetricCloudsEnabled()
+	{
+		COMP_GET(LightComponent, light, false);
+		return light->IsVolumetricCloudsEnabled();
+	}
+
+	float VmLight::GetRange()
+	{
+		COMP_GET(LightComponent, light, -1.f);
+		return light->GetRange();
+	}
+	void VmLight::SetType(const LightType val)
+	{
+		COMP_GET(LightComponent, light, );
+		light->SetType((LightComponent::LightType)val);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	VmLight::LightType VmLight::GetType()
+	{
+		COMP_GET(LightComponent, light, VmLight::LightType::DIRECTIONAL);
+		return (VmLight::LightType)light->GetType();
+	}
+#pragma endregion 
+
+#pragma region // VmCollider
 	void VmCollider::SetCPUEnabled(const bool value)
 	{
 		COMP_GET(ColliderComponent, collider, );
@@ -1278,9 +1429,9 @@ namespace vzm // VmCollider
 		collider->shape = (wi::scene::ColliderComponent::Shape)shape;
 		timeStamp = std::chrono::high_resolution_clock::now();
 	}
-}
-namespace vzm // VmEmitter
-{
+#pragma endregion
+
+#pragma region // VmEmitter
 	void VmEmitter::Burst(int num)
 	{
 		COMP_GET(EmittedParticleSystem, emitter, );
@@ -1640,9 +1791,9 @@ namespace vzm // VmEmitter
 		emitter->SetTakeColorFromMesh(value);
 		timeStamp = std::chrono::high_resolution_clock::now();
 	}
-}
-namespace vzm // VmWeather
-{
+#pragma endregion
+
+#pragma region // VmWeather
 	void VmWeather::SetWeatherPreset(const uint32_t index)
 	{
 		VzmScene* scene = sceneManager.GetScene(componentVID);
@@ -1658,9 +1809,196 @@ namespace vzm // VmWeather
 		scene->weather = scene->weathers.GetComponentArray()[index];
 		timeStamp = std::chrono::high_resolution_clock::now();
 	}
-}
-namespace vzm // VmAnimation
-{
+
+#define GetWeatherParam(IS_NAME) VzmScene* scene = sceneManager.GetScene(componentVID); \
+	if (scene == nullptr) return false;  return scene->weather.IS_NAME();
+
+	bool VmWeather::IsOceanEnabled()
+	{
+		GetWeatherParam(IsOceanEnabled);
+	}
+	bool VmWeather::IsRealisticSky()
+	{
+		GetWeatherParam(IsRealisticSky);
+	}
+	bool VmWeather::IsVolumetricClouds()
+	{
+		GetWeatherParam(IsVolumetricClouds);
+	}
+	bool VmWeather::IsHeightFog()
+	{
+		GetWeatherParam(IsHeightFog);
+	}
+	bool VmWeather::IsVolumetricCloudsCastShadow()
+	{
+		GetWeatherParam(IsVolumetricCloudsCastShadow);
+	}
+	bool VmWeather::IsOverrideFogColor()
+	{
+		GetWeatherParam(IsOverrideFogColor);
+	}
+	bool VmWeather::IsRealisticSkyAerialPerspective()
+	{
+		GetWeatherParam(IsRealisticSkyAerialPerspective);
+	}
+	bool VmWeather::IsRealisticSkyHighQuality()
+	{
+		GetWeatherParam(IsRealisticSkyHighQuality);
+	}
+	bool VmWeather::IsRealisticSkyReceiveShadow()
+	{
+		GetWeatherParam(IsRealisticSkyReceiveShadow);
+	}
+	bool VmWeather::IsVolumetricCloudsReceiveShadow()
+	{
+		GetWeatherParam(IsVolumetricCloudsReceiveShadow);
+	}
+
+#define GetWeatherComp  VzmScene* scene = sceneManager.GetScene(componentVID); \
+	WeatherComponent* weather = nullptr; \
+	if (scene != nullptr) { weather = &scene->weather; } else { COMP_GET(WeatherComponent, w, ); weather = w; } 
+
+#define SetWeatherEnabled(FN_NAME) GetWeatherComp; weather->FN_NAME(value); timeStamp = std::chrono::high_resolution_clock::now();
+
+	void VmWeather::SetOceanEnabled(const bool value)
+	{
+		SetWeatherEnabled(SetOceanEnabled);
+	}
+	void VmWeather::SetRealisticSky(const bool value)
+	{
+		SetWeatherEnabled(SetRealisticSky);
+	}
+	void VmWeather::SetVolumetricClouds(const bool value)
+	{
+		SetWeatherEnabled(SetVolumetricClouds);
+	}
+	void VmWeather::SetHeightFog(const bool value)
+	{
+		SetWeatherEnabled(SetHeightFog);
+	}
+	void VmWeather::SetVolumetricCloudsCastShadow(const bool value)
+	{
+		SetWeatherEnabled(SetVolumetricCloudsCastShadow);
+	}
+	void VmWeather::SetOverrideFogColor(const bool value)
+	{
+		SetWeatherEnabled(SetOverrideFogColor);
+	}
+	void VmWeather::SetRealisticSkyAerialPerspective(const bool value)
+	{
+		SetWeatherEnabled(SetRealisticSkyAerialPerspective);
+	}
+	void VmWeather::SetRealisticSkyHighQuality(const bool value)
+	{
+		SetWeatherEnabled(SetRealisticSkyHighQuality);
+	}
+	void VmWeather::SetRealisticSkyReceiveShadow(const bool value)
+	{
+		SetWeatherEnabled(SetRealisticSkyReceiveShadow);
+	}
+	void VmWeather::SetVolumetricCloudsReceiveShadow(const bool value)
+	{
+		SetWeatherEnabled(SetVolumetricCloudsReceiveShadow);
+	}
+
+#define SetWeatherParamT(PARAM, TYPE) GetWeatherComp; weather->PARAM = *(TYPE*)value; timeStamp = std::chrono::high_resolution_clock::now();
+#define SetWeatherParam(PARAM) GetWeatherComp; weather->PARAM = value; 	timeStamp = std::chrono::high_resolution_clock::now();
+
+	void VmWeather::SetSunColor(const float value[3])
+	{
+		SetWeatherParamT(sunColor, XMFLOAT3);
+	}
+	void VmWeather::SetDirectionColor(const float value[3])
+	{
+		SetWeatherParamT(sunDirection, XMFLOAT3);
+	}
+	void VmWeather::SetSkyExposure(const float value)
+	{
+		SetWeatherParam(skyExposure);
+	}
+	void VmWeather::SetHorizonColor(const float value[3])
+	{
+		SetWeatherParamT(horizon, XMFLOAT3);
+	}
+	void VmWeather::SetZenithColor(const float value[3])
+	{
+		SetWeatherParamT(zenith, XMFLOAT3);
+	}
+	void VmWeather::SetAmbient(const float value[3])
+	{
+		SetWeatherParamT(ambient, XMFLOAT3);
+	}
+	void VmWeather::SetFogStart(const float value)
+	{
+		SetWeatherParam(fogStart);
+	}
+	void VmWeather::SetFogDensity(const float value)
+	{
+		SetWeatherParam(fogDensity);
+	}
+	void VmWeather::SetFogHightStart(const float value)
+	{
+		SetWeatherParam(fogHeightStart);
+	}
+	void VmWeather::SetFogHightEnd(const float value)
+	{
+		SetWeatherParam(fogHeightEnd);
+	}
+	void VmWeather::SetWindDirection(const float value[3])
+	{
+		SetWeatherParamT(windDirection, XMFLOAT3);
+	}
+	void VmWeather::SetWindowRandomness(const float value)
+	{
+		SetWeatherParam(windRandomness);
+	}
+	void VmWeather::SetWindWaveSize(const float value)
+	{
+		SetWeatherParam(windWaveSize);
+	}
+	void VmWeather::SetWindSpeed(const float value)
+	{
+		SetWeatherParam(windSpeed);
+	}
+	void VmWeather::SetStars(const float value)
+	{
+		SetWeatherParam(stars);
+	}
+	void VmWeather::SetGravity(const float value[3])
+	{
+		SetWeatherParamT(gravity, XMFLOAT3);
+	}
+	void VmWeather::SetSkyRotation(const float value)
+	{
+		SetWeatherParam(sky_rotation);
+	}
+	void VmWeather::SetRainAmount(const float value)
+	{
+		SetWeatherParam(rain_amount);
+	}
+	void VmWeather::SetRainLength(const float value)
+	{
+		SetWeatherParam(rain_length);
+	}
+	void VmWeather::SetRainSpeed(const float value)
+	{
+		SetWeatherParam(rain_speed);
+	}
+	void VmWeather::SetRainScale(const float value)
+	{
+		SetWeatherParam(rain_scale);
+	}
+	void VmWeather::SetRainSplashScale(const float value)
+	{
+		SetWeatherParam(rain_splash_scale);
+	}
+	void VmWeather::SetRainColor(const float value[4])
+	{
+		SetWeatherParamT(rain_color, XMFLOAT4);
+	}
+#pragma endregion
+
+#pragma region // VmAnimation
 	void VmAnimation::Play()
 	{
 		AnimationComponent* aniComponent = sceneManager.GetEngineComp<AnimationComponent>(componentVID);
@@ -1689,6 +2027,13 @@ namespace vzm // VmAnimation
 		aniComponent->SetLooped(value);
 		timeStamp = std::chrono::high_resolution_clock::now();
 	}
+#pragma endregion
+
+	// Resource Pool
+#pragma region // VmMesh
+#pragma endregion
+#pragma region // VmMaterial
+#pragma endregion
 }
 
 namespace vzm
@@ -1821,7 +2166,7 @@ namespace vzm
 		}
 		case COMPONENT_TYPE::LIGHT:
 		{
-			ett = scene->Entity_CreateLight(compName);
+			ett = scene->Entity_CreateLight(compName);// , XMFLOAT3(0, 3, 0), XMFLOAT3(1, 1, 1), 2, 60);
 			VmLight* vmLight = sceneManager.CreateVmComp<VmLight>(ett);
 			if (baseComp) *baseComp = vmLight;
 			break;
@@ -1851,6 +2196,14 @@ namespace vzm
 			break;
 		}
 		case COMPONENT_TYPE::WEATHER:
+		{
+			ett = CreateEntity();
+			scene->names.Create(ett) = compName;
+			scene->weathers.Create(ett);
+			VmWeather* vmWeather = sceneManager.CreateVmComp<VmWeather>(ett);
+			if (baseComp) *baseComp = vmWeather;
+			break;
+		}
 		case COMPONENT_TYPE::ANIMATION:
 		default:
 			return INVALID_ENTITY;
