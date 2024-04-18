@@ -164,12 +164,35 @@ int main(int, char**)
 		{
 			static bool callbackLoadModel_Finished = false;
 			static VID sid = 0, cid = 0, cid_ani = 0;
-			static VID eid = 0, mid = 0;
+			static VID eid = 0, mid = 0, lid = 0;
 			static vzm::ArcBall arcball;
 			static ImVec2 wh(512, 512);
 			if (sid == 0)
 			{
+				// TO DO //
+				// 1. mesh to resource pool
+				// 2. material to resource pool
+				// 3. check another material (different from the mesh's original) to objectcomponent 
+
 				sid = vzm::NewScene("my scene");
+
+				vzm::VmWeather* vWeather;// = vzm::GetSceneActivatedWeather(sid);
+				vzm::NewSceneComponent(vzm::COMPONENT_TYPE::WEATHER, sid, "weather", 0, CMPP(vWeather));
+				if (vWeather)
+				{
+					vWeather->SetRealisticSky(true);
+					vWeather->SetVolumetricClouds(true);
+					vWeather->SetVolumetricCloudsCastShadow(true);
+					vWeather->SetVolumetricCloudsReceiveShadow(true);
+				}
+
+				vzm::VmLight* vLight;
+				lid = vzm::NewSceneComponent(vzm::COMPONENT_TYPE::LIGHT, sid, "global directional light", 0, CMPP(vLight));
+				glm::fvec3 lightPos(0, 10, 0);
+				vLight->SetTranslate(__FP lightPos);
+				vLight->SetIntensity(10.f);
+				vLight->SetType(vzm::VmLight::DIRECTIONAL);
+
 				ImVec2 canvas_size = ImGui::GetContentRegionAvail();
 				vzm::VmCamera* vCam;
 				cid = vzm::NewSceneComponent(vzm::COMPONENT_TYPE::CAMERA, sid, "my camera", 0, CMPP(vCam));
@@ -197,7 +220,7 @@ int main(int, char**)
 								break;
 							}
 						}
-
+						
 						VID aid_backTire = vzm::GetFirstVidByName("back_tire_d");
 						{
 							eid = vzm::NewSceneComponent(vzm::COMPONENT_TYPE::EMITTER, sid, "grapicar emitter", aid_backTire);
@@ -210,7 +233,7 @@ int main(int, char**)
 
 							// add plane collider
 							vzm::VmCollider* collider = nullptr;
-							VID colliderId = vzm::NewSceneComponent(vzm::COMPONENT_TYPE::COLLIDER, sid, "road collider", aid_backTire, CMPP(collider));
+							VID colliderId = vzm::NewSceneComponent(vzm::COMPONENT_TYPE::COLLIDER, sid, "road collider", 0, CMPP(collider));
 							collider->SetGPUEnabled(true);
 							collider->SetRadius(1000.f);
 							collider->SetShape(vzm::VmCollider::Shape::Plane);
@@ -218,8 +241,8 @@ int main(int, char**)
 						callbackLoadModel_Finished = true;
 					};
 
-				callbackLoadModel(vzm::LoadMeshModel(sid, "D:\\data\\car_gltf\\ioniq.gltf", "my obj"));
-				//vzm::LoadMeshModelAsync(sid, "D:\\data\\car_gltf\\ioniq.gltf", "my obj", callbackLoadModel);
+				//callbackLoadModel(vzm::LoadMeshModel(sid, "D:\\data\\car_gltf\\ioniq.gltf", "my obj"));
+				vzm::LoadMeshModelAsync(sid, "D:\\data\\car_gltf\\ioniq.gltf", "my obj", callbackLoadModel);
 				//vzm::LoadMeshModel(sid, "D:\\VisMotive\\data\\obj files\\skull\\12140_Skull_v3_L2.obj", "my obj");
 			}
 
@@ -292,7 +315,7 @@ int main(int, char**)
 				}
 				ImGui::SetCursorPos(curItemPos);
 
-				vzm::Render(cid, true);// cid_ani == 0);
+				vzm::Render(cid, true);
 
 				uint32_t w, h;
 				ImTextureID texId = vzm::GetGraphicsSharedRenderTarget(cid, g_pd3dDevice, g_pd3dSrvDescHeap, 1, &w, &h);
@@ -317,22 +340,34 @@ int main(int, char**)
 					p.z /= p.w;
 				}
 
+				VID aid1 = vzm::GetFirstVidByName("road collider");
+				vzm::VmBaseComponent* collider = (vzm::VmBaseComponent*)vzm::GetComponent(vzm::COMPONENT_TYPE::BASE, aid1);
+				if (collider)
+				{
+					glm::fmat4x4 matT;
+					collider->GetWorldTransform(__FP matT);
+					glm::fvec4 p = matT * glm::fvec4(0, 0, 0, 1);
+					p.x /= p.w;
+					p.y /= p.w;
+					p.z /= p.w;
+				}
+				
+
 				// Note that we pass the GPU SRV handle here, *not* the CPU handle. We're passing the internal pointer value, cast to an ImTextureID
 
-				static ImVec2 prevWindowSize = ImVec2(0, 0);
-				ImVec2 curWindowSize = ImGui::GetWindowSize();
+				static ImVec2 prevWindowSize2 = ImVec2(0, 0);
+				ImVec2 curWindowSize2 = ImGui::GetWindowSize();
 
-				//if (prevWindowSize.x * prevWindowSize.y == 0)
-				//	ImGui::SetWindowSize(ImVec2(0, 0));
+				if (prevWindowSize2.x * prevWindowSize2.y == 0)
+					ImGui::SetWindowSize(ImVec2(0, 0));
 
-				bool resized = prevWindowSize.x != curWindowSize.x || prevWindowSize.y != curWindowSize.y;
-				prevWindowSize = curWindowSize;
+				bool resized = prevWindowSize2.x != curWindowSize2.x || prevWindowSize2.y != curWindowSize2.y;
+				prevWindowSize2 = curWindowSize2;
 				if (resized)
 				{
 					vzm::VmCamera* vCam = (vzm::VmCamera*)vzm::GetComponent(vzm::COMPONENT_TYPE::CAMERA, cid_ani);
 					ImVec2 canvas_size = ImGui::GetContentRegionAvail();
 					vCam->SetCanvasSize(canvas_size.x, std::max(canvas_size.y, 1.f), 96.f);
-					wh = canvas_size;
 				}
 
 				vzm::Render(cid_ani, true);
@@ -421,12 +456,12 @@ int main(int, char**)
 					static float ParticleDrag = vEmitter->GetDrag();
 					ImGui::SliderFloat("ParticleDrag", &ParticleDrag, 0.0f, 10.f);
 					vEmitter->SetDrag(ParticleDrag);
-					static float Gravity[3] = { 0, -0.7f, 0 };
+					static float Gravity[3] = { 0, -0.9f, 0 };
 					//if (!initialized)
 					//	vEmitter->GetGravity(Gravity);
 					ImGui::SliderFloat3("Gravity", Gravity, -1.0f, 1.f);
 					vEmitter->SetGravity(Gravity);
-					static float Velocity[3] = { 0, 0, 0.7f};
+					static float Velocity[3] = { 0, 0, 0.0f};
 					//if (!initialized)
 					//	vEmitter->GetVelocity(Velocity);
 					ImGui::SliderFloat3("Velocity", Velocity, -1.0f, 1.f);

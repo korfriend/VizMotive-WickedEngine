@@ -218,11 +218,13 @@ namespace vzm
 
 	public:
 
+		uint64_t FRAMECOUNT = 0;
+
 		float deltaTime = 0;
 		float deltaTimeAccumulator = 0;
-		float targetFrameRate = 60;
+		float targetFrameRate = 60;		//
 		bool frameskip = true;
-		bool framerate_lock = false;
+		bool framerate_lock = false;	//
 		wi::Timer timer;
 		int fps_avg_counter = 0;
 
@@ -664,7 +666,7 @@ namespace vzm
 			graphicsDevice->BindViewports(1, &viewport, cmd);
 			if (wi::initializer::IsInitializeFinished(wi::initializer::INITIALIZED_SYSTEM_FONT))
 			{
-				wi::backlog::DrawOutputText(*this, cmd);
+				wi::backlog::DrawOutputText(*this, cmd, colorspace);
 			}
 			graphicsDevice->RenderPassEnd(cmd);
 			graphicsDevice->SubmitCommandLists();
@@ -717,6 +719,13 @@ namespace vzm
 		VID sceneVid = INVALID_VID;
 		VmWeather vmWeather;
 		std::string name;
+
+		float deltaTime = 0;
+		float deltaTimeAccumulator = 0;
+		float targetFrameRate = 60;
+		bool frameskip = true;
+		bool framerate_lock = false;
+		wi::Timer timer;
 	};
 
 	class SceneManager
@@ -731,7 +740,6 @@ namespace vzm
 		wi::unordered_map<VID, std::unique_ptr<VmBaseComponent>> vmComponents;
 
 	public:
-
 		void Initialize(::vzm::ParamMap<std::string>& argument)
 		{
 			// device creation
@@ -2348,6 +2356,10 @@ namespace vzm
 				sceneManager.CreateVmComp<VmMaterial>(ett);
 			}
 		}
+		//static Scene scene_resPool;
+		//scene_resPool.meshes.Merge(dstScene->meshes);
+		//scene_resPool.Update(0);
+		//int gg = 0;
 	}
 
 	void LoadMeshModelAsync(const VID sceneVid, const std::string& file, const std::string& rootName, const std::function<void(VID rootVid)>& callback)
@@ -2438,7 +2450,7 @@ namespace vzm
 		return rootEntity;
 	}
 
-	VZRESULT Render(const VID camVid, const bool updateScene)
+	VZRESULT RenderOld(const VID camVid, const bool updateScene)
 	{
 		VzmRenderer* renderer = sceneManager.GetRenderer(camVid);
 		if (renderer == nullptr)
@@ -2512,6 +2524,114 @@ namespace vzm
 			renderer->Update(renderer->deltaTime);
 			renderer->PostUpdate();
 			wi::profiler::EndRange(range); // Update
+		}
+
+		{
+			auto range = wi::profiler::BeginRangeCPU("Render");
+			renderer->Render();
+			wi::profiler::EndRange(range); // Render
+		}
+		renderer->RenderFinalize();
+
+		return VZ_OK;
+	}
+
+	VZRESULT Render(const VID camVid, const bool updateScene)
+	{
+		VzmRenderer* renderer = sceneManager.GetRenderer(camVid);
+		if (renderer == nullptr)
+		{
+			return VZ_FAIL;
+		}
+
+		// DOJO TO DO : CHECK updateScene across cameras belonging to a scene and force to use a oldest one...
+		renderer->setSceneUpdateEnabled(updateScene);
+		if (!updateScene)
+		{
+			renderer->scene->camera = *renderer->camera;
+		}
+
+		wi::font::UpdateAtlas(renderer->GetDPIScaling());
+
+		renderer->UpdateVmCamera();
+
+		if (!wi::initializer::IsInitializeFinished())
+		{
+			// Until engine is not loaded, present initialization screen...
+			renderer->WaitRender();
+			return VZ_JOB_WAIT;
+		}
+
+		wi::profiler::BeginFrame();
+
+		VzmScene* scene = (VzmScene*)renderer->scene;
+
+		{
+			scene->deltaTime = float(std::max(0.0, scene->timer.record_elapsed_seconds()));
+			const float target_deltaTime = 1.0f / scene->targetFrameRate;
+			if (scene->framerate_lock && scene->deltaTime < target_deltaTime)
+			{
+				wi::helper::QuickSleep((target_deltaTime - scene->deltaTime) * 1000);
+				scene->deltaTime += float(std::max(0.0, scene->timer.record_elapsed_seconds()));
+			}
+		}
+
+		{
+			// for frame info.
+			renderer->deltaTime = float(std::max(0.0, renderer->timer.record_elapsed_seconds()));
+			const float target_deltaTime = 1.0f / renderer->targetFrameRate;
+			if (renderer->framerate_lock && renderer->deltaTime < target_deltaTime)
+			{
+				wi::helper::QuickSleep((target_deltaTime - renderer->deltaTime) * 1000);
+				renderer->deltaTime += float(std::max(0.0, renderer->timer.record_elapsed_seconds()));
+			}
+		}
+
+		//wi::input::Update(nullptr, *renderer);
+		// Wake up the events that need to be executed on the main thread, in thread safe manner:
+		wi::eventhandler::FireEvent(wi::eventhandler::EVENT_THREAD_SAFE_POINT, 0);
+		renderer->fadeManager.Update(scene->deltaTime);
+
+		renderer->PreUpdate(); // current to previous
+
+		// Fixed time update:
+		{
+			auto range = wi::profiler::BeginRangeCPU("Fixed Update");
+			if (scene->frameskip)
+			{
+				scene->deltaTimeAccumulator += scene->deltaTime;
+				if (scene->deltaTimeAccumulator > 10)
+				{
+					// application probably lost control, fixed update would take too long
+					scene->deltaTimeAccumulator = 0;
+				}
+
+				const float targetFrameRateInv = 1.0f / scene->targetFrameRate;
+				while (scene->deltaTimeAccumulator >= targetFrameRateInv)
+				{
+					renderer->FixedUpdate();
+					scene->deltaTimeAccumulator -= targetFrameRateInv;
+				}
+			}
+			else
+			{
+				renderer->FixedUpdate();
+			}
+			wi::profiler::EndRange(range); // Fixed Update
+		}
+
+		{
+			// use scene->deltaTime
+			auto range = wi::profiler::BeginRangeCPU("Update");
+			wi::backlog::Update(*renderer, scene->deltaTime);
+			renderer->Update(scene->deltaTime);
+			renderer->PostUpdate();
+			wi::profiler::EndRange(range); // Update
+
+			// we ill use the separate framecount for each renderer (not global device)
+			//
+			renderer->FRAMECOUNT++;
+			renderer->frameCB.frame_count = (uint)renderer->FRAMECOUNT;
 		}
 
 		{
