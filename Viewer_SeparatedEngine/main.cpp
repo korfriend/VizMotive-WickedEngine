@@ -163,9 +163,9 @@ int main(int, char**)
 
 		{
 			static bool callbackLoadModel_Finished = false;
-			static VID sid = 0, cid = 0, cid_ani = 0;
-			static VID eid = 0, mid = 0, lid = 0;
-			static vzm::ArcBall arcball;
+			static VID sid = 0, sid_file = 0, cid = 0, cid_ani = 0;
+			static VID eid = 0, lid = 0, ani_id = 0, aid_body = 0;
+			static vzm::OrbitalControl orbitControl, orbitControlAni;
 			static ImVec2 wh(512, 512);
 			if (sid == 0)
 			{
@@ -200,56 +200,87 @@ int main(int, char**)
 				glm::fvec3 pos(0, 2, 2), up(0, 1, 0), at(0, 0, 0);
 				glm::fvec3 view = at - pos;
 				vCam->SetPose(__FP pos, __FP view, __FP up);
-				vCam->SetPerspectiveProjection(0.1f, 5000.f, glm::pi<float>() * 0.4f, 1.f);
+				vCam->SetPerspectiveProjection(0.1f, 5000.f, glm::pi<float>() * 0.25f, 1.f);
 
-				arcball.Intializer(__FP at, 2.f);
-
-				auto callbackLoadModel = [&](VID rootVid)
+				auto callbackLoadModel = [&](VID sceneVid, VID rootVid)
 					{
-						std::vector<VID> camIds;
-						vzm::GetSceneCompoenentVids(vzm::COMPONENT_TYPE::CAMERA, sid, camIds);
-						for (VID id : camIds)
-						{
-							if (id != cid)
-							{
-								vzm::VmCamera* vCamNew = (vzm::VmCamera*)vzm::GetComponent(vzm::COMPONENT_TYPE::CAMERA, id);
-								vCamNew->GetPose(__FP pos, __FP view, __FP up);
-								vCam->SetPose(__FP pos, __FP view, __FP up);
-								vCamNew->SetCanvasSize(wh.x, wh.y, 96.f);
-								cid_ani = id;
-								break;
-							}
-						}
-						
-						VID aid_backTire = vzm::GetFirstVidByName("back_tire_d");
-						{
-							eid = vzm::NewSceneComponent(vzm::COMPONENT_TYPE::EMITTER, sid, "grapicar emitter", aid_backTire);
-						}
-						if (eid != INVALID_VID)
-						{
-							vzm::VmEmitter* vEmitter = (vzm::VmEmitter*)vzm::GetComponent(vzm::COMPONENT_TYPE::EMITTER, eid);
-							mid = vzm::GetFirstVidByName("back_tire");
-							vEmitter->SetMeshVid(mid);
-
-							// add plane collider
-							vzm::VmCollider* collider = nullptr;
-							VID colliderId = vzm::NewSceneComponent(vzm::COMPONENT_TYPE::COLLIDER, sid, "road collider", 0, CMPP(collider));
-							collider->SetGPUEnabled(true);
-							collider->SetRadius(1000.f);
-							collider->SetShape(vzm::VmCollider::Shape::Plane);
-						}
+						sid_file = sceneVid;
 						callbackLoadModel_Finished = true;
 					};
 
-				//callbackLoadModel(vzm::LoadMeshModel(sid, "D:\\data\\car_gltf\\ioniq.gltf", "my obj"));
-				vzm::LoadMeshModelAsync(sid, "D:\\data\\car_gltf\\ioniq.gltf", "my obj", callbackLoadModel);
-				//vzm::LoadMeshModel(sid, "D:\\VisMotive\\data\\obj files\\skull\\12140_Skull_v3_L2.obj", "my obj");
+				//callbackLoadModel(vzm::LoadMeshModel("D:\\data\\car_gltf\\ioniq.gltf", "my file scene", "my gltf root"));
+				vzm::LoadFileIntoNewSceneAsync("D:\\data\\car_gltf\\ioniq.gltf", "my file scene", "my gltf root", callbackLoadModel);
+				//vzm::LoadMeshModel("D:\\VisMotive\\data\\obj files\\skull\\12140_Skull_v3_L2.obj", "my file scene", "my obj");
+			}
+
+			if (sid_file != INVALID_VID)
+			{
+				vzm::MergeScenes(sid_file, sid);
+				sid_file = INVALID_VID;
+
+				std::vector<VID> camIds;
+				vzm::GetSceneCompoenentVids(vzm::COMPONENT_TYPE::CAMERA, sid, camIds);
+				for (VID id : camIds)
+				{
+					if (id != cid)
+					{
+						vzm::VmCamera* vCam = (vzm::VmCamera*)vzm::GetComponent(vzm::COMPONENT_TYPE::CAMERA, cid);
+						vzm::VmCamera* vCamNew = (vzm::VmCamera*)vzm::GetComponent(vzm::COMPONENT_TYPE::CAMERA, id);
+						glm::fvec3 pos, up, view;
+						vCamNew->GetPose(__FP pos, __FP view, __FP up);
+						vCam->SetPose(__FP pos, __FP view, __FP up);
+						vCamNew->SetCanvasSize(wh.x, wh.y, 96.f);
+
+						float zNearP, zFarP, fovY, aspectRatio;
+						vCamNew->GetPerspectiveProjection(&zNearP, &zFarP, &fovY, &aspectRatio);
+						vCam->SetPerspectiveProjection(zNearP, zFarP, fovY, aspectRatio);
+						cid_ani = id;
+						break;
+					}
+				}
+
+				VID aid_backTire = vzm::GetFirstVidByName("back_tire_d");
+				if (aid_backTire != INVALID_VID)
+				{
+					eid = vzm::NewSceneComponent(vzm::COMPONENT_TYPE::EMITTER, sid, "grapicar emitter", aid_backTire);
+					vzm::VmEmitter* vEmitter = (vzm::VmEmitter*)vzm::GetComponent(vzm::COMPONENT_TYPE::EMITTER, eid);
+					VID mid = vzm::GetFirstVidByName("back_tire");
+					vEmitter->SetMeshVid(mid);
+
+					// add plane collider
+					vzm::VmCollider* collider = nullptr;
+					VID colliderId = vzm::NewSceneComponent(vzm::COMPONENT_TYPE::COLLIDER, sid, "road collider", 0, CMPP(collider));
+					collider->SetGPUEnabled(true);
+					collider->SetRadius(1000.f);
+					collider->SetShape(vzm::VmCollider::Shape::Plane);
+				}
+
+
+				std::vector<VID> aniComponentes;
+				if (vzm::GetSceneCompoenentVids(vzm::COMPONENT_TYPE::ANIMATION, sid, aniComponentes) > 0u)
+				{
+					ani_id = aniComponentes[0];
+				}
+
+				aid_body = vzm::GetFirstVidByName("body_m");
+			}
+
+			auto aniComp = (vzm::VmAnimation*)vzm::GetComponent(vzm::COMPONENT_TYPE::ANIMATION, ani_id);
+			glm::fvec3 at(0);
+			if (aniComp && callbackLoadModel_Finished)
+			{
+				auto camComp = vzm::GetComponent(vzm::COMPONENT_TYPE::BASE, cid);
+				if (camComp->GetParentVid() != aid_body)
+				{
+					vzm::AppendComponentTo(cid, aid_body);
+				}
+
+				vzm::VmBaseComponent* bodyBase = vzm::GetComponent(vzm::COMPONENT_TYPE::BASE, aid_body);
+				bodyBase->GetWorldPosition(__FP at);
 			}
 
 			ImGui::Begin("Arcball Viewer");
 			{
-				// Note that we pass the GPU SRV handle here, *not* the CPU handle. We're passing the internal pointer value, cast to an ImTextureID
-
 				static ImVec2 prevWindowSize = ImVec2(0, 0);
 				ImVec2 curWindowSize = ImGui::GetWindowSize();
 
@@ -259,8 +290,6 @@ int main(int, char**)
 				bool resized = prevWindowSize.x != curWindowSize.x || prevWindowSize.y != curWindowSize.y;
 				prevWindowSize = curWindowSize;
 
-				ImVec2 winPos = ImGui::GetWindowPos();
-				ImVec2 curItemPos = ImGui::GetCursorPos();
 				if (resized)
 				{
 					vzm::VmCamera* vCam = (vzm::VmCamera*)vzm::GetComponent(vzm::COMPONENT_TYPE::CAMERA, cid);
@@ -269,12 +298,16 @@ int main(int, char**)
 					vCam->SetCanvasSize(canvas_size.x, canvas_size.y, 96.f);
 					wh = canvas_size;
 				}
+				ImVec2 winPos = ImGui::GetWindowPos();
+				ImVec2 curItemPos = ImGui::GetCursorPos();
 				ImGui::InvisibleButton("render window", wh, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
 				ImGui::SetItemAllowOverlap();
 
-				const bool is_hovered = ImGui::IsItemHovered(); // Hovered
-				const bool is_active = ImGui::IsItemActive();   // Held
+				bool is_hovered = ImGui::IsItemHovered(); // Hovered
+				bool is_active = ImGui::IsItemActive();   // Held
 
+				vzm::VmCamera* vCam = (vzm::VmCamera*)vzm::GetComponent(vzm::COMPONENT_TYPE::CAMERA, cid);
+				if (aniComp) is_hovered = is_hovered && !aniComp->IsPlaying();
 				if (is_hovered && !resized)
 				{
 					static glm::fvec2 __prevMousePos(0);
@@ -282,29 +315,28 @@ int main(int, char**)
 					glm::fvec2 s_pos = *(glm::fvec2*)&curItemPos;
 					glm::fvec2 w_pos = *(glm::fvec2*)&winPos;
 					glm::fvec2 m_pos = ioPos - s_pos - w_pos;
-					glm::ivec2 pos_ss = m_pos;
+					glm::fvec2 pos_ss = m_pos;
 
-					vzm::VmCamera* vCam = (vzm::VmCamera*)vzm::GetComponent(vzm::COMPONENT_TYPE::CAMERA, cid);
-					glm::fvec3 pos, view, up;
-					vCam->GetPose(__FP pos, __FP view, __FP up);
+					orbitControl.SetTargetCam(cid, __FP at, 2.f);
 
 					if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Right))
 					{
 						float np, fp;
 						vCam->GetPerspectiveProjection(&np, &fp, NULL, NULL);
-						arcball.Start((int*)&pos_ss, __FP wh, __FP pos, __FP view, __FP up, np, fp);
+						orbitControl.Start(__FP pos_ss);
 					}
 					else if ((ImGui::IsMouseDragging(ImGuiMouseButton_Left, 1.f) || ImGui::IsMouseDragging(ImGuiMouseButton_Right, 1.f))
 						&& glm::length2(__prevMousePos - m_pos) > 0)
 					{
 						if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
-							arcball.PanMove((int*)&pos_ss, __FP pos, __FP view, __FP up);
+							orbitControl.PanMove(__FP pos_ss);
 						else
-							arcball.Move((int*)&pos_ss, __FP pos, __FP view, __FP up);
-						vCam->SetPose(__FP pos, __FP view, __FP up);
+							orbitControl.Move(__FP pos_ss);
 					}
 					else if (io.MouseWheel != 0)
 					{
+						glm::fvec3 pos, view, up;
+						vCam->GetPose(__FP pos, __FP view, __FP up);
 						if (io.MouseWheel > 0)
 							pos += 0.2f * view;
 						else
@@ -313,6 +345,7 @@ int main(int, char**)
 					}
 					__prevMousePos = pos_ss;
 				}
+				
 				ImGui::SetCursorPos(curItemPos);
 
 				vzm::Render(cid, true);
@@ -326,35 +359,8 @@ int main(int, char**)
 
 
 			ImGui::Begin("Animation");
-			if (callbackLoadModel_Finished)
+			if (callbackLoadModel_Finished && cid_ani != INVALID_VID)
 			{
-				VID aid = vzm::GetFirstVidByName("back_tire_d");
-				vzm::VmBaseComponent* group = (vzm::VmBaseComponent*)vzm::GetComponent(vzm::COMPONENT_TYPE::BASE, aid);
-				if (group)
-				{
-					glm::fmat4x4 matT;
-					group->GetWorldTransform(__FP matT);
-					glm::fvec4 p = matT * glm::fvec4(0, 0, 0, 1);
-					p.x /= p.w;
-					p.y /= p.w;
-					p.z /= p.w;
-				}
-
-				VID aid1 = vzm::GetFirstVidByName("road collider");
-				vzm::VmBaseComponent* collider = (vzm::VmBaseComponent*)vzm::GetComponent(vzm::COMPONENT_TYPE::BASE, aid1);
-				if (collider)
-				{
-					glm::fmat4x4 matT;
-					collider->GetWorldTransform(__FP matT);
-					glm::fvec4 p = matT * glm::fvec4(0, 0, 0, 1);
-					p.x /= p.w;
-					p.y /= p.w;
-					p.z /= p.w;
-				}
-				
-
-				// Note that we pass the GPU SRV handle here, *not* the CPU handle. We're passing the internal pointer value, cast to an ImTextureID
-
 				static ImVec2 prevWindowSize2 = ImVec2(0, 0);
 				ImVec2 curWindowSize2 = ImGui::GetWindowSize();
 
@@ -365,13 +371,61 @@ int main(int, char**)
 				prevWindowSize2 = curWindowSize2;
 				if (resized)
 				{
-					vzm::VmCamera* vCam = (vzm::VmCamera*)vzm::GetComponent(vzm::COMPONENT_TYPE::CAMERA, cid_ani);
+					vzm::VmCamera* vCamAni = (vzm::VmCamera*)vzm::GetComponent(vzm::COMPONENT_TYPE::CAMERA, cid_ani);
 					ImVec2 canvas_size = ImGui::GetContentRegionAvail();
-					vCam->SetCanvasSize(canvas_size.x, std::max(canvas_size.y, 1.f), 96.f);
+					vCamAni->SetCanvasSize(canvas_size.x, std::max(canvas_size.y, 1.f), 96.f);
 				}
+				ImVec2 winPos = ImGui::GetWindowPos();
+				ImVec2 curItemPos = ImGui::GetCursorPos();
+				ImGui::InvisibleButton("render window", wh, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+				ImGui::SetItemAllowOverlap();
+
+				orbitControlAni.SetTargetCam(cid_ani, __FP at, 2.f);
+
+				vzm::VmCamera* vCamAni = (vzm::VmCamera*)vzm::GetComponent(vzm::COMPONENT_TYPE::CAMERA, cid_ani);
+				bool is_hovered = ImGui::IsItemHovered(); // Hovered
+				bool is_active = ImGui::IsItemActive();   // Held
+				if (aniComp) is_hovered = is_hovered && !aniComp->IsPlaying();
+				if (is_hovered && !resized)
+				{
+					static glm::fvec2 __prevMousePos(0);
+					glm::fvec2 ioPos = *(glm::fvec2*)&io.MousePos;
+					glm::fvec2 s_pos = *(glm::fvec2*)&curItemPos;
+					glm::fvec2 w_pos = *(glm::fvec2*)&winPos;
+					glm::fvec2 m_pos = ioPos - s_pos - w_pos;
+					glm::fvec2 pos_ss = m_pos;
+
+					if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+					{
+						float np, fp;
+						vCamAni->GetPerspectiveProjection(&np, &fp, NULL, NULL);
+						orbitControlAni.Start(__FP pos_ss);
+					}
+					else if ((ImGui::IsMouseDragging(ImGuiMouseButton_Left, 1.f) || ImGui::IsMouseDragging(ImGuiMouseButton_Right, 1.f))
+						&& glm::length2(__prevMousePos - m_pos) > 0)
+					{
+						if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
+							orbitControlAni.PanMove(__FP pos_ss);
+						else
+							orbitControlAni.Move(__FP pos_ss);
+					}
+					else if (io.MouseWheel != 0)
+					{
+						glm::fvec3 pos, view, up;
+						vCamAni->GetPose(__FP pos, __FP view, __FP up);
+						if (io.MouseWheel > 0)
+							pos += 0.2f * view;
+						else
+							pos -= 0.2f * view;
+						vCamAni->SetPose(__FP pos, __FP view, __FP up);
+					}
+					__prevMousePos = pos_ss;
+				}
+				ImGui::SetCursorPos(curItemPos);
 
 				vzm::Render(cid_ani, true);
 
+				// Note that we pass the GPU SRV handle here, *not* the CPU handle. We're passing the internal pointer value, cast to an ImTextureID
 				uint32_t w, h;
 				ImTextureID texId = vzm::GetGraphicsSharedRenderTarget(cid_ani, g_pd3dDevice, g_pd3dSrvDescHeap, 2, &w, &h);
 				// https://github.com/ocornut/imgui/wiki/Image-Loading-and-Displaying-Examples
@@ -384,15 +438,6 @@ int main(int, char**)
 				if (ImGui::Button("Shader Reload"))
 				{
 					vzm::ReloadShader();
-				}
-				vzm::VmAnimation* aniComp = nullptr;
-				std::vector<VID> aniComponentes;
-				if (vzm::GetSceneCompoenentVids(vzm::COMPONENT_TYPE::ANIMATION, sid, aniComponentes) > 0u)
-				{
-					for (size_t i = 0; i < aniComponentes.size(); i++)
-					{
-						aniComp = (vzm::VmAnimation*)vzm::GetComponent(vzm::COMPONENT_TYPE::ANIMATION, aniComponentes[i]);
-					}
 				}
 				if (aniComp)
 				{
