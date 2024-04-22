@@ -1,6 +1,6 @@
 #pragma once
 #define __dojostatic extern "C" __declspec(dllexport)
-#define __dojoclass class //__declspec(dllexport)
+#define __dojoclass class __declspec(dllexport)
 #define __dojostruct struct __declspec(dllexport)
 
 #define __FP (float*)&
@@ -136,7 +136,7 @@ namespace vzm
 		COLLIDER
 	};
 
-	struct VmBaseComponent
+	__dojostruct VmBaseComponent
 	{
 		VID componentVID = INVALID_VID;
 		COMPONENT_TYPE compType = COMPONENT_TYPE::UNDEFINED;
@@ -160,8 +160,8 @@ namespace vzm
 
 		VID GetParentVid();
 	};
-	struct VmRenderer;
-	struct VmCamera : VmBaseComponent
+	__dojostruct VmRenderer;
+	__dojostruct VmCamera : VmBaseComponent
 	{
 		VmRenderer* renderer = nullptr;
 		// Pose parameters are defined in WS (not local space)
@@ -172,18 +172,18 @@ namespace vzm
 		void GetPerspectiveProjection(float* zNearP, float* zFarP, float* fovY, float* aspectRatio);
 		void GetCanvasSize(float* w, float* h, float* dpi);
 	};
-	struct VmActor : VmBaseComponent
+	__dojostruct VmActor : VmBaseComponent
 	{
 		// 
 	};
-	struct VmMesh : VmBaseComponent
+	__dojostruct VmMesh : VmBaseComponent
 	{
 		//  
 	};
-	struct VmMaterial : VmBaseComponent
+	__dojostruct VmMaterial : VmBaseComponent
 	{
 	};
-	struct VmEmitter : VmBaseComponent
+	__dojostruct VmEmitter : VmBaseComponent
 	{
 		struct ParticleCounters
 		{
@@ -284,7 +284,7 @@ namespace vzm
 		void SetCollidersDisabled(const bool value);
 		void SetTakeColorFromMesh(const bool value);
 	};
-	struct VmLight : VmBaseComponent
+	__dojostruct VmLight : VmBaseComponent
 	{
 		void SetColor(const float value[3]);
 		void SetIntensity(const float value);
@@ -319,7 +319,7 @@ namespace vzm
 		void SetType(const LightType val);
 		LightType GetType();
 	};
-	struct VmWeather : VmBaseComponent
+	__dojostruct VmWeather : VmBaseComponent
 	{
 		void SetWeatherPreset(const uint32_t index);
 
@@ -369,7 +369,7 @@ namespace vzm
 		void SetRainSplashScale(const float value);
 		void SetRainColor(const float value[4]);
 	};
-	struct VmAnimation : VmBaseComponent
+	__dojostruct VmAnimation : VmBaseComponent
 	{
 		bool IsPlaying();
 		bool IsLooped();
@@ -382,7 +382,7 @@ namespace vzm
 		void SetLooped(const bool value);
 		void SetRootMotion(const bool value);
 	};
-	struct VmCollider : VmBaseComponent
+	__dojostruct VmCollider : VmBaseComponent
 	{
 		enum class Shape
 		{

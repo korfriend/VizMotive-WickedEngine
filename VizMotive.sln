@@ -190,7 +190,6 @@ Global
 		SolutionGuid = {E3FF044A-B72E-4ED5-BE05-AB641BA048CD}
 	EndGlobalSection
 	GlobalSection(SharedMSBuildProjectFiles) = preSolution
-		Editor\Editor_SOURCE.vcxitems*{06163dcb-b183-4ed9-9c62-13ef1658e049}*SharedItemsImports = 4
 		WickedEngine\WickedEngine_SOURCE.vcxitems*{06163dcb-b183-4ed9-9c62-13ef1658e049}*SharedItemsImports = 4
 		WickedEngine\WickedEngine_SOURCE.vcxitems*{45d41acc-2c3c-43d2-bc10-02aa73ffc7c7}*SharedItemsImports = 9
 		Editor\Editor_SOURCE.vcxitems*{5fe97b9b-a445-4eea-a42d-9de60b891d48}*SharedItemsImports = 4

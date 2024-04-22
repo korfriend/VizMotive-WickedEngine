@@ -56,6 +56,7 @@ namespace wi::jobsystem
 
 	};
 
+	static bool alreadyShutDown = false;
 	// This structure is responsible to stop worker thread loops.
 	//	Once this is destroyed, worker threads will be woken up and end their loops.
 	struct InternalState
@@ -88,10 +89,14 @@ namespace wi::jobsystem
 			threads.clear();
 			numCores = 0;
 			numThreads = 0;
+			alreadyShutDown = true;
 		}
 		~InternalState()
 		{
-			ShutDown();
+			if (!alreadyShutDown)
+			{
+				ShutDown();
+			}
 		}
 	} static internal_state;
 
