@@ -239,7 +239,7 @@ namespace arcball
 			XMMATRIX mat_trs_1 = XMMatrixTranslationFromVector(__posArcballCenter);
 			XMMATRIX mat_trs_0 = XMMatrixTranslationFromVector(-__posArcballCenter);
 
-			matRotatedWS = mat_trs_1 * mat_rot * mat_trs_0;
+			matRotatedWS = mat_trs_0 * mat_rot * mat_trs_1;
 
 			if (isInvert)
 				angle *= -1;
