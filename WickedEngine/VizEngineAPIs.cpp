@@ -7,6 +7,8 @@
 
 #include "../Editor/ModelImporter.h"
 
+#include <iostream>
+
 using namespace wi::ecs;
 using namespace wi::scene;
 
@@ -226,7 +228,10 @@ namespace vzm
 		bool frameskip = true;
 		bool framerate_lock = false;	//
 		wi::Timer timer;
+
 		int fps_avg_counter = 0;
+		float		time;
+		float		time_previous;
 
 		wi::FadeManager fadeManager;
 
@@ -327,7 +332,441 @@ namespace vzm
 
 		void Update(float dt) override
 		{
-			RenderPath3D::Update(dt);	// calls RenderPath2D::Update(dt);
+			// RenderPath3D::Update(dt);	// calls RenderPath2D::Update(dt);
+			using namespace wi::graphics;
+
+			GraphicsDevice* device = wi::graphics::GetDevice();
+
+			if (rtMain_render.desc.sample_count != getMSAASampleCount())
+			{
+				ResizeBuffers();
+			}
+
+			RenderPath2D::Update(dt); // animation update... so using scene's dt
+
+			const bool hw_raytrace = device->CheckCapability(GraphicsDeviceCapability::RAYTRACING);
+			if (getSceneUpdateEnabled())
+			{
+				if (wi::renderer::GetSurfelGIEnabled() ||
+					wi::renderer::GetDDGIEnabled() ||
+					(hw_raytrace && wi::renderer::GetRaytracedShadowsEnabled()) ||
+					(hw_raytrace && getAO() == AO_RTAO) ||
+					(hw_raytrace && getRaytracedReflectionEnabled()) ||
+					(hw_raytrace && getRaytracedDiffuseEnabled())
+					)
+				{
+					scene->SetAccelerationStructureUpdateRequested(true);
+				}
+
+				scene->camera = *camera;
+				scene->Update(dt * wi::renderer::GetGameSpeed()); // scene's dt
+			}
+
+			// Frustum culling for main camera:
+			visibility_main.layerMask = getLayerMask();
+			visibility_main.scene = scene;
+			visibility_main.camera = camera;
+			visibility_main.flags = wi::renderer::Visibility::ALLOW_EVERYTHING;
+			if (!getOcclusionCullingEnabled())
+			{
+				visibility_main.flags &= ~wi::renderer::Visibility::ALLOW_OCCLUSION_CULLING;
+			}
+			wi::renderer::UpdateVisibility(visibility_main);
+
+			if (visibility_main.planar_reflection_visible)
+			{
+				// Frustum culling for planar reflections:
+				camera_reflection = *camera;
+				camera_reflection.jitter = XMFLOAT2(0, 0);
+				camera_reflection.Reflect(visibility_main.reflectionPlane);
+				visibility_reflection.layerMask = getLayerMask();
+				visibility_reflection.scene = scene;
+				visibility_reflection.camera = &camera_reflection;
+				visibility_reflection.flags =
+					wi::renderer::Visibility::ALLOW_OBJECTS |
+					wi::renderer::Visibility::ALLOW_EMITTERS |
+					wi::renderer::Visibility::ALLOW_HAIRS |
+					wi::renderer::Visibility::ALLOW_LIGHTS
+					;
+				wi::renderer::UpdateVisibility(visibility_reflection);
+			}
+
+			XMUINT2 internalResolution = GetInternalResolution();
+
+			wi::renderer::UpdatePerFrameData(
+				*scene,
+				visibility_main,
+				frameCB,
+				getSceneUpdateEnabled() ? deltaTime : 0 // dt 는 renderer dt 이어야 한다.
+			);
+
+			if (getFSR2Enabled())
+			{
+				camera->jitter = fsr2Resources.GetJitter();
+				camera_reflection.jitter.x = camera->jitter.x * 2;
+				camera_reflection.jitter.y = camera->jitter.x * 2;
+			}
+			else if (wi::renderer::GetTemporalAAEnabled())
+			{
+				const XMFLOAT4& halton = wi::math::GetHaltonSequence(wi::graphics::GetDevice()->GetFrameCount() % 256);
+				camera->jitter.x = (halton.x * 2 - 1) / (float)internalResolution.x;
+				camera->jitter.y = (halton.y * 2 - 1) / (float)internalResolution.y;
+				camera_reflection.jitter.x = camera->jitter.x * 2;
+				camera_reflection.jitter.y = camera->jitter.x * 2;
+				if (!temporalAAResources.IsValid())
+				{
+					wi::renderer::CreateTemporalAAResources(temporalAAResources, internalResolution);
+				}
+			}
+			else
+			{
+				camera->jitter = XMFLOAT2(0, 0);
+				camera_reflection.jitter = XMFLOAT2(0, 0);
+				temporalAAResources = {};
+			}
+
+			camera->UpdateCamera();
+			if (visibility_main.planar_reflection_visible)
+			{
+				camera_reflection.UpdateCamera();
+			}
+
+			if (getAO() != AO_RTAO)
+			{
+				rtaoResources.frame = 0;
+			}
+			if (!wi::renderer::GetRaytracedShadowsEnabled())
+			{
+				rtshadowResources.frame = 0;
+			}
+			if (!getSSREnabled() && !getRaytracedReflectionEnabled())
+			{
+				rtSSR = {};
+			}
+			if (!getSSGIEnabled())
+			{
+				rtSSGI = {};
+			}
+			if (!getRaytracedDiffuseEnabled())
+			{
+				rtRaytracedDiffuse = {};
+			}
+			if (getAO() == AO_DISABLED)
+			{
+				rtAO = {};
+			}
+
+			if (wi::renderer::GetRaytracedShadowsEnabled() && device->CheckCapability(GraphicsDeviceCapability::RAYTRACING))
+			{
+				if (!rtshadowResources.denoised.IsValid())
+				{
+					wi::renderer::CreateRTShadowResources(rtshadowResources, internalResolution);
+				}
+			}
+			else
+			{
+				rtshadowResources = {};
+			}
+
+			if (scene->weather.IsRealisticSky() && scene->weather.IsRealisticSkyAerialPerspective())
+			{
+				if (!aerialperspectiveResources.texture_output.IsValid())
+				{
+					wi::renderer::CreateAerialPerspectiveResources(aerialperspectiveResources, internalResolution);
+				}
+				if (getReflectionsEnabled() && depthBuffer_Reflection.IsValid())
+				{
+					if (!aerialperspectiveResources_reflection.texture_output.IsValid())
+					{
+						wi::renderer::CreateAerialPerspectiveResources(aerialperspectiveResources_reflection, XMUINT2(depthBuffer_Reflection.desc.width, depthBuffer_Reflection.desc.height));
+					}
+				}
+				else
+				{
+					aerialperspectiveResources_reflection = {};
+				}
+			}
+			else
+			{
+				aerialperspectiveResources = {};
+			}
+
+			if (scene->weather.IsVolumetricClouds())
+			{
+				if (!volumetriccloudResources.texture_cloudRender.IsValid())
+				{
+					wi::renderer::CreateVolumetricCloudResources(volumetriccloudResources, internalResolution);
+				}
+				if (getReflectionsEnabled() && depthBuffer_Reflection.IsValid())
+				{
+					if (!volumetriccloudResources_reflection.texture_cloudRender.IsValid())
+					{
+						wi::renderer::CreateVolumetricCloudResources(volumetriccloudResources_reflection, XMUINT2(depthBuffer_Reflection.desc.width, depthBuffer_Reflection.desc.height));
+					}
+				}
+				else
+				{
+					volumetriccloudResources_reflection = {};
+				}
+			}
+			else
+			{
+				volumetriccloudResources = {};
+			}
+
+			if (!scene->waterRipples.empty())
+			{
+				if (!rtWaterRipple.IsValid())
+				{
+					TextureDesc desc;
+					desc.bind_flags = BindFlag::RENDER_TARGET | BindFlag::SHADER_RESOURCE;
+					desc.format = Format::R16G16_FLOAT;
+					desc.width = internalResolution.x / 8;
+					desc.height = internalResolution.y / 8;
+					assert(ComputeTextureMemorySizeInBytes(desc) <= ComputeTextureMemorySizeInBytes(rtParticleDistortion.desc)); // aliasing check
+					device->CreateTexture(&desc, nullptr, &rtWaterRipple, &rtParticleDistortion); // aliased!
+					device->SetName(&rtWaterRipple, "rtWaterRipple");
+				}
+			}
+			else
+			{
+				rtWaterRipple = {};
+			}
+
+			if (wi::renderer::GetSurfelGIEnabled())
+			{
+				if (!surfelGIResources.result.IsValid())
+				{
+					wi::renderer::CreateSurfelGIResources(surfelGIResources, internalResolution);
+				}
+			}
+
+			if (wi::renderer::GetVXGIEnabled())
+			{
+				if (!vxgiResources.IsValid())
+				{
+					wi::renderer::CreateVXGIResources(vxgiResources, internalResolution);
+				}
+			}
+			else
+			{
+				vxgiResources = {};
+			}
+
+			// Check whether velocity buffer is required:
+			if (
+				getMotionBlurEnabled() ||
+				wi::renderer::GetTemporalAAEnabled() ||
+				getSSREnabled() ||
+				getSSGIEnabled() ||
+				getRaytracedReflectionEnabled() ||
+				getRaytracedDiffuseEnabled() ||
+				wi::renderer::GetRaytracedShadowsEnabled() ||
+				getAO() == AO::AO_RTAO ||
+				wi::renderer::GetVariableRateShadingClassification() ||
+				getFSR2Enabled()
+				)
+			{
+				if (!rtVelocity.IsValid())
+				{
+					TextureDesc desc;
+					desc.format = Format::R16G16_FLOAT;
+					desc.bind_flags = BindFlag::SHADER_RESOURCE | BindFlag::UNORDERED_ACCESS | BindFlag::RENDER_TARGET;
+					desc.width = internalResolution.x;
+					desc.height = internalResolution.y;
+					desc.layout = ResourceState::SHADER_RESOURCE_COMPUTE;
+					device->CreateTexture(&desc, nullptr, &rtVelocity);
+					device->SetName(&rtVelocity, "rtVelocity");
+				}
+			}
+			else
+			{
+				rtVelocity = {};
+			}
+
+			// Check whether shadow mask is required:
+			if (wi::renderer::GetScreenSpaceShadowsEnabled() || wi::renderer::GetRaytracedShadowsEnabled())
+			{
+				if (!rtShadow.IsValid())
+				{
+					TextureDesc desc;
+					desc.bind_flags = BindFlag::SHADER_RESOURCE | BindFlag::UNORDERED_ACCESS;
+					desc.format = Format::R32G32B32A32_UINT;
+					desc.width = internalResolution.x;
+					desc.height = internalResolution.y;
+					desc.layout = ResourceState::SHADER_RESOURCE_COMPUTE;
+					device->CreateTexture(&desc, nullptr, &rtShadow);
+					device->SetName(&rtShadow, "rtShadow");
+				}
+			}
+			else
+			{
+				rtShadow = {};
+			}
+
+			if (getFSR2Enabled())
+			{
+				// FSR2 also acts as a temporal AA, so we inform the shaders about it here
+				//	This will allow improved stochastic alpha test transparency
+				frameCB.options |= OPTION_BIT_TEMPORALAA_ENABLED;
+				uint x = frameCB.frame_count % 4;
+				uint y = frameCB.frame_count / 4;
+				frameCB.temporalaa_samplerotation = (x & 0x000000FF) | ((y & 0x000000FF) << 8);
+			}
+
+			// Check whether visibility resources are required:
+			if (
+				visibility_shading_in_compute ||
+				getSSREnabled() ||
+				getSSGIEnabled() ||
+				getRaytracedReflectionEnabled() ||
+				getRaytracedDiffuseEnabled() ||
+				wi::renderer::GetScreenSpaceShadowsEnabled() ||
+				wi::renderer::GetRaytracedShadowsEnabled() ||
+				wi::renderer::GetVXGIEnabled()
+				)
+			{
+				if (!visibilityResources.IsValid())
+				{
+					wi::renderer::CreateVisibilityResources(visibilityResources, internalResolution);
+				}
+			}
+			else
+			{
+				visibilityResources = {};
+			}
+
+			// Check for depth of field allocation:
+			if (getDepthOfFieldEnabled() &&
+				getDepthOfFieldStrength() > 0 &&
+				camera->aperture_size > 0
+				)
+			{
+				if (!depthoffieldResources.IsValid())
+				{
+					XMUINT2 resolution = GetInternalResolution();
+					if (getFSR2Enabled())
+					{
+						resolution = XMUINT2(GetPhysicalWidth(), GetPhysicalHeight());
+					}
+					wi::renderer::CreateDepthOfFieldResources(depthoffieldResources, resolution);
+				}
+			}
+			else
+			{
+				depthoffieldResources = {};
+			}
+
+			// Check for motion blur allocation:
+			if (getMotionBlurEnabled() && getMotionBlurStrength() > 0)
+			{
+				if (!motionblurResources.IsValid())
+				{
+					XMUINT2 resolution = GetInternalResolution();
+					if (getFSR2Enabled())
+					{
+						resolution = XMUINT2(GetPhysicalWidth(), GetPhysicalHeight());
+					}
+					wi::renderer::CreateMotionBlurResources(motionblurResources, resolution);
+				}
+			}
+			else
+			{
+				motionblurResources = {};
+			}
+
+			// Keep a copy of last frame's depth buffer for temporal disocclusion checks, so swap with current one every frame:
+			std::swap(depthBuffer_Copy, depthBuffer_Copy1);
+
+			visibilityResources.depthbuffer = &depthBuffer_Copy;
+			visibilityResources.lineardepth = &rtLinearDepth;
+			if (getMSAASampleCount() > 1)
+			{
+				visibilityResources.primitiveID_resolved = &rtPrimitiveID;
+			}
+			else
+			{
+				visibilityResources.primitiveID_resolved = nullptr;
+			}
+
+			camera->canvas.init(*this);
+			camera->width = (float)internalResolution.x;
+			camera->height = (float)internalResolution.y;
+			camera->scissor = GetScissorInternalResolution();
+			camera->sample_count = depthBuffer_Main.desc.sample_count;
+			camera->texture_primitiveID_index = device->GetDescriptorIndex(&rtPrimitiveID, SubresourceType::SRV);
+			camera->texture_depth_index = device->GetDescriptorIndex(&depthBuffer_Copy, SubresourceType::SRV);
+			camera->texture_lineardepth_index = device->GetDescriptorIndex(&rtLinearDepth, SubresourceType::SRV);
+			camera->texture_velocity_index = device->GetDescriptorIndex(&rtVelocity, SubresourceType::SRV);
+			camera->texture_normal_index = device->GetDescriptorIndex(&visibilityResources.texture_normals, SubresourceType::SRV);
+			camera->texture_roughness_index = device->GetDescriptorIndex(&visibilityResources.texture_roughness, SubresourceType::SRV);
+			camera->buffer_entitytiles_index = device->GetDescriptorIndex(&tiledLightResources.entityTiles, SubresourceType::SRV);
+			camera->texture_reflection_index = device->GetDescriptorIndex(&rtReflection, SubresourceType::SRV);
+			camera->texture_reflection_depth_index = device->GetDescriptorIndex(&depthBuffer_Reflection, SubresourceType::SRV);
+			camera->texture_refraction_index = device->GetDescriptorIndex(&rtSceneCopy, SubresourceType::SRV);
+			camera->texture_waterriples_index = device->GetDescriptorIndex(&rtWaterRipple, SubresourceType::SRV);
+			camera->texture_ao_index = device->GetDescriptorIndex(&rtAO, SubresourceType::SRV);
+			camera->texture_ssr_index = device->GetDescriptorIndex(&rtSSR, SubresourceType::SRV);
+			camera->texture_ssgi_index = device->GetDescriptorIndex(&rtSSGI, SubresourceType::SRV);
+			camera->texture_rtshadow_index = device->GetDescriptorIndex(&rtShadow, SubresourceType::SRV);
+			camera->texture_rtdiffuse_index = device->GetDescriptorIndex(&rtRaytracedDiffuse, SubresourceType::SRV);
+			camera->texture_surfelgi_index = device->GetDescriptorIndex(&surfelGIResources.result, SubresourceType::SRV);
+			camera->texture_vxgi_diffuse_index = device->GetDescriptorIndex(&vxgiResources.diffuse, SubresourceType::SRV);
+			if (wi::renderer::GetVXGIReflectionsEnabled())
+			{
+				camera->texture_vxgi_specular_index = device->GetDescriptorIndex(&vxgiResources.specular, SubresourceType::SRV);
+			}
+			else
+			{
+				camera->texture_vxgi_specular_index = -1;
+			}
+
+			camera_reflection.canvas.init(*this);
+			camera_reflection.width = (float)depthBuffer_Reflection.desc.width;
+			camera_reflection.height = (float)depthBuffer_Reflection.desc.height;
+			camera_reflection.scissor.left = 0;
+			camera_reflection.scissor.top = 0;
+			camera_reflection.scissor.right = (int)depthBuffer_Reflection.desc.width;
+			camera_reflection.scissor.bottom = (int)depthBuffer_Reflection.desc.height;
+			camera_reflection.sample_count = depthBuffer_Reflection.desc.sample_count;
+			camera_reflection.texture_primitiveID_index = -1;
+			camera_reflection.texture_depth_index = device->GetDescriptorIndex(&depthBuffer_Reflection, SubresourceType::SRV);
+			camera_reflection.texture_lineardepth_index = -1;
+			camera_reflection.texture_velocity_index = -1;
+			camera_reflection.texture_normal_index = -1;
+			camera_reflection.texture_roughness_index = -1;
+			camera_reflection.buffer_entitytiles_index = device->GetDescriptorIndex(&tiledLightResources_planarReflection.entityTiles, SubresourceType::SRV);
+			camera_reflection.texture_reflection_index = -1;
+			camera_reflection.texture_reflection_depth_index = -1;
+			camera_reflection.texture_refraction_index = -1;
+			camera_reflection.texture_waterriples_index = -1;
+			camera_reflection.texture_ao_index = -1;
+			camera_reflection.texture_ssr_index = -1;
+			camera_reflection.texture_ssgi_index = -1;
+			camera_reflection.texture_rtshadow_index = -1;
+			camera_reflection.texture_rtdiffuse_index = -1;
+			camera_reflection.texture_surfelgi_index = -1;
+			camera_reflection.texture_vxgi_diffuse_index = -1;
+			camera_reflection.texture_vxgi_specular_index = -1;
+
+			video_cmd = {};
+			if (getSceneUpdateEnabled() && scene->videos.GetCount() > 0)
+			{
+				for (size_t i = 0; i < scene->videos.GetCount(); ++i)
+				{
+					const wi::scene::VideoComponent& video = scene->videos[i];
+					if (wi::video::IsDecodingRequired(&video.videoinstance, dt))
+					{
+						video_cmd = device->BeginCommandList(QUEUE_VIDEO_DECODE);
+						break;
+					}
+				}
+				for (size_t i = 0; i < scene->videos.GetCount(); ++i)
+				{
+					wi::scene::VideoComponent& video = scene->videos[i];
+					wi::video::UpdateVideo(&video.videoinstance, dt, video_cmd);
+				}
+			}
 		}
 
 		void PostUpdate() override
@@ -721,10 +1160,6 @@ namespace vzm
 		std::string name;
 
 		float deltaTime = 0;
-		float deltaTimeAccumulator = 0;
-		float targetFrameRate = 60;
-		bool frameskip = true;
-		bool framerate_lock = false;
 		wi::Timer timer;
 	};
 
@@ -819,14 +1254,14 @@ namespace vzm
 			//wi::initializer::InitializeComponentsImmediate();
 
 			// Reset all state that tests might have modified:
-			wi::eventhandler::SetVSync(true);
+			wi::eventhandler::SetVSync(false);
 			//wi::renderer::SetToDrawGridHelper(false);
 			//wi::renderer::SetTemporalAAEnabled(false);
 			//wi::renderer::ClearWorld(wi::scene::GetScene());
 		}
 
 		// Runtime can create a new entity with this
-		inline Entity CreateSceneEntity(const std::string& name)
+		inline VID CreateSceneEntity(const std::string& name)
 		{
 			if (GetFirstSceneByName(name))
 			{
@@ -1100,6 +1535,26 @@ namespace vzm
 namespace vzm 
 {
 #pragma region // VmBaseComponent
+	void VmBaseComponent::GetWorldPosition(float v[3])
+	{
+		COMP_GET(TransformComponent, transform, );
+		*(XMFLOAT3*)v = transform->GetPosition();
+	}
+	void VmBaseComponent::GetWorldForward(float v[3])
+	{
+		COMP_GET(TransformComponent, transform, );
+		*(XMFLOAT3*)v = transform->GetForward();
+	}
+	void VmBaseComponent::GetWorldRight(float v[3])
+	{
+		COMP_GET(TransformComponent, transform, );
+		*(XMFLOAT3*)v = transform->GetRight();
+	}
+	void VmBaseComponent::GetWorldUp(float v[3])
+	{
+		COMP_GET(TransformComponent, transform, );
+		*(XMFLOAT3*)v = transform->GetUp();
+	}
 	void VmBaseComponent::GetLocalTransform(float mat[16], const bool rowMajor)
 	{
 		COMP_GET(TransformComponent, transform, );
@@ -1167,44 +1622,54 @@ namespace vzm
 		transform->MatrixTransform(mat);
 		timeStamp = std::chrono::high_resolution_clock::now();
 	}
+	VID VmBaseComponent::GetParentVid()
+	{
+		COMP_GET(HierarchyComponent, hierarchy, INVALID_VID);
+		return hierarchy->parentID;
+	}
 #pragma endregion 
 
 #pragma region // VmCamera
 	void VmCamera::SetPose(const float pos[3], const float view[3], const float up[3])
 	{
-		CameraComponent* camComponent = sceneManager.GetEngineComp<CameraComponent>(componentVID);
-		if (!camComponent || !renderer) return;
+		//wi::jobsystem::context ctx;
+		//wi::jobsystem::Execute(ctx, [&](wi::jobsystem::JobArgs args) {
+			CameraComponent* camComponent = sceneManager.GetEngineComp<CameraComponent>(componentVID);
+			TransformComponent* transform = sceneManager.GetEngineComp<TransformComponent>(componentVID);
+			if (!camComponent || !renderer || !transform) return;
 
-		// up vector correction
-		XMVECTOR _eye = XMLoadFloat3((XMFLOAT3*)pos);
-		XMVECTOR _view = XMVector3Normalize(XMLoadFloat3((XMFLOAT3*)view));
-		XMVECTOR _up = XMLoadFloat3((XMFLOAT3*)up);
-		XMVECTOR _right = XMVector3Cross(_view, _up);
-		_up = XMVector3Normalize(XMVector3Cross(_right, _view));
+			// up vector correction
+			XMVECTOR _eye = XMLoadFloat3((XMFLOAT3*)pos);
+			XMVECTOR _view = XMVector3Normalize(XMLoadFloat3((XMFLOAT3*)view));
+			XMVECTOR _up = XMLoadFloat3((XMFLOAT3*)up);
+			XMVECTOR _right = XMVector3Cross(_view, _up);
+			_up = XMVector3Normalize(XMVector3Cross(_right, _view));
 
+			// note the pose info is defined in WS
+			XMMATRIX ws2cs = VZMatrixLookTo(_eye, _view, _up);
+			XMMATRIX cs2ws = XMMatrixInverse(nullptr, ws2cs);
 
-		TransformComponent* transform = ((VzmRenderer*)renderer)->scene->transforms.GetComponent(componentVID);
-		if (transform)
-		{
-			XMMATRIX _V = VZMatrixLookTo(_eye, _view, _up);
-			XMMATRIX _InvV = XMMatrixInverse(nullptr, _V);
+			HierarchyComponent* parent = sceneManager.GetEngineComp<HierarchyComponent>(componentVID);
+			XMMATRIX parent2ws = XMMatrixIdentity();
+			while (parent)
+			{
+				TransformComponent* transformParent = sceneManager.GetEngineComp<TransformComponent>(parent->parentID);
+				parent = sceneManager.GetEngineComp<HierarchyComponent>(parent->parentID);
+				if (transformParent)
+				{
+					parent2ws *= transformParent->GetLocalMatrix();
+				}
+			}
+
+			XMMATRIX local = cs2ws * XMMatrixInverse(nullptr, parent2ws);
 			transform->ClearTransform();
-			transform->MatrixTransform(_InvV);
+			transform->MatrixTransform(local); // ls2ws
 
-			//transform->UpdateTransform();
-			//camComponent->TransformCamera(*transform);
-			//camComponent->UpdateCamera();
-		}
-		else
-		{
-			// Note At is the view direction
-			camComponent->Eye = *(XMFLOAT3*)pos;
-			XMStoreFloat3(&camComponent->At, _view);
-			XMStoreFloat3(&camComponent->Up, _up);
-			//camComponent->UpdateCamera();
-		}
-
-		timeStamp = std::chrono::high_resolution_clock::now();
+			// note camComponent will be updated during the scene update
+			// avoid to directly update the eye, at, and view, which are defined in WS
+			timeStamp = std::chrono::high_resolution_clock::now();
+		//});
+		//wi::jobsystem::Wait(ctx);
 	}
 	void VmCamera::SetPerspectiveProjection(const float zNearP, const float zFarP, const float fovY, const float aspectRatio)
 	{
@@ -1224,11 +1689,17 @@ namespace vzm
 	}
 	void VmCamera::GetPose(float pos[3], float view[3], float up[3])
 	{
-		CameraComponent* camComponent = sceneManager.GetEngineComp<CameraComponent>(componentVID);
-		if (!camComponent) return;
-		if (pos) *(XMFLOAT3*)pos = camComponent->Eye;
-		if (view) *(XMFLOAT3*)view = camComponent->At;
-		if (up) *(XMFLOAT3*)up = camComponent->Up;
+		//wi::jobsystem::context ctx;
+		//wi::jobsystem::Execute(ctx, [&](wi::jobsystem::JobArgs args) {
+			CameraComponent* camComponent = sceneManager.GetEngineComp<CameraComponent>(componentVID);
+			if (!camComponent) return;
+
+			TransformComponent* transform = sceneManager.GetEngineComp<TransformComponent>(componentVID);
+			if (pos) *(XMFLOAT3*)pos = camComponent->Eye;
+			if (view) *(XMFLOAT3*)view = camComponent->At;
+			if (up) *(XMFLOAT3*)up = camComponent->Up;
+		//});
+		//wi::jobsystem::Wait(ctx);
 	}
 	void VmCamera::GetPerspectiveProjection(float* zNearP, float* zFarP, float* fovY, float* aspectRatio)
 	{
@@ -2007,32 +2478,59 @@ namespace vzm
 #pragma endregion
 
 #pragma region // VmAnimation
+	bool VmAnimation::IsPlaying()
+	{
+		COMP_GET(AnimationComponent, aniComponent, false);
+		return aniComponent->IsPlaying();
+	}
+	bool VmAnimation::IsLooped()
+	{
+		COMP_GET(AnimationComponent, aniComponent, false);
+		return aniComponent->IsLooped();
+	}
+	float VmAnimation::GetLength()
+	{
+		COMP_GET(AnimationComponent, aniComponent, 0);
+		return aniComponent->GetLength();
+	}
+	bool VmAnimation::IsEnded()
+	{
+		COMP_GET(AnimationComponent, aniComponent, false);
+		return aniComponent->IsEnded();
+	}
+	bool VmAnimation::IsRootMotion()
+	{
+		COMP_GET(AnimationComponent, aniComponent, false);
+		return aniComponent->IsRootMotion();
+	}
 	void VmAnimation::Play()
 	{
-		AnimationComponent* aniComponent = sceneManager.GetEngineComp<AnimationComponent>(componentVID);
-		if (!aniComponent) return;
+		COMP_GET(AnimationComponent, aniComponent, );
 		aniComponent->Play();
 		timeStamp = std::chrono::high_resolution_clock::now();
 	}
 	void VmAnimation::Pause()
 	{
-		AnimationComponent* aniComponent = sceneManager.GetEngineComp<AnimationComponent>(componentVID);
-		if (!aniComponent) return;
+		COMP_GET(AnimationComponent, aniComponent, );
 		aniComponent->Pause();
 		timeStamp = std::chrono::high_resolution_clock::now();
 	}
 	void VmAnimation::Stop()
 	{
-		AnimationComponent* aniComponent = sceneManager.GetEngineComp<AnimationComponent>(componentVID);
-		if (!aniComponent) return;
+		COMP_GET(AnimationComponent, aniComponent, );
 		aniComponent->Stop();
 		timeStamp = std::chrono::high_resolution_clock::now();
 	}
 	void VmAnimation::SetLooped(const bool value)
 	{
-		AnimationComponent* aniComponent = sceneManager.GetEngineComp<AnimationComponent>(componentVID);
-		if (!aniComponent) return;
+		COMP_GET(AnimationComponent, aniComponent, );
 		aniComponent->SetLooped(value);
+		timeStamp = std::chrono::high_resolution_clock::now();
+	}
+	void VmAnimation::SetRootMotion(const bool value)
+	{
+		COMP_GET(AnimationComponent, aniComponent, );
+		value ? aniComponent->RootMotionOn() : aniComponent->RootMotionOff();
 		timeStamp = std::chrono::high_resolution_clock::now();
 	}
 #pragma endregion
@@ -2040,6 +2538,7 @@ namespace vzm
 	// Resource Pool
 #pragma region // VmMesh
 #pragma endregion
+
 #pragma region // VmMaterial
 #pragma endregion
 }
@@ -2222,6 +2721,24 @@ namespace vzm
 
 	VID AppendComponentTo(const VID vid, const VID parentVid)
 	{
+		HierarchyComponent* hierarchy = sceneManager.GetEngineComp<HierarchyComponent>(vid);
+		if (hierarchy)
+		{
+			if (hierarchy->parentID == parentVid)
+			{
+				auto scenes = sceneManager.GetScenes();
+				for (auto it = scenes->begin(); it != scenes->end(); it++)
+				{
+					VzmScene* scene = &it->second;
+					if (scene->hierarchy.GetComponent(vid))
+					{
+						return scene->sceneVid;
+					}
+				}
+				assert("There must be a scene containing the hierarchy entity");
+			}
+		}
+
 		auto scenes = sceneManager.GetScenes();
 		bool ret = false;
 		for (auto it = scenes->begin(); it != scenes->end(); it++)
@@ -2239,7 +2756,7 @@ namespace vzm
 	{
 		switch (compType)
 		{
-		case COMPONENT_TYPE::BASE: return sceneManager.GetVmComp<VmCamera>(vid);
+		case COMPONENT_TYPE::BASE: return sceneManager.GetVmComp<VmBaseComponent>(vid);
 		case COMPONENT_TYPE::CAMERA: return sceneManager.GetVmComp<VmCamera>(vid);
 		case COMPONENT_TYPE::ACTOR: return sceneManager.GetVmComp<VmActor>(vid);
 		case COMPONENT_TYPE::LIGHT: return sceneManager.GetVmComp<VmLight>(vid);
@@ -2281,8 +2798,106 @@ namespace vzm
 		return &scene->vmWeather;
 	}
 
-	void MergeVzmSceneSystem(Scene* srcScene, Scene* dstScene)
+	void LoadFileIntoNewSceneAsync(const std::string& file, const std::string& rootName, const std::string& sceneName, const std::function<void(VID sceneVid, VID rootVid)>& callback)
 	{
+		struct loadingJob
+		{
+			wi::Timer timer;
+			wi::jobsystem::context ctx;
+			// input param
+			std::string rootName;
+			std::string sceneName;
+			std::string file;
+			std::function<void(VID sceneVid, VID rootVid)> callback;
+
+			bool isFinished = false;
+		};
+
+		static uint32_t jobIndex = 0;
+		static std::map<uint32_t, loadingJob> loadingJobStore;
+		bool isBusy = false;
+		for (auto& it : loadingJobStore)
+		{
+			if (!it.second.isFinished)
+			{
+				isBusy = true;
+				break;
+			}
+		}
+		if (!isBusy)
+		{
+			loadingJobStore.clear();
+			jobIndex = 0;
+		}
+
+		loadingJob& jobInfo = loadingJobStore[jobIndex++];
+		jobInfo.file = file;
+		jobInfo.rootName = rootName;
+		jobInfo.sceneName = sceneName;
+		jobInfo.callback = callback;
+
+		wi::backlog::post("");
+		wi::jobsystem::Execute(jobInfo.ctx, [&](wi::jobsystem::JobArgs args) {
+			VID rootVid = INVALID_VID;
+			VID sceneVid = LoadFileIntoNewScene(jobInfo.file, jobInfo.rootName, jobInfo.sceneName, &rootVid);
+			if (jobInfo.callback != nullptr)
+			{
+				jobInfo.callback(sceneVid, rootVid);
+			}
+			});
+		std::thread([&jobInfo] {
+			wi::jobsystem::Wait(jobInfo.ctx);
+			wi::backlog::post("\n[vzm::LoadMeshModelAsync] GLTF Loading (" + std::to_string((int)std::round(jobInfo.timer.elapsed())) + " ms)");
+			}).detach();
+	}
+
+	VID LoadFileIntoNewScene(const std::string& file, const std::string& rootName, const std::string& sceneName, VID* rootVid)
+	{
+		VID sid = sceneManager.CreateSceneEntity(sceneName);
+		VzmScene* scene = sceneManager.GetScene(sid);
+		if (scene == nullptr)
+		{
+			return INVALID_ENTITY;
+		}
+
+		Entity rootEntity = INVALID_ENTITY;
+		// loading.. with file
+
+		std::string extension = wi::helper::toUpper(wi::helper::GetExtensionFromFileName(file));
+		FileType type = FileType::INVALID;
+		auto it = filetypes.find(extension);
+		if (it != filetypes.end())
+		{
+			type = it->second;
+		}
+		if (type == FileType::INVALID)
+			return INVALID_ENTITY;
+
+		if (type == FileType::OBJ) // wavefront-obj
+		{
+			rootEntity = ImportModel_OBJ(file, *scene);	// reassign transform components
+		}
+		else if (type == FileType::GLTF || type == FileType::GLB || type == FileType::VRM) // gltf, vrm
+		{
+			rootEntity = ImportModel_GLTF(file, *scene);
+		}
+		scene->names.GetComponent(rootEntity)->name = rootName;
+
+		if (rootVid) *rootVid = rootEntity;
+
+		return sid;
+	}
+
+	VZRESULT MergeScenes(const VID srcSceneVid, const VID dstSceneVid)
+	{
+		Scene* srcScene = sceneManager.GetScene(srcSceneVid);
+		Scene* dstScene = sceneManager.GetScene(dstSceneVid);
+		if (srcScene == nullptr || dstScene == nullptr)
+		{
+			wi::backlog::post("Invalid Scene", wi::backlog::LogLevel::Error);
+			return VZ_FAIL;
+		}
+
 		// base
 		wi::vector<Entity> transformEntities = srcScene->transforms.GetEntityArray();
 
@@ -2360,97 +2975,10 @@ namespace vzm
 		//scene_resPool.meshes.Merge(dstScene->meshes);
 		//scene_resPool.Update(0);
 		//int gg = 0;
+		return VZ_OK;
 	}
 
-	void LoadMeshModelAsync(const VID sceneVid, const std::string& file, const std::string& rootName, const std::function<void(VID rootVid)>& callback)
-	{
-		struct loadingJob
-		{
-			wi::Timer timer;
-			wi::jobsystem::context ctx;
-			// input param
-			VID sceneVid;
-			std::string rootName;
-			std::string file;
-			std::function<void(VID rootVid)> callback;
-
-			bool isFinished = false;
-		};
-
-		static uint32_t jobIndex = 0;
-		static std::map<uint32_t, loadingJob> loadingJobStore;
-		bool isBusy = false;
-		for (auto& it : loadingJobStore)
-		{
-			if (!it.second.isFinished)
-			{
-				isBusy = true;
-				break;
-			}
-		}
-		if (!isBusy)
-		{
-			loadingJobStore.clear();
-			jobIndex = 0;
-		}
-
-		loadingJob& jobInfo = loadingJobStore[jobIndex++];
-		jobInfo.sceneVid = sceneVid;
-		jobInfo.file = file;
-		jobInfo.rootName = rootName;
-		jobInfo.callback = callback;
-
-		wi::backlog::post("");
-		wi::jobsystem::Execute(jobInfo.ctx, [&](wi::jobsystem::JobArgs args) {
-			VID rootEntity = LoadMeshModel(jobInfo.sceneVid, jobInfo.file, jobInfo.rootName);
-			if (jobInfo.callback != nullptr)
-			{
-				jobInfo.callback(rootEntity);
-			}
-			});
-		std::thread([&jobInfo] {
-			wi::jobsystem::Wait(jobInfo.ctx);
-			wi::backlog::post("\n[vzm::LoadMeshModelAsync] GLTF Loading (" + std::to_string((int)std::round(jobInfo.timer.elapsed())) + " ms)");
-			}).detach();
-	}
-	VID LoadMeshModel(const VID sceneVid, const std::string& file, const std::string& rootName)
-	{
-		Scene* scene = sceneManager.GetScene(sceneVid);
-		if (scene == nullptr)
-		{
-			return INVALID_ENTITY;
-		}
-
-		Entity rootEntity = INVALID_ENTITY; //sceneManager.internalResArchive.Entity_CreateMesh(actorName);
-		// loading.. with file
-
-		std::string extension = wi::helper::toUpper(wi::helper::GetExtensionFromFileName(file));
-		FileType type = FileType::INVALID;
-		auto it = filetypes.find(extension);
-		if (it != filetypes.end())
-		{
-			type = it->second;
-		}
-		if (type == FileType::INVALID)
-			return INVALID_ENTITY;
-
-		std::unique_ptr<Scene> sceneTmp = std::make_unique<Scene>();
-		if (type == FileType::OBJ) // wavefront-obj
-		{
-			rootEntity = ImportModel_OBJ(file, *sceneTmp);	// reassign transform components
-		}
-		else if (type == FileType::GLTF || type == FileType::GLB || type == FileType::VRM) // gltf, vrm
-		{
-			rootEntity = ImportModel_GLTF(file, *sceneTmp);
-		}
-		sceneTmp->names.GetComponent(rootEntity)->name = rootName;
-
-		MergeVzmSceneSystem(sceneTmp.get(), scene);
-
-		return rootEntity;
-	}
-
-	VZRESULT RenderOld(const VID camVid, const bool updateScene)
+	VZRESULT Render(const VID camVid, const bool updateScene)
 	{
 		VzmRenderer* renderer = sceneManager.GetRenderer(camVid);
 		if (renderer == nullptr)
@@ -2459,11 +2987,11 @@ namespace vzm
 		}
 
 		// DOJO TO DO : CHECK updateScene across cameras belonging to a scene and force to use a oldest one...
-		renderer->setSceneUpdateEnabled(updateScene);
-		//if (!updateScene)
-		//{
-		//	renderer->scene->camera = *renderer->camera;
-		//}
+		renderer->setSceneUpdateEnabled(updateScene || renderer->FRAMECOUNT == 0);
+		if (!updateScene)
+		{
+			renderer->scene->camera = *renderer->camera;
+		}
 
 		wi::font::UpdateAtlas(renderer->GetDPIScaling());
 
@@ -2477,14 +3005,23 @@ namespace vzm
 		}
 
 		wi::profiler::BeginFrame();
-		renderer->deltaTime = float(std::max(0.0, renderer->timer.record_elapsed_seconds()));
 
-		const float target_deltaTime = 1.0f / renderer->targetFrameRate;
-		if (renderer->framerate_lock && renderer->deltaTime < target_deltaTime)
+		VzmScene* scene = (VzmScene*)renderer->scene;
+
 		{
-			wi::helper::QuickSleep((target_deltaTime - renderer->deltaTime) * 1000);
-			renderer->deltaTime += float(std::max(0.0, renderer->timer.record_elapsed_seconds()));
+			// for frame info.
+			renderer->deltaTime = float(std::max(0.0, renderer->timer.record_elapsed_seconds()));
+			const float target_deltaTime = 1.0f / renderer->targetFrameRate;
+			if (renderer->framerate_lock && renderer->deltaTime < target_deltaTime)
+			{
+				wi::helper::QuickSleep((target_deltaTime - renderer->deltaTime) * 1000);
+				renderer->deltaTime += float(std::max(0.0, renderer->timer.record_elapsed_seconds()));
+			}
+
+			scene->deltaTime = float(std::max(0.0, scene->timer.record_elapsed_seconds()));
 		}
+
+
 		//wi::input::Update(nullptr, *renderer);
 		// Wake up the events that need to be executed on the main thread, in thread safe manner:
 		wi::eventhandler::FireEvent(wi::eventhandler::EVENT_THREAD_SAFE_POINT, 0);
@@ -2517,109 +3054,6 @@ namespace vzm
 			}
 			wi::profiler::EndRange(range); // Fixed Update
 		}
-
-		{
-			auto range = wi::profiler::BeginRangeCPU("Update");
-			wi::backlog::Update(*renderer, renderer->deltaTime);
-			renderer->Update(renderer->deltaTime);
-			renderer->PostUpdate();
-			wi::profiler::EndRange(range); // Update
-		}
-
-		{
-			auto range = wi::profiler::BeginRangeCPU("Render");
-			renderer->Render();
-			wi::profiler::EndRange(range); // Render
-		}
-		renderer->RenderFinalize();
-
-		return VZ_OK;
-	}
-
-	VZRESULT Render(const VID camVid, const bool updateScene)
-	{
-		VzmRenderer* renderer = sceneManager.GetRenderer(camVid);
-		if (renderer == nullptr)
-		{
-			return VZ_FAIL;
-		}
-
-		// DOJO TO DO : CHECK updateScene across cameras belonging to a scene and force to use a oldest one...
-		renderer->setSceneUpdateEnabled(updateScene);
-		if (!updateScene)
-		{
-			renderer->scene->camera = *renderer->camera;
-		}
-
-		wi::font::UpdateAtlas(renderer->GetDPIScaling());
-
-		renderer->UpdateVmCamera();
-
-		if (!wi::initializer::IsInitializeFinished())
-		{
-			// Until engine is not loaded, present initialization screen...
-			renderer->WaitRender();
-			return VZ_JOB_WAIT;
-		}
-
-		wi::profiler::BeginFrame();
-
-		VzmScene* scene = (VzmScene*)renderer->scene;
-
-		{
-			scene->deltaTime = float(std::max(0.0, scene->timer.record_elapsed_seconds()));
-			const float target_deltaTime = 1.0f / scene->targetFrameRate;
-			if (scene->framerate_lock && scene->deltaTime < target_deltaTime)
-			{
-				wi::helper::QuickSleep((target_deltaTime - scene->deltaTime) * 1000);
-				scene->deltaTime += float(std::max(0.0, scene->timer.record_elapsed_seconds()));
-			}
-		}
-
-		{
-			// for frame info.
-			renderer->deltaTime = float(std::max(0.0, renderer->timer.record_elapsed_seconds()));
-			const float target_deltaTime = 1.0f / renderer->targetFrameRate;
-			if (renderer->framerate_lock && renderer->deltaTime < target_deltaTime)
-			{
-				wi::helper::QuickSleep((target_deltaTime - renderer->deltaTime) * 1000);
-				renderer->deltaTime += float(std::max(0.0, renderer->timer.record_elapsed_seconds()));
-			}
-		}
-
-		//wi::input::Update(nullptr, *renderer);
-		// Wake up the events that need to be executed on the main thread, in thread safe manner:
-		wi::eventhandler::FireEvent(wi::eventhandler::EVENT_THREAD_SAFE_POINT, 0);
-		renderer->fadeManager.Update(scene->deltaTime);
-
-		renderer->PreUpdate(); // current to previous
-
-		// Fixed time update:
-		{
-			auto range = wi::profiler::BeginRangeCPU("Fixed Update");
-			if (scene->frameskip)
-			{
-				scene->deltaTimeAccumulator += scene->deltaTime;
-				if (scene->deltaTimeAccumulator > 10)
-				{
-					// application probably lost control, fixed update would take too long
-					scene->deltaTimeAccumulator = 0;
-				}
-
-				const float targetFrameRateInv = 1.0f / scene->targetFrameRate;
-				while (scene->deltaTimeAccumulator >= targetFrameRateInv)
-				{
-					renderer->FixedUpdate();
-					scene->deltaTimeAccumulator -= targetFrameRateInv;
-				}
-			}
-			else
-			{
-				renderer->FixedUpdate();
-			}
-			wi::profiler::EndRange(range); // Fixed Update
-		}
-
 		{
 			// use scene->deltaTime
 			auto range = wi::profiler::BeginRangeCPU("Update");
@@ -2632,10 +3066,15 @@ namespace vzm
 			//
 			renderer->FRAMECOUNT++;
 			renderer->frameCB.frame_count = (uint)renderer->FRAMECOUNT;
+			//renderer->frameCB.delta_time = renderer->deltaTime;
+			// note here frameCB's time is computed based on the scene timeline
+			//renderer->frameCB.time_previous = renderer->frameCB.time;
+			//renderer->frameCB.time = scene->deltaTimeAccumulator;
 		}
 
 		{
 			auto range = wi::profiler::BeginRangeCPU("Render");
+			scene->dt = renderer->deltaTime;
 			renderer->Render();
 			wi::profiler::EndRange(range); // Render
 		}
@@ -2672,26 +3111,28 @@ namespace vzm
 
 namespace vzm
 {
-	std::unordered_map<ArcBall*, arcball::ArcBall> map_arcballs;
+	std::unordered_map<OrbitalControl*, arcball::ArcBall> map_arcballs;
 
-	ArcBall::ArcBall()
+	OrbitalControl::OrbitalControl()
 	{
 		map_arcballs[this] = arcball::ArcBall();
 	}
-	ArcBall::~ArcBall()
+	OrbitalControl::~OrbitalControl()
 	{
 		map_arcballs.erase(this);
 	}
-	bool ArcBall::Intializer(const float stage_center[3], const float stage_radius)
+
+	void OrbitalControl::SetTargetCam(const VID _camVid, const float stage_center[3], const float stage_radius)
 	{
 		auto itr = map_arcballs.find(this);
 		if (itr == map_arcballs.end())
-			return fail_ret("NOT AVAILABLE ARCBALL!");
+			return wi::backlog::post("NOT AVAILABLE ARCBALL!", wi::backlog::LogLevel::Error);
+
+		camVid = _camVid;
 		arcball::ArcBall& arc_ball = itr->second;
 		XMVECTOR _stage_center = XMLoadFloat3((XMFLOAT3*)stage_center);
 		arc_ball.FitArcballToSphere(_stage_center, stage_radius);
 		arc_ball.__is_set_stage = true;
-		return true;
 	}
 	void compute_screen_matrix(XMMATRIX& ps2ss, const float w, const float h)
 	{
@@ -2702,57 +3143,50 @@ namespace vzm
 
 		ps2ss = matTranslate * matScale * matTranslateSampleModel;
 	}
-	bool ArcBall::Start(const int pos_xy[2], const float screen_size[2],
-		const float pos[3], const float view[3], const float up[3],
-		const float np, const float fp, const float sensitivity)
+	bool OrbitalControl::Start(const float pos_xy[2], const float sensitivity)
 	{
 		auto itr = map_arcballs.find(this);
 		if (itr == map_arcballs.end())
+		{
 			return fail_ret("NOT AVAILABLE ARCBALL!");
+		}
 		arcball::ArcBall& arc_ball = itr->second;
 		if (!arc_ball.__is_set_stage)
+		{
 			return fail_ret("NO INITIALIZATION IN THIS ARCBALL!");
-		
-		arcball::CameraState cam_pose_ac;
-		cam_pose_ac.isPerspective = true;
-		cam_pose_ac.np = np;
-		cam_pose_ac.posCamera = XMFLOAT3(pos);
-		cam_pose_ac.vecView = XMFLOAT3(view);
+		}
 
-		// up vector correction
-		XMVECTOR _view = XMLoadFloat3((XMFLOAT3*)view);
-		XMVECTOR _up = XMLoadFloat3((XMFLOAT3*)up);
-		XMVECTOR _right = XMVector3Cross(_view, _up);
-		_up = XMVector3Normalize(XMVector3Cross(_right, _view));
-		XMStoreFloat3(&cam_pose_ac.vecUp, _up);
+		CameraComponent* cam = sceneManager.GetEngineComp<CameraComponent>(camVid);
+		TransformComponent* transform = sceneManager.GetEngineComp<TransformComponent>(camVid);
+		if (cam == nullptr || transform == nullptr)
+		{
+			return fail_ret("NO VALID CAMERA!!");
+		}
+
+		// Orbital Camera
+		// we assume the transform->world is not dirty state
+		XMMATRIX matWorld = XMLoadFloat4x4(&transform->world);
+
+		arcball::CameraState cam_pose;
+		cam_pose.isPerspective = true;
+		cam_pose.np = cam->zNearP;
+		cam_pose.posCamera = cam->Eye;
+		cam_pose.vecView = cam->At;
+		cam_pose.vecUp = cam->Up;
 
 		XMMATRIX ws2cs, cs2ps, ps2ss;
-		ws2cs = VZMatrixLookTo(XMLoadFloat3(&cam_pose_ac.posCamera), 
-			XMLoadFloat3(&cam_pose_ac.vecView), XMLoadFloat3(&cam_pose_ac.vecUp));
-		cs2ps = VZMatrixPerspectiveFov(XM_PIDIV4, (float)screen_size[0] / (float)screen_size[1], np, fp);
-		compute_screen_matrix(ps2ss, screen_size[0], screen_size[1]);
-		cam_pose_ac.matWS2SS = ws2cs * cs2ps * ps2ss;
-		cam_pose_ac.matSS2WS = XMMatrixInverse(NULL, cam_pose_ac.matWS2SS);
+		ws2cs = cam->GetView();
+		float aspect = (float)cam->canvas.width / (float)cam->canvas.height;
+		cs2ps = VZMatrixPerspectiveFov(XM_PIDIV4, aspect, cam->zNearP, cam->zFarP);
+		compute_screen_matrix(ps2ss, (float)cam->canvas.width, (float)cam->canvas.height);
+		cam_pose.matWS2SS = ws2cs * cs2ps * ps2ss;
+		cam_pose.matSS2WS = XMMatrixInverse(NULL, cam_pose.matWS2SS);
 
-		arc_ball.StartArcball((float)pos_xy[0], (float)pos_xy[1], cam_pose_ac, 10.f * sensitivity);
+		arc_ball.StartArcball((float)pos_xy[0], (float)pos_xy[1], cam_pose, 10.f * sensitivity);
 
 		return true;
 	}
-	bool ArcBall::Move(const int pos_xy[2], float mat_r_onmove[16])
-	{
-		auto itr = map_arcballs.find(this);
-		if (itr == map_arcballs.end())
-			return fail_ret("NOT AVAILABLE ARCBALL!");
-		arcball::ArcBall& arc_ball = itr->second;
-		if (!arc_ball.__is_set_stage)
-			return fail_ret("NO INITIALIZATION IN THIS ARCBALL!");
-
-		XMMATRIX mat_tr;
-		arc_ball.MoveArcball(mat_tr, (float)pos_xy[0], (float)pos_xy[1], false); // cf. true
-		*(XMMATRIX*)mat_r_onmove = XMMatrixTranspose(mat_tr);
-		return true;
-	}
-	bool ArcBall::Move(const int pos_xy[2], float pos[3], float view[3], float up[3])
+	bool OrbitalControl::Move(const float pos_xy[2])
 	{
 		auto itr = map_arcballs.find(this);
 		if (itr == map_arcballs.end())
@@ -2765,17 +3199,21 @@ namespace vzm
 		arc_ball.MoveArcball(mat_tr, (float)pos_xy[0], (float)pos_xy[1], true);
 
 		arcball::CameraState cam_pose_begin = arc_ball.GetCameraStateSetInStart();
-		XMVECTOR pos_eye = XMVector3TransformCoord(XMLoadFloat3(&cam_pose_begin.posCamera), mat_tr);
-		XMVECTOR vec_view = XMVector3TransformNormal(XMLoadFloat3(&cam_pose_begin.vecView), mat_tr);
-		XMVECTOR vec_up = XMVector3TransformNormal(XMLoadFloat3(&cam_pose_begin.vecUp), mat_tr);
+		XMVECTOR vEye = XMVector3TransformCoord(XMLoadFloat3(&cam_pose_begin.posCamera), mat_tr);
+		XMVECTOR vView = XMVector3TransformNormal(XMLoadFloat3(&cam_pose_begin.vecView), mat_tr);
+		XMVECTOR vUp = XMVector3TransformNormal(XMLoadFloat3(&cam_pose_begin.vecUp), mat_tr);
 
-		XMStoreFloat3((XMFLOAT3*)pos, pos_eye);
-		XMStoreFloat3((XMFLOAT3*)view, XMVector3Normalize(vec_view));
-		XMStoreFloat3((XMFLOAT3*)up, XMVector3Normalize(vec_up));
+		// Set Pose //...
+		VmCamera* vCam = sceneManager.GetVmComp<VmCamera>(camVid);
+		XMFLOAT3 pos, view, up;
+		XMStoreFloat3(&pos, vEye);
+		XMStoreFloat3(&view, XMVector3Normalize(vView));
+		XMStoreFloat3(&up, XMVector3Normalize(vUp));
+		vCam->SetPose(__FP pos, __FP view, __FP up);
 
 		return true;
 	}
-	bool ArcBall::PanMove(const int pos_xy[2], float pos[3], float view[3], float up[3])
+	bool OrbitalControl::PanMove(const float pos_xy[2])
 	{
 		auto itr = map_arcballs.find(this);
 		if (itr == map_arcballs.end())
@@ -2789,20 +3227,22 @@ namespace vzm
 		XMMATRIX& mat_ws2ss = cam_pose_begin.matWS2SS;
 		XMMATRIX& mat_ss2ws = cam_pose_begin.matSS2WS;
 
+		VmCamera* vCam = sceneManager.GetVmComp<VmCamera>(camVid);
+
 		if (!cam_pose_begin.isPerspective)
 		{
 			XMVECTOR pos_eye_ws = XMLoadFloat3(&cam_pose_begin.posCamera);
 			XMVECTOR pos_eye_ss = XMVector3TransformCoord(pos_eye_ws, mat_ws2ss);
-
+		
 			XMFLOAT3 v = XMFLOAT3((float)pos_xy[0] - arc_ball.__start_x, (float)pos_xy[1] - arc_ball.__start_y, 0);
 			XMVECTOR diff_ss = XMLoadFloat3(&v);
-
+		
 			pos_eye_ss = pos_eye_ss - diff_ss; // Think Panning! reverse camera moving
 			pos_eye_ws = XMVector3TransformCoord(pos_eye_ss, mat_ss2ws);
 
-			XMStoreFloat3((XMFLOAT3*)pos, pos_eye_ws);
-			*(XMFLOAT3*)up = cam_pose_begin.vecUp;
-			*(XMFLOAT3*)view = cam_pose_begin.vecView;
+			XMFLOAT3 pos;
+			XMStoreFloat3(&pos, pos_eye_ws);
+			vCam->SetPose(__FP pos, __FP cam_pose_begin.vecView, __FP cam_pose_begin.vecUp);
 		}
 		else
 		{
@@ -2813,28 +3253,26 @@ namespace vzm
 			XMVECTOR pos_cur_ws = XMVector3TransformCoord(pos_cur_ss, mat_ss2ws);
 			XMVECTOR pos_old_ws = XMVector3TransformCoord(pos_old_ss, mat_ss2ws);
 			XMVECTOR diff_ws = pos_cur_ws - pos_old_ws;
-
+		
 			if (XMVectorGetX(XMVector3Length(diff_ws)) < DBL_EPSILON)
 			{
-				*(XMFLOAT3*)pos = cam_pose_begin.posCamera;
-				*(XMFLOAT3*)up = cam_pose_begin.vecUp;
-				*(XMFLOAT3*)view = cam_pose_begin.vecView;
+				vCam->SetPose(__FP cam_pose_begin.posCamera, __FP cam_pose_begin.vecView, __FP cam_pose_begin.vecUp);
 				return true;
 			}
-
+		
 			//cout << "-----0> " << glm::length(diff_ws) << endl;
 			//cout << "-----1> " << pos.x << ", " << pos.y << endl;
 			//cout << "-----2> " << arc_ball.__start_x << ", " << arc_ball.__start_y << endl;
 			XMVECTOR pos_center_ws = arc_ball.GetCenterStage();
 			XMVECTOR vec_eye2center_ws = pos_center_ws - XMLoadFloat3(&cam_pose_begin.posCamera);
-
+		
 			float panningCorrected = XMVectorGetX(XMVector3Length(diff_ws)) * XMVectorGetX(XMVector3Length(vec_eye2center_ws)) / cam_pose_begin.np;
-
+		
 			diff_ws = XMVector3Normalize(diff_ws);
 			XMVECTOR v = XMLoadFloat3(&cam_pose_begin.posCamera) - XMVectorScale(diff_ws, panningCorrected);
-			XMStoreFloat3((XMFLOAT3*)pos, v);
-			*(XMFLOAT3*)up = cam_pose_begin.vecUp;
-			*(XMFLOAT3*)view = cam_pose_begin.vecView;
+			XMFLOAT3 pos;
+			XMStoreFloat3(&pos, v);
+			vCam->SetPose(__FP pos, __FP cam_pose_begin.vecView, __FP cam_pose_begin.vecUp);
 		}
 		return true;
 	}

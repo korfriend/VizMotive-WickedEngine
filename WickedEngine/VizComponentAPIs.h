@@ -143,6 +143,11 @@ namespace vzm
 		TimeStamp timeStamp = {}; // will be automatically set 
 		ParamMap<std::string> attributes;
 
+		void GetWorldPosition(float v[3]);
+		void GetWorldForward(float v[3]);
+		void GetWorldRight(float v[3]);
+		void GetWorldUp(float v[3]);
+
 		void GetLocalTransform(float mat[16], const bool rowMajor = false);
 		void GetWorldTransform(float mat[16], const bool rowMajor = false);
 		void GetLocalInvTransform(float mat[16], const bool rowMajor = false);
@@ -152,11 +157,14 @@ namespace vzm
 		void SetScale(const float value[3]);
 		void SetQuaternion(const float value[4]);
 		void SetMatrix(const float value[16], const bool additiveTransform = false, const bool rowMajor = false);
+
+		VID GetParentVid();
 	};
 	struct VmRenderer;
 	struct VmCamera : VmBaseComponent
 	{
 		VmRenderer* renderer = nullptr;
+		// Pose parameters are defined in WS (not local space)
 		void SetPose(const float pos[3], const float view[3], const float up[3]);
 		void SetPerspectiveProjection(const float zNearP, const float zFarP, const float fovY, const float aspectRatio);
 		void SetCanvasSize(const float w, const float h, const float dpi);
@@ -363,10 +371,16 @@ namespace vzm
 	};
 	struct VmAnimation : VmBaseComponent
 	{
+		bool IsPlaying();
+		bool IsLooped();
+		float GetLength();
+		bool IsEnded();
+		bool IsRootMotion();
 		void Play();
 		void Pause();
 		void Stop();
 		void SetLooped(const bool value);
+		void SetRootMotion(const bool value);
 	};
 	struct VmCollider : VmBaseComponent
 	{

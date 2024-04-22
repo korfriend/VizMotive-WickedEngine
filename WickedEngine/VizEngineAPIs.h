@@ -38,12 +38,15 @@ namespace vzm
 	// Get VmWeather and return its pointer 
 	//  - return nullptr in case of failure 
 	__dojostatic VmWeather* GetSceneActivatedWeather(const VID sceneVid);
-	// Load model component and return resource ID (global entity), resource item
+	// Load scene components into a new scene and return the scene ID
 	//  - Must belong to the internal scene
-	//  - return zero in case of failure (invalid sceneID, the name is already registered, or overflow VID)
-	__dojostatic VID LoadMeshModel(const VID sceneVid, const std::string& file, const std::string& rootName);
-	// Async version of LoadMeshModel
-	__dojostatic void LoadMeshModelAsync(const VID sceneVid, const std::string& file, const std::string& rootName, const std::function<void(VID rootVid)>& callback = nullptr);
+	//  - return zero in case of failure
+	__dojostatic VID LoadFileIntoNewScene(const std::string& file, const std::string& rootName, const std::string& sceneName = "", VID* rootVid = nullptr);
+	// Async version of LoadFileIntoNewScene
+	__dojostatic void LoadFileIntoNewSceneAsync(const std::string& file, const std::string& rootName, const std::string& sceneName = "", const std::function<void(VID sceneVid, VID rootVid)>& callback = nullptr);
+	// Merge src scene to dest scene 
+	//  - This is not THREAD-SAFE 
+	__dojostatic VZRESULT MergeScenes(const VID srcSceneVid, const VID dstSceneVid);
 	// Render a scene on camera (camVid)
 	//  - Must belong to the internal scene
 	//  - if updateScene is true, uses the camera for camera-dependent scene updates
@@ -60,21 +63,15 @@ namespace vzm
 
 namespace vzm // helper APIs
 {
-	__dojoclass ArcBall
+	__dojoclass OrbitalControl
 	{
+		VID camVid = INVALID_VID;
 	public:
-		ArcBall();
-		~ArcBall();
-		// stage_center .. fvec3
-		bool Intializer(const float stage_center[3], const float stage_radius);
-		// pos_xy .. ivec2
-		bool Start(const int pos_xy[2], const float screen_size[2],
-			const float pos[3], const float view[3], const float up[3],
-			const float np = 0.1f, const float fp = 100.f, const float sensitivity = 1.0f);
-		// pos_xy .. ivec2
-		// mat_r_onmove .. fmat4x4
-		bool Move(const int pos_xy[2], float pos[3], float view[3], float up[3]);	// target is camera
-		bool Move(const int pos_xy[2], float mat_r_onmove[16]);	// target is object
-		bool PanMove(const int pos_xy[2], float pos[3], float view[3], float up[3]);
+		OrbitalControl();
+		~OrbitalControl();
+		void SetTargetCam(const VID camVid, const float stage_center[3], const float stage_radius);
+		bool Start(const float pos_xy[2], const float sensitivity = 1.0f);
+		bool Move(const float pos_xy[2]);	// target is camera
+		bool PanMove(const float pos_xy[2]);
 	};
 }
