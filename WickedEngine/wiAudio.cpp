@@ -162,8 +162,11 @@ namespace wi::audio
 				wi::backlog::post("wi::audio Initialized [XAudio2] (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
 			}
 		}
-		~AudioInternal()
+		// DOJO adds for explicit release of COM-based components
+		bool destoryed = false;
+		void Destory()
 		{
+			destoryed = true;
 
 			if (reverbSubmix != nullptr)
 				reverbSubmix->DestroyVoice();
@@ -181,12 +184,23 @@ namespace wi::audio
 
 			CoUninitialize();
 		}
+
+		~AudioInternal()
+		{
+			// DOJO adds for explicit release of COM-based components
+			if (!destoryed)
+				Destory();
+		}
 	};
 	static std::shared_ptr<AudioInternal> audio_internal;
 
 	void Initialize()
 	{
 		audio_internal = std::make_shared<AudioInternal>();
+	}
+	void Deinitialize()
+	{
+		audio_internal.reset();
 	}
 
 	struct SoundInternal

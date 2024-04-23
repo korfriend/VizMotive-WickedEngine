@@ -12,6 +12,7 @@
 namespace wi::audio
 {
 	void Initialize();
+	void Deinitialize();
 
 	// SUBMIX_TYPE specifies the playback channel of sound instances
 	//	Do not change the order as this enum can be serialized!

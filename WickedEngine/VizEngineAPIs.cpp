@@ -2583,6 +2583,8 @@ namespace vzm
 	VZRESULT DeinitEngineLib()
 	{
 		wi::jobsystem::ShutDown();
+		// DOJO adds for explicit release of COM-based components
+		wi::audio::Deinitialize(); // note audio is based on COM, so explicitly destruction is required!
 		return VZ_OK;
 	}
 
