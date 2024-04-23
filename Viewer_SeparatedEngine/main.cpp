@@ -209,7 +209,7 @@ int main(int, char**)
 					};
 
 				//callbackLoadModel(vzm::LoadMeshModel("D:\\data\\car_gltf\\ioniq.gltf", "my file scene", "my gltf root"));
-				//vzm::LoadFileIntoNewSceneAsync("D:\\data\\car_gltf\\ioniq.gltf", "my file scene", "my gltf root", callbackLoadModel);
+				vzm::LoadFileIntoNewSceneAsync("D:\\data\\car_gltf\\ioniq.gltf", "my file scene", "my gltf root", callbackLoadModel);
 				//vzm::LoadMeshModel("D:\\VisMotive\\data\\obj files\\skull\\12140_Skull_v3_L2.obj", "my file scene", "my obj");
 			}
 
