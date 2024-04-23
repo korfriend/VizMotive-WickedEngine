@@ -2545,13 +2545,32 @@ namespace vzm
 
 namespace vzm
 {
+	struct SafeReleaseChecker
+	{
+		SafeReleaseChecker() {};
+		bool destroyed = false;
+		~SafeReleaseChecker()
+		{
+			if (!destroyed)
+			{
+				std::cout << "MUST CALL DeinitEngineLib before finishing the application!" << std::endl;
+				DeinitEngineLib();
+			}
+			std::cout << "Safely finished ^^" << std::endl;
+		};
+	};
+	static std::unique_ptr<SafeReleaseChecker> safeReleaseChecker;
+
 	VZRESULT InitEngineLib(const std::string& coreName, const std::string& logFileName)
 	{
 		static bool initialized = false;
 		if (initialized)
 		{
-			return VZ_OK;
+			wi::backlog::post("Already initialized!");
+			return VZ_WARNNING;
 		}
+
+		safeReleaseChecker = std::make_unique<SafeReleaseChecker>();
 
 		auto ext_video = wi::resourcemanager::GetSupportedVideoExtensions();
 		for (auto& x : ext_video)
@@ -2582,9 +2601,15 @@ namespace vzm
 
 	VZRESULT DeinitEngineLib()
 	{
+		if (safeReleaseChecker.get() == nullptr)
+		{
+			wi::backlog::post("MUST CALL vzm::InitEngineLib before calling vzm::DeinitEngineLib()", backlog::LogLevel::Error);
+			return VZ_WARNNING;
+		}
 		wi::jobsystem::ShutDown();
 		// DOJO adds for explicit release of COM-based components
 		wi::audio::Deinitialize(); // note audio is based on COM, so explicitly destruction is required!
+		safeReleaseChecker->destroyed = true;
 		return VZ_OK;
 	}
 

@@ -7,7 +7,8 @@
 #define VZRESULT int
 #define VZ_OK 0
 #define VZ_FAIL 1
-#define VZ_JOB_WAIT 1
+#define VZ_JOB_WAIT 2
+#define VZ_WARNNING 3
 
 #define SAFE_GET_COPY(DST_PTR, SRC_PTR, TYPE, ELEMENTS) { if(DST_PTR) memcpy(DST_PTR, SRC_PTR, sizeof(TYPE)*ELEMENTS); }
 #define GET_COPY(DST_PTR, SRC_PTR, TYPE, ELEMENTS) { memcpy(DST_PTR, SRC_PTR, sizeof(TYPE)*ELEMENTS); }
