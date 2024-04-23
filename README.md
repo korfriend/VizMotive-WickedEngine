@@ -1,8 +1,8 @@
 # Scientific Vizualization Framework Engine
 - This project starts with the compact version of Wicked Engine (first milestone)
 - And adding my previous rendering engine features to this project while refactoring/compacting the underlying datastructures
-- Jobsystem as Thread manager will be modified for supporting MD project
 - High-level (COM-based) APIs (not exposing the core datastructures)
+- Refer to ["Viewer_SeparatedEngine" project](https://github.com/korfriend/VizMotive/tree/master/Viewer_SeparatedEngine) for the usage of my high-level APIs
 
 ## Our Engine (based on Wicked Engine)
 
@@ -30,6 +30,7 @@ VizMotive Engine is an open-source 3D engine for scientific data visualizations 
 ### Examples:
 
 #### Basics (C++):
+- Refer to vzm-namespace functions in [main.cpp](https://github.com/korfriend/VizMotive/blob/master/Viewer_SeparatedEngine/main.cpp) (based on dear imgui) ["Viewer_SeparatedEngine" project](https://github.com/korfriend/VizMotive/tree/master/Viewer_SeparatedEngine)
 ```cpp
 // Include engine headers:
 #include "VizEngineAPIs.h"	// this reauires "VizComponentAPIs.h", none external dependencies
