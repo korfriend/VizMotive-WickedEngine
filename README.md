@@ -33,7 +33,7 @@ VizMotive Engine is an open-source 3D engine for scientific data visualizations 
 - Refer to vzm-namespace functions in [main.cpp](https://github.com/korfriend/VizMotive/blob/master/Viewer_SeparatedEngine/main.cpp) (based on dear imgui) ["Viewer_SeparatedEngine" project](https://github.com/korfriend/VizMotive/tree/master/Viewer_SeparatedEngine)
 ```cpp
 // Include engine headers:
-#include "VizEngineAPIs.h"	// this reauires "VizComponentAPIs.h", none external dependencies
+#include "VizEngineAPIs.h"	// this requires "VizComponentAPIs.h", none external dependencies
 
 // Start the Engine APIs:
 // Note: the engine uses internally-assigned GPU device handler 
