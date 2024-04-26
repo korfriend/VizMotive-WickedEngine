@@ -165,6 +165,9 @@
     <None Include="$(MSBuildThisFileDirectory)BlockCompress.hlsli">
       <Filter>HF</Filter>
     </None>
+    <None Include="$(MSBuildThisFileDirectory)bc6h.hlsli">
+      <Filter>HF</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="$(MSBuildThisFileDirectory)hairparticle_simulateCS.hlsl">
@@ -1151,6 +1154,18 @@
     <FxCompile Include="$(MSBuildThisFileDirectory)ssgi_deinterleaveCS.hlsl">
       <Filter>CS</Filter>
     </FxCompile>
+    <FxCompile Include="$(MSBuildThisFileDirectory)terrainVirtualTextureUpdateCS_emissivemap.hlsl">
+      <Filter>CS</Filter>
+    </FxCompile>
+    <FxCompile Include="$(MSBuildThisFileDirectory)ddgi_rayallocationCS.hlsl">
+      <Filter>CS</Filter>
+    </FxCompile>
+    <FxCompile Include="$(MSBuildThisFileDirectory)ddgi_indirectprepareCS.hlsl">
+      <Filter>CS</Filter>
+    </FxCompile>
+    <FxCompile Include="$(MSBuildThisFileDirectory)rtshadow_upsampleCS.hlsl">
+      <Filter>CS</Filter>
+    </FxCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="$(MSBuildThisFileDirectory)ShaderInterop.h">
@@ -1299,6 +1314,12 @@
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)ffx-shadows-dnsr\ffx_denoiser_shadows_util.h">
       <Filter>ffx-shadows-dnsr</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)ShaderInterop_Terrain.h">
+      <Filter>interop</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)ShaderInterop_VoxelGrid.h">
+      <Filter>interop</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

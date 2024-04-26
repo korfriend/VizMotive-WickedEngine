@@ -32,7 +32,7 @@ namespace wi::scene
 		wi::ecs::ComponentManager<LayerComponent>& layers = componentLibrary.Register<LayerComponent>("wi::scene::Scene::layers");
 		wi::ecs::ComponentManager<TransformComponent>& transforms = componentLibrary.Register<TransformComponent>("wi::scene::Scene::transforms");
 		wi::ecs::ComponentManager<HierarchyComponent>& hierarchy = componentLibrary.Register<HierarchyComponent>("wi::scene::Scene::hierarchy");
-		wi::ecs::ComponentManager<MaterialComponent>& materials = componentLibrary.Register<MaterialComponent>("wi::scene::Scene::materials", 3); // version = 3
+		wi::ecs::ComponentManager<MaterialComponent>& materials = componentLibrary.Register<MaterialComponent>("wi::scene::Scene::materials", 4); // version = 4
 		wi::ecs::ComponentManager<MeshComponent>& meshes = componentLibrary.Register<MeshComponent>("wi::scene::Scene::meshes", 2); // version = 2
 		wi::ecs::ComponentManager<ImpostorComponent>& impostors = componentLibrary.Register<ImpostorComponent>("wi::scene::Scene::impostors");
 		wi::ecs::ComponentManager<ObjectComponent>& objects = componentLibrary.Register<ObjectComponent>("wi::scene::Scene::objects", 3); // version = 3
@@ -57,7 +57,7 @@ namespace wi::scene
 		wi::ecs::ComponentManager<ScriptComponent>& scripts = componentLibrary.Register<ScriptComponent>("wi::scene::Scene::scripts");
 		wi::ecs::ComponentManager<ExpressionComponent>& expressions = componentLibrary.Register<ExpressionComponent>("wi::scene::Scene::expressions");
 		wi::ecs::ComponentManager<HumanoidComponent>& humanoids = componentLibrary.Register<HumanoidComponent>("wi::scene::Scene::humanoids", 1); // version = 1
-		wi::ecs::ComponentManager<wi::terrain::Terrain>& terrains = componentLibrary.Register<wi::terrain::Terrain>("wi::scene::Scene::terrains", 4); // version = 4
+		wi::ecs::ComponentManager<wi::terrain::Terrain>& terrains = componentLibrary.Register<wi::terrain::Terrain>("wi::scene::Scene::terrains", 5); // version = 5
 		wi::ecs::ComponentManager<wi::Sprite>& sprites = componentLibrary.Register<wi::Sprite>("wi::scene::Scene::sprites");
 		wi::ecs::ComponentManager<wi::SpriteFont>& fonts = componentLibrary.Register<wi::SpriteFont>("wi::scene::Scene::fonts");
 		wi::ecs::ComponentManager<wi::VoxelGrid>& voxel_grids = componentLibrary.Register<wi::VoxelGrid>("wi::scene::Scene::voxel_grids");
@@ -162,16 +162,24 @@ namespace wi::scene
 		mutable std::atomic<uint32_t> queryAllocator{ 0 };
 
 		// Surfel GI resources:
-		wi::graphics::GPUBuffer surfelBuffer;
-		wi::graphics::GPUBuffer surfelDataBuffer;
-		wi::graphics::GPUBuffer surfelAliveBuffer[2];
-		wi::graphics::GPUBuffer surfelDeadBuffer;
-		wi::graphics::GPUBuffer surfelStatsBuffer;
-		wi::graphics::GPUBuffer surfelIndirectBuffer;
-		wi::graphics::GPUBuffer surfelGridBuffer;
-		wi::graphics::GPUBuffer surfelCellBuffer;
-		wi::graphics::GPUBuffer surfelRayBuffer;
-		wi::graphics::Texture surfelMomentsTexture[2];
+		struct SurfelGI
+		{
+			mutable bool cleared = false;
+			wi::graphics::GPUBuffer surfelBuffer;
+			wi::graphics::GPUBuffer dataBuffer;
+			wi::graphics::GPUBuffer varianceBuffer;
+			wi::graphics::GPUBuffer aliveBuffer[2];
+			wi::graphics::GPUBuffer deadBuffer;
+			wi::graphics::GPUBuffer statsBuffer;
+			wi::graphics::GPUBuffer indirectBuffer;
+			wi::graphics::GPUBuffer gridBuffer;
+			wi::graphics::GPUBuffer cellBuffer;
+			wi::graphics::GPUBuffer rayBuffer;
+			wi::graphics::Texture momentsTexture;
+			wi::graphics::Texture irradianceTexture;
+			wi::graphics::Texture irradianceTexture_rw;
+			wi::graphics::GPUBuffer sparse_tile_pool;
+		} surfelgi;
 
 		// DDGI resources:
 		struct DDGI
@@ -180,13 +188,16 @@ namespace wi::scene
 			uint3 grid_dimensions = uint3(32, 8, 32); // The scene extents will be subdivided into a grid of this resolution, each grid cell will have one probe
 			float3 grid_min = float3(-1, -1, -1);
 			float3 grid_max = float3(1, 1, 1);
-			float smooth_backface = 0; // smoothness of backface test
+			float smooth_backface = 0.01f; // smoothness of backface test
 			wi::graphics::GPUBuffer ray_buffer;
 			wi::graphics::GPUBuffer offset_buffer;
+			wi::graphics::GPUBuffer variance_buffer;
+			wi::graphics::GPUBuffer raycount_buffer;
+			wi::graphics::GPUBuffer rayallocation_buffer;
 			wi::graphics::GPUBuffer sparse_tile_pool;
-			wi::graphics::Texture color_texture[2];
-			wi::graphics::Texture color_texture_rw[2]; // alias of color_texture
-			wi::graphics::Texture depth_texture[2];
+			wi::graphics::Texture color_texture;
+			wi::graphics::Texture color_texture_rw; // alias of color_texture
+			wi::graphics::Texture depth_texture;
 
 			void Serialize(wi::Archive& archive);
 		} ddgi;
@@ -270,6 +281,8 @@ namespace wi::scene
 		mutable wi::vector<wi::Sprite> waterRipples;
 		void PutWaterRipple(const XMFLOAT3& pos);
 		void PutWaterRipple(const std::string& image, const XMFLOAT3& pos);
+
+		wi::graphics::GPUBuffer voxelgrid_gpu; // primary CPU voxelgrid uploaded to GPU
 
 		// Animation processing optimizer:
 		struct AnimationQueue

@@ -9,7 +9,13 @@
 
 PUSHCONSTANT(push, DDGIPushConstants);
 
+StructuredBuffer<uint> rayallocationBuffer : register(t0);
+Buffer<uint> raycountBuffer : register(t1);
+
 RWStructuredBuffer<DDGIRayDataPacked> rayBuffer : register(u0);
+
+groupshared float shared_inconsistency[DDGI_COLOR_RESOLUTION * DDGI_COLOR_RESOLUTION];
+groupshared uint shared_rayCount;
 
 static const uint THREADCOUNT = 32;
 
@@ -27,7 +33,13 @@ float3 spherical_fibonacci(float i, float n)
 [numthreads(THREADCOUNT, 1, 1)]
 void main(uint3 DTid : SV_DispatchThreadID, uint3 Gid : SV_GroupID, uint groupIndex : SV_GroupIndex)
 {
-	const uint probeIndex = Gid.x;
+	const uint allocCount = rayallocationBuffer[3];
+	if(DTid.x >= allocCount)
+		return;
+	const uint rayAlloc = rayallocationBuffer[4 + DTid.x];
+	const uint probeIndex = rayAlloc & 0xFFFFF;
+	const uint rayIndex = rayAlloc >> 20u;
+	const uint rayCount = raycountBuffer[probeIndex] * DDGI_RAY_BUCKET_COUNT;
 	const uint3 probeCoord = ddgi_probe_coord(probeIndex);
 	const float3 probePos = ddgi_probe_position(probeCoord);
 
@@ -35,14 +47,13 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 Gid : SV_GroupID, uint groupIn
 	rng.init(DTid.xx, GetFrame().frame_count);
 
 	const float3x3 random_orientation = (float3x3)g_xTransform;
-
-	for (uint rayIndex = groupIndex; rayIndex < push.rayCount; rayIndex += THREADCOUNT)
+	
 	{
 		RayDesc ray;
 		ray.Origin = probePos;
 		ray.TMin = 0; // don't need TMin because we are not tracing from a surface
 		ray.TMax = FLT_MAX;
-		ray.Direction = normalize(mul(random_orientation, spherical_fibonacci(rayIndex, push.rayCount)));
+		ray.Direction = normalize(mul(random_orientation, spherical_fibonacci(rayIndex, rayCount)));
 
 #ifdef RTAPI
 		wiRayQuery q;
@@ -107,7 +118,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 Gid : SV_GroupID, uint groupIn
 			}
 
 			if (!surface.load(prim, q.CommittedTriangleBarycentrics()))
-				break;
+				return;
 
 #else
 
@@ -121,7 +132,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 Gid : SV_GroupID, uint groupIn
 			}
 
 			if (!surface.load(hit.primitiveID, hit.bary))
-				break;
+				return;
 
 #endif // RTAPI
 

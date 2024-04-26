@@ -14,6 +14,7 @@
     <ProjectCapability Include="SourceItemsFromImports" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)bc6h.hlsli" />
     <None Include="$(MSBuildThisFileDirectory)bitonicSortHF.hlsli" />
     <None Include="$(MSBuildThisFileDirectory)BlockCompress.hlsli" />
     <None Include="$(MSBuildThisFileDirectory)brdf.hlsli" />
@@ -402,6 +403,14 @@
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">Pixel</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">Pixel</ShaderType>
     </FxCompile>
+    <FxCompile Include="$(MSBuildThisFileDirectory)ddgi_indirectprepareCS.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compute</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">4.0</ShaderModel>
+    </FxCompile>
+    <FxCompile Include="$(MSBuildThisFileDirectory)ddgi_rayallocationCS.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compute</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">4.0</ShaderModel>
+    </FxCompile>
     <FxCompile Include="$(MSBuildThisFileDirectory)hairparticlePS_prepass_depthonly.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Pixel</ShaderType>
     </FxCompile>
@@ -423,6 +432,10 @@
     </FxCompile>
     <FxCompile Include="$(MSBuildThisFileDirectory)objectPS_prepass_depthonly_alphatest.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Pixel</ShaderType>
+    </FxCompile>
+    <FxCompile Include="$(MSBuildThisFileDirectory)rtshadow_upsampleCS.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compute</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">4.0</ShaderModel>
     </FxCompile>
     <FxCompile Include="$(MSBuildThisFileDirectory)screenVS.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Vertex</ShaderType>
@@ -1008,6 +1021,10 @@
       <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">4.0</ShaderModel>
     </FxCompile>
     <FxCompile Include="$(MSBuildThisFileDirectory)terrainVirtualTextureUpdateCS.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compute</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">4.0</ShaderModel>
+    </FxCompile>
+    <FxCompile Include="$(MSBuildThisFileDirectory)terrainVirtualTextureUpdateCS_emissivemap.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compute</ShaderType>
       <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">4.0</ShaderModel>
     </FxCompile>
@@ -2729,7 +2746,9 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)ShaderInterop_Raytracing.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)ShaderInterop_Renderer.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)ShaderInterop_SurfelGI.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)ShaderInterop_VoxelGrid.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)ShaderInterop_VXGI.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)ShaderInterop_Weather.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)ShaderInterop_Terrain.h" />
   </ItemGroup>
 </Project>

@@ -399,12 +399,14 @@ namespace wi::renderer
 	// Surfel GI: diffuse GI with ray tracing from surfels
 	struct SurfelGIResources
 	{
+		wi::graphics::Texture result_halfres;
 		wi::graphics::Texture result;
 	};
 	void CreateSurfelGIResources(SurfelGIResources& res, XMUINT2 resolution);
 	void SurfelGI_Coverage(
 		const SurfelGIResources& res,
 		const wi::scene::Scene& scene,
+		const wi::graphics::Texture& lineardepth,
 		const wi::graphics::Texture& debugUAV,
 		wi::graphics::CommandList cmd
 	);
@@ -621,6 +623,7 @@ namespace wi::renderer
 	);
 	struct RTShadowResources
 	{
+		wi::graphics::Texture raytraced;
 		wi::graphics::Texture temporal[2];
 		wi::graphics::Texture normals;
 
@@ -1002,7 +1005,7 @@ namespace wi::renderer
 
 
 
-	void SetTransparentShadowsEnabled(float value);
+	void SetTransparentShadowsEnabled(bool value);
 	float GetTransparentShadowsEnabled();
 	void SetWireRender(bool value);
 	bool IsWireRender();

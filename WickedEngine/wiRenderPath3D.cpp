@@ -594,7 +594,8 @@ namespace wi
 			{
 				TextureDesc desc;
 				desc.bind_flags = BindFlag::SHADER_RESOURCE | BindFlag::UNORDERED_ACCESS;
-				desc.format = Format::R32G32B32A32_UINT;
+				desc.format = Format::R8_UNORM;
+				desc.array_size = 16;
 				desc.width = internalResolution.x;
 				desc.height = internalResolution.y;
 				desc.layout = ResourceState::SHADER_RESOURCE_COMPUTE;
@@ -1059,6 +1060,7 @@ namespace wi
 				wi::renderer::SurfelGI_Coverage(
 					surfelGIResources,
 					*scene,
+					rtLinearDepth,
 					debugUAV,
 					cmd
 				);
