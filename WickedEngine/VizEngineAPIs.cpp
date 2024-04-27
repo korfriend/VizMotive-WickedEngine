@@ -99,6 +99,8 @@ auto fail_ret = [](const std::string& err_str, const bool _warn = false)
 
 namespace vzm
 {
+	std::atomic_bool profileFrameFinished = { true };
+
 	void TransformPoint(const float posSrc[3], const float mat[16], const bool rowMajor, float posDst[3])
 	{
 		XMVECTOR p = XMLoadFloat3((XMFLOAT3*)posSrc);
@@ -246,56 +248,65 @@ namespace vzm
 		// renderInterResult is valid only when swapchain's color space is ColorSpace::HDR10_ST2084
 		wi::graphics::Texture renderInterResult;
 
-		bool gridHelper = false;
-
-		struct InfoDisplayer
-		{
-			// activate the whole display
-			bool active = false;
-			// display engine version number
-			bool watermark = true;
-			// display framerate
-			bool fpsinfo = false;
-			// display graphics device name
-			bool device_name = false;
-			// display resolution info
-			bool resolution = false;
-			// window's size in logical (DPI scaled) units
-			bool logical_size = false;
-			// HDR status and color space
-			bool colorspace = false;
-			// display number of heap allocations per frame
-			bool heap_allocation_counter = false;
-			// display the active graphics pipeline count
-			bool pipeline_count = false;
-			// display video memory usage and budget
-			bool vram_usage = false;
-			// text size
-			int size = 16;
-			// display default color grading helper texture in top left corner of the screen
-			bool colorgrading_helper = false;
-		};
 		// display all-time engine information text
 		InfoDisplayer infoDisplay;
 		std::string infodisplay_str;
 		float deltatimes[20] = {};
 
+		// wi::renderer options
+		int ShadowProps2D = 1024; // (int max_resolution);
+		int ShadowPropsCube = 256; // (int max_resolution);
+		float TransparentShadowsEnabled = true; 
+		bool WireRender = false; 
+		bool DrawDebugBoneLines = false; // (bool param);
+		bool DrawDebugPartitionTree = false; // (bool param);
+		bool DrawDebugEnvProbes = false; 
+		bool DrawDebugEmitters = false; // (bool param);
+		bool DrawDebugForceFields = false; // (bool param);
+		bool DrawDebugCameras = false; // (bool param);
+		bool DrawDebugColliders = false; // (bool param);
+		bool DrawGridHelper = false; 
+		bool DrawVoxelHelper = false;
+		int DrawVoxelHelperClipMapLevel = 0;
+		bool DebugLightCulling = false;
+		bool AdvancedLightCulling = true;
+		bool VariableRateShadingClassification = false;
+		bool VariableRateShadingClassificationDebug = false;
+		bool TemporalAAEnabled = false;
+		bool TemporalAADebugEnabled = false;
+		bool FreezeCullingCameraEnabled = false;
+		bool VXGIEnabled = false;
+		bool VXGIReflectionsEnabled = false;
+		float GameSpeed = 1.f; 
+		uint32_t RaytraceBounceCount = 3u; 
+		bool RaytraceDebugBVHVisualizerEnabled = false; 
+		bool RaytracedShadowsEnabled = false; 
+		bool TessellationEnabled = true; 
+		bool DisableAlbedoMaps = false; 
+		bool ForceDiffuseLighting = false; 
+		bool ScreenSpaceShadowsEnabled = false; 
+		bool SurfelGIEnabled = false; 
+		SURFEL_DEBUG SurfelGIDebugEnabled = SURFEL_DEBUG_NONE; // (SURFEL_DEBUG value);
+		bool DDGIEnabled = false; 
+		bool DDGIDebugEnabled = false; 
+		uint32_t DDGIRayCount = 128u; // (uint32_t value);
+		float DDGIBlendSpeed = 0.02f; 
+		float GIBoost = 1.f;
+
+		bool DisplayProfile = false; // this is only for profiling canvas
+
 		// kind of initializer
 		void Load() override
 		{
+			infoDisplay.active = true;
+			infoDisplay.fpsinfo = true;
+			infoDisplay.pipeline_count = true;
+			infoDisplay.resolution = true;
+			infoDisplay.heap_allocation_counter = true;
+			infoDisplay.logical_size = true;
 
 			this->ClearSprites();
 			this->ClearFonts();
-
-			gridHelper = false;
-			infoDisplay.active = true;
-			infoDisplay.watermark = true;
-			infoDisplay.fpsinfo = true;
-			infoDisplay.resolution = true;
-			infoDisplay.colorspace = true;
-			infoDisplay.device_name = true;
-			infoDisplay.vram_usage = true;
-			infoDisplay.heap_allocation_counter = true;
 
 			// remove...
 			wi::renderer::SetToDrawGridHelper(true);
@@ -330,443 +341,55 @@ namespace vzm
 			}
 		}
 
+		void UpdateRendererOptions()
+		{
+			wi::renderer::SetShadowProps2D(ShadowProps2D);
+			wi::renderer::SetShadowPropsCube(ShadowPropsCube);
+			wi::renderer::SetTransparentShadowsEnabled(TransparentShadowsEnabled);
+			wi::renderer::SetWireRender(WireRender);
+			wi::renderer::SetToDrawDebugBoneLines(DrawDebugBoneLines);
+			wi::renderer::SetToDrawDebugPartitionTree(DrawDebugPartitionTree);
+			wi::renderer::SetToDrawDebugEnvProbes(DrawDebugEnvProbes);
+			wi::renderer::SetToDrawDebugEmitters(DrawDebugEmitters);
+			wi::renderer::SetToDrawDebugForceFields(DrawDebugForceFields);
+			wi::renderer::SetToDrawDebugCameras(DrawDebugCameras);
+			wi::renderer::SetToDrawDebugColliders(DrawDebugColliders);
+			wi::renderer::SetToDrawGridHelper(DrawGridHelper);
+			wi::renderer::SetToDrawVoxelHelper(DrawVoxelHelper, DrawVoxelHelperClipMapLevel);
+			wi::renderer::SetDebugLightCulling(DebugLightCulling);
+			wi::renderer::SetAdvancedLightCulling(AdvancedLightCulling);
+			wi::renderer::SetVariableRateShadingClassification(VariableRateShadingClassification);
+			wi::renderer::SetVariableRateShadingClassificationDebug(VariableRateShadingClassificationDebug);
+			wi::renderer::SetTemporalAAEnabled(TemporalAAEnabled);
+			wi::renderer::SetTemporalAADebugEnabled(TemporalAADebugEnabled);
+			wi::renderer::SetFreezeCullingCameraEnabled(FreezeCullingCameraEnabled);
+			wi::renderer::SetVXGIEnabled(VXGIEnabled);
+			wi::renderer::SetVXGIReflectionsEnabled(VXGIReflectionsEnabled);
+			wi::renderer::SetGameSpeed(GameSpeed);
+			wi::renderer::SetRaytraceBounceCount(RaytraceBounceCount);
+			wi::renderer::SetRaytraceDebugBVHVisualizerEnabled(RaytraceDebugBVHVisualizerEnabled);
+			wi::renderer::SetRaytracedShadowsEnabled(RaytracedShadowsEnabled);
+			wi::renderer::SetTessellationEnabled(TessellationEnabled);
+			wi::renderer::SetDisableAlbedoMaps(DisableAlbedoMaps);
+			wi::renderer::SetForceDiffuseLighting(ForceDiffuseLighting);
+			wi::renderer::SetScreenSpaceShadowsEnabled(ScreenSpaceShadowsEnabled);
+			wi::renderer::SetSurfelGIEnabled(SurfelGIEnabled);
+			wi::renderer::SetSurfelGIDebugEnabled(SurfelGIDebugEnabled);
+			wi::renderer::SetDDGIEnabled(DDGIEnabled);
+			wi::renderer::SetDDGIDebugEnabled(DDGIDebugEnabled);
+			wi::renderer::SetDDGIRayCount(DDGIRayCount);
+			wi::renderer::SetDDGIBlendSpeed(DDGIBlendSpeed);
+			wi::renderer::SetGIBoost(GIBoost);
+		}
+
 		void Update(float dt) override
 		{
-			// RenderPath3D::Update(dt);	// calls RenderPath2D::Update(dt);
-			using namespace wi::graphics;
-
-			GraphicsDevice* device = wi::graphics::GetDevice();
-
-			if (rtMain_render.desc.sample_count != getMSAASampleCount())
+			if (vmCam)
 			{
-				ResizeBuffers();
+				vmCam->IsActivated = true;
 			}
-
-			RenderPath2D::Update(dt); // animation update... so using scene's dt
-
-			const bool hw_raytrace = device->CheckCapability(GraphicsDeviceCapability::RAYTRACING);
-			if (getSceneUpdateEnabled())
-			{
-				if (wi::renderer::GetSurfelGIEnabled() ||
-					wi::renderer::GetDDGIEnabled() ||
-					(hw_raytrace && wi::renderer::GetRaytracedShadowsEnabled()) ||
-					(hw_raytrace && getAO() == AO_RTAO) ||
-					(hw_raytrace && getRaytracedReflectionEnabled()) ||
-					(hw_raytrace && getRaytracedDiffuseEnabled())
-					)
-				{
-					scene->SetAccelerationStructureUpdateRequested(true);
-				}
-
-				scene->camera = *camera;
-				scene->Update(dt * wi::renderer::GetGameSpeed()); // scene's dt
-			}
-
-			// Frustum culling for main camera:
-			visibility_main.layerMask = getLayerMask();
-			visibility_main.scene = scene;
-			visibility_main.camera = camera;
-			visibility_main.flags = wi::renderer::Visibility::ALLOW_EVERYTHING;
-			if (!getOcclusionCullingEnabled())
-			{
-				visibility_main.flags &= ~wi::renderer::Visibility::ALLOW_OCCLUSION_CULLING;
-			}
-			wi::renderer::UpdateVisibility(visibility_main);
-
-			if (visibility_main.planar_reflection_visible)
-			{
-				// Frustum culling for planar reflections:
-				camera_reflection = *camera;
-				camera_reflection.jitter = XMFLOAT2(0, 0);
-				camera_reflection.Reflect(visibility_main.reflectionPlane);
-				visibility_reflection.layerMask = getLayerMask();
-				visibility_reflection.scene = scene;
-				visibility_reflection.camera = &camera_reflection;
-				visibility_reflection.flags =
-					wi::renderer::Visibility::ALLOW_OBJECTS |
-					wi::renderer::Visibility::ALLOW_EMITTERS |
-					wi::renderer::Visibility::ALLOW_HAIRS |
-					wi::renderer::Visibility::ALLOW_LIGHTS
-					;
-				wi::renderer::UpdateVisibility(visibility_reflection);
-			}
-
-			XMUINT2 internalResolution = GetInternalResolution();
-
-			wi::renderer::UpdatePerFrameData(
-				*scene,
-				visibility_main,
-				frameCB,
-				getSceneUpdateEnabled() ? deltaTime : 0 // dt 는 renderer dt 이어야 한다.
-			);
-
-			if (getFSR2Enabled())
-			{
-				camera->jitter = fsr2Resources.GetJitter();
-				camera_reflection.jitter.x = camera->jitter.x * 2;
-				camera_reflection.jitter.y = camera->jitter.x * 2;
-			}
-			else if (wi::renderer::GetTemporalAAEnabled())
-			{
-				const XMFLOAT4& halton = wi::math::GetHaltonSequence(wi::graphics::GetDevice()->GetFrameCount() % 256);
-				camera->jitter.x = (halton.x * 2 - 1) / (float)internalResolution.x;
-				camera->jitter.y = (halton.y * 2 - 1) / (float)internalResolution.y;
-				camera_reflection.jitter.x = camera->jitter.x * 2;
-				camera_reflection.jitter.y = camera->jitter.x * 2;
-				if (!temporalAAResources.IsValid())
-				{
-					wi::renderer::CreateTemporalAAResources(temporalAAResources, internalResolution);
-				}
-			}
-			else
-			{
-				camera->jitter = XMFLOAT2(0, 0);
-				camera_reflection.jitter = XMFLOAT2(0, 0);
-				temporalAAResources = {};
-			}
-
-			camera->UpdateCamera();
-			if (visibility_main.planar_reflection_visible)
-			{
-				camera_reflection.UpdateCamera();
-			}
-
-			if (getAO() != AO_RTAO)
-			{
-				rtaoResources.frame = 0;
-			}
-			if (!wi::renderer::GetRaytracedShadowsEnabled())
-			{
-				rtshadowResources.frame = 0;
-			}
-			if (!getSSREnabled() && !getRaytracedReflectionEnabled())
-			{
-				rtSSR = {};
-			}
-			if (!getSSGIEnabled())
-			{
-				rtSSGI = {};
-			}
-			if (!getRaytracedDiffuseEnabled())
-			{
-				rtRaytracedDiffuse = {};
-			}
-			if (getAO() == AO_DISABLED)
-			{
-				rtAO = {};
-			}
-
-			if (wi::renderer::GetRaytracedShadowsEnabled() && device->CheckCapability(GraphicsDeviceCapability::RAYTRACING))
-			{
-				if (!rtshadowResources.denoised.IsValid())
-				{
-					wi::renderer::CreateRTShadowResources(rtshadowResources, internalResolution);
-				}
-			}
-			else
-			{
-				rtshadowResources = {};
-			}
-
-			if (scene->weather.IsRealisticSky() && scene->weather.IsRealisticSkyAerialPerspective())
-			{
-				if (!aerialperspectiveResources.texture_output.IsValid())
-				{
-					wi::renderer::CreateAerialPerspectiveResources(aerialperspectiveResources, internalResolution);
-				}
-				if (getReflectionsEnabled() && depthBuffer_Reflection.IsValid())
-				{
-					if (!aerialperspectiveResources_reflection.texture_output.IsValid())
-					{
-						wi::renderer::CreateAerialPerspectiveResources(aerialperspectiveResources_reflection, XMUINT2(depthBuffer_Reflection.desc.width, depthBuffer_Reflection.desc.height));
-					}
-				}
-				else
-				{
-					aerialperspectiveResources_reflection = {};
-				}
-			}
-			else
-			{
-				aerialperspectiveResources = {};
-			}
-
-			if (scene->weather.IsVolumetricClouds())
-			{
-				if (!volumetriccloudResources.texture_cloudRender.IsValid())
-				{
-					wi::renderer::CreateVolumetricCloudResources(volumetriccloudResources, internalResolution);
-				}
-				if (getReflectionsEnabled() && depthBuffer_Reflection.IsValid())
-				{
-					if (!volumetriccloudResources_reflection.texture_cloudRender.IsValid())
-					{
-						wi::renderer::CreateVolumetricCloudResources(volumetriccloudResources_reflection, XMUINT2(depthBuffer_Reflection.desc.width, depthBuffer_Reflection.desc.height));
-					}
-				}
-				else
-				{
-					volumetriccloudResources_reflection = {};
-				}
-			}
-			else
-			{
-				volumetriccloudResources = {};
-			}
-
-			if (!scene->waterRipples.empty())
-			{
-				if (!rtWaterRipple.IsValid())
-				{
-					TextureDesc desc;
-					desc.bind_flags = BindFlag::RENDER_TARGET | BindFlag::SHADER_RESOURCE;
-					desc.format = Format::R16G16_FLOAT;
-					desc.width = internalResolution.x / 8;
-					desc.height = internalResolution.y / 8;
-					assert(ComputeTextureMemorySizeInBytes(desc) <= ComputeTextureMemorySizeInBytes(rtParticleDistortion.desc)); // aliasing check
-					device->CreateTexture(&desc, nullptr, &rtWaterRipple, &rtParticleDistortion); // aliased!
-					device->SetName(&rtWaterRipple, "rtWaterRipple");
-				}
-			}
-			else
-			{
-				rtWaterRipple = {};
-			}
-
-			if (wi::renderer::GetSurfelGIEnabled())
-			{
-				if (!surfelGIResources.result.IsValid())
-				{
-					wi::renderer::CreateSurfelGIResources(surfelGIResources, internalResolution);
-				}
-			}
-
-			if (wi::renderer::GetVXGIEnabled())
-			{
-				if (!vxgiResources.IsValid())
-				{
-					wi::renderer::CreateVXGIResources(vxgiResources, internalResolution);
-				}
-			}
-			else
-			{
-				vxgiResources = {};
-			}
-
-			// Check whether velocity buffer is required:
-			if (
-				getMotionBlurEnabled() ||
-				wi::renderer::GetTemporalAAEnabled() ||
-				getSSREnabled() ||
-				getSSGIEnabled() ||
-				getRaytracedReflectionEnabled() ||
-				getRaytracedDiffuseEnabled() ||
-				wi::renderer::GetRaytracedShadowsEnabled() ||
-				getAO() == AO::AO_RTAO ||
-				wi::renderer::GetVariableRateShadingClassification() ||
-				getFSR2Enabled()
-				)
-			{
-				if (!rtVelocity.IsValid())
-				{
-					TextureDesc desc;
-					desc.format = Format::R16G16_FLOAT;
-					desc.bind_flags = BindFlag::SHADER_RESOURCE | BindFlag::UNORDERED_ACCESS | BindFlag::RENDER_TARGET;
-					desc.width = internalResolution.x;
-					desc.height = internalResolution.y;
-					desc.layout = ResourceState::SHADER_RESOURCE_COMPUTE;
-					device->CreateTexture(&desc, nullptr, &rtVelocity);
-					device->SetName(&rtVelocity, "rtVelocity");
-				}
-			}
-			else
-			{
-				rtVelocity = {};
-			}
-
-			// Check whether shadow mask is required:
-			if (wi::renderer::GetScreenSpaceShadowsEnabled() || wi::renderer::GetRaytracedShadowsEnabled())
-			{
-				if (!rtShadow.IsValid())
-				{
-					TextureDesc desc;
-					desc.bind_flags = BindFlag::SHADER_RESOURCE | BindFlag::UNORDERED_ACCESS;
-					desc.format = Format::R32G32B32A32_UINT;
-					desc.width = internalResolution.x;
-					desc.height = internalResolution.y;
-					desc.layout = ResourceState::SHADER_RESOURCE_COMPUTE;
-					device->CreateTexture(&desc, nullptr, &rtShadow);
-					device->SetName(&rtShadow, "rtShadow");
-				}
-			}
-			else
-			{
-				rtShadow = {};
-			}
-
-			if (getFSR2Enabled())
-			{
-				// FSR2 also acts as a temporal AA, so we inform the shaders about it here
-				//	This will allow improved stochastic alpha test transparency
-				frameCB.options |= OPTION_BIT_TEMPORALAA_ENABLED;
-				uint x = frameCB.frame_count % 4;
-				uint y = frameCB.frame_count / 4;
-				frameCB.temporalaa_samplerotation = (x & 0x000000FF) | ((y & 0x000000FF) << 8);
-			}
-
-			// Check whether visibility resources are required:
-			if (
-				visibility_shading_in_compute ||
-				getSSREnabled() ||
-				getSSGIEnabled() ||
-				getRaytracedReflectionEnabled() ||
-				getRaytracedDiffuseEnabled() ||
-				wi::renderer::GetScreenSpaceShadowsEnabled() ||
-				wi::renderer::GetRaytracedShadowsEnabled() ||
-				wi::renderer::GetVXGIEnabled()
-				)
-			{
-				if (!visibilityResources.IsValid())
-				{
-					wi::renderer::CreateVisibilityResources(visibilityResources, internalResolution);
-				}
-			}
-			else
-			{
-				visibilityResources = {};
-			}
-
-			// Check for depth of field allocation:
-			if (getDepthOfFieldEnabled() &&
-				getDepthOfFieldStrength() > 0 &&
-				camera->aperture_size > 0
-				)
-			{
-				if (!depthoffieldResources.IsValid())
-				{
-					XMUINT2 resolution = GetInternalResolution();
-					if (getFSR2Enabled())
-					{
-						resolution = XMUINT2(GetPhysicalWidth(), GetPhysicalHeight());
-					}
-					wi::renderer::CreateDepthOfFieldResources(depthoffieldResources, resolution);
-				}
-			}
-			else
-			{
-				depthoffieldResources = {};
-			}
-
-			// Check for motion blur allocation:
-			if (getMotionBlurEnabled() && getMotionBlurStrength() > 0)
-			{
-				if (!motionblurResources.IsValid())
-				{
-					XMUINT2 resolution = GetInternalResolution();
-					if (getFSR2Enabled())
-					{
-						resolution = XMUINT2(GetPhysicalWidth(), GetPhysicalHeight());
-					}
-					wi::renderer::CreateMotionBlurResources(motionblurResources, resolution);
-				}
-			}
-			else
-			{
-				motionblurResources = {};
-			}
-
-			// Keep a copy of last frame's depth buffer for temporal disocclusion checks, so swap with current one every frame:
-			std::swap(depthBuffer_Copy, depthBuffer_Copy1);
-
-			visibilityResources.depthbuffer = &depthBuffer_Copy;
-			visibilityResources.lineardepth = &rtLinearDepth;
-			if (getMSAASampleCount() > 1)
-			{
-				visibilityResources.primitiveID_resolved = &rtPrimitiveID;
-			}
-			else
-			{
-				visibilityResources.primitiveID_resolved = nullptr;
-			}
-
-			camera->canvas.init(*this);
-			camera->width = (float)internalResolution.x;
-			camera->height = (float)internalResolution.y;
-			camera->scissor = GetScissorInternalResolution();
-			camera->sample_count = depthBuffer_Main.desc.sample_count;
-			camera->texture_primitiveID_index = device->GetDescriptorIndex(&rtPrimitiveID, SubresourceType::SRV);
-			camera->texture_depth_index = device->GetDescriptorIndex(&depthBuffer_Copy, SubresourceType::SRV);
-			camera->texture_lineardepth_index = device->GetDescriptorIndex(&rtLinearDepth, SubresourceType::SRV);
-			camera->texture_velocity_index = device->GetDescriptorIndex(&rtVelocity, SubresourceType::SRV);
-			camera->texture_normal_index = device->GetDescriptorIndex(&visibilityResources.texture_normals, SubresourceType::SRV);
-			camera->texture_roughness_index = device->GetDescriptorIndex(&visibilityResources.texture_roughness, SubresourceType::SRV);
-			camera->buffer_entitytiles_index = device->GetDescriptorIndex(&tiledLightResources.entityTiles, SubresourceType::SRV);
-			camera->texture_reflection_index = device->GetDescriptorIndex(&rtReflection, SubresourceType::SRV);
-			camera->texture_reflection_depth_index = device->GetDescriptorIndex(&depthBuffer_Reflection, SubresourceType::SRV);
-			camera->texture_refraction_index = device->GetDescriptorIndex(&rtSceneCopy, SubresourceType::SRV);
-			camera->texture_waterriples_index = device->GetDescriptorIndex(&rtWaterRipple, SubresourceType::SRV);
-			camera->texture_ao_index = device->GetDescriptorIndex(&rtAO, SubresourceType::SRV);
-			camera->texture_ssr_index = device->GetDescriptorIndex(&rtSSR, SubresourceType::SRV);
-			camera->texture_ssgi_index = device->GetDescriptorIndex(&rtSSGI, SubresourceType::SRV);
-			camera->texture_rtshadow_index = device->GetDescriptorIndex(&rtShadow, SubresourceType::SRV);
-			camera->texture_rtdiffuse_index = device->GetDescriptorIndex(&rtRaytracedDiffuse, SubresourceType::SRV);
-			camera->texture_surfelgi_index = device->GetDescriptorIndex(&surfelGIResources.result, SubresourceType::SRV);
-			camera->texture_vxgi_diffuse_index = device->GetDescriptorIndex(&vxgiResources.diffuse, SubresourceType::SRV);
-			if (wi::renderer::GetVXGIReflectionsEnabled())
-			{
-				camera->texture_vxgi_specular_index = device->GetDescriptorIndex(&vxgiResources.specular, SubresourceType::SRV);
-			}
-			else
-			{
-				camera->texture_vxgi_specular_index = -1;
-			}
-
-			camera_reflection.canvas.init(*this);
-			camera_reflection.width = (float)depthBuffer_Reflection.desc.width;
-			camera_reflection.height = (float)depthBuffer_Reflection.desc.height;
-			camera_reflection.scissor.left = 0;
-			camera_reflection.scissor.top = 0;
-			camera_reflection.scissor.right = (int)depthBuffer_Reflection.desc.width;
-			camera_reflection.scissor.bottom = (int)depthBuffer_Reflection.desc.height;
-			camera_reflection.sample_count = depthBuffer_Reflection.desc.sample_count;
-			camera_reflection.texture_primitiveID_index = -1;
-			camera_reflection.texture_depth_index = device->GetDescriptorIndex(&depthBuffer_Reflection, SubresourceType::SRV);
-			camera_reflection.texture_lineardepth_index = -1;
-			camera_reflection.texture_velocity_index = -1;
-			camera_reflection.texture_normal_index = -1;
-			camera_reflection.texture_roughness_index = -1;
-			camera_reflection.buffer_entitytiles_index = device->GetDescriptorIndex(&tiledLightResources_planarReflection.entityTiles, SubresourceType::SRV);
-			camera_reflection.texture_reflection_index = -1;
-			camera_reflection.texture_reflection_depth_index = -1;
-			camera_reflection.texture_refraction_index = -1;
-			camera_reflection.texture_waterriples_index = -1;
-			camera_reflection.texture_ao_index = -1;
-			camera_reflection.texture_ssr_index = -1;
-			camera_reflection.texture_ssgi_index = -1;
-			camera_reflection.texture_rtshadow_index = -1;
-			camera_reflection.texture_rtdiffuse_index = -1;
-			camera_reflection.texture_surfelgi_index = -1;
-			camera_reflection.texture_vxgi_diffuse_index = -1;
-			camera_reflection.texture_vxgi_specular_index = -1;
-
-			video_cmd = {};
-			if (getSceneUpdateEnabled() && scene->videos.GetCount() > 0)
-			{
-				for (size_t i = 0; i < scene->videos.GetCount(); ++i)
-				{
-					const wi::scene::VideoComponent& video = scene->videos[i];
-					if (wi::video::IsDecodingRequired(&video.videoinstance, dt))
-					{
-						video_cmd = device->BeginCommandList(QUEUE_VIDEO_DECODE);
-						break;
-					}
-				}
-				for (size_t i = 0; i < scene->videos.GetCount(); ++i)
-				{
-					wi::scene::VideoComponent& video = scene->videos[i];
-					wi::video::UpdateVideo(&video.videoinstance, dt, video_cmd);
-				}
-			}
+			UpdateRendererOptions();
+			RenderPath3D::Update(dt);	// calls RenderPath2D::Update(dt);
 		}
 
 		void PostUpdate() override
@@ -1000,12 +623,14 @@ namespace vzm
 					wi::image::Draw(wi::texturehelper::getColorGradeDefault(), wi::image::Params(0, 0, 256.0f / GetDPIScaling(), 16.0f / GetDPIScaling()), cmd);
 				}
 			}
-
-			wi::profiler::DrawData(*this, 4, 10, cmd, colorspace);
-
+			
 			wi::backlog::Draw(*this, cmd, colorspace);
-
 			wi::profiler::EndRange(range); // Compose
+
+			if (DisplayProfile)
+			{
+				wi::profiler::DrawData(*this, 4, 10, cmd, colorspace);
+			}
 		}
 
 		void RenderFinalize()
@@ -1076,7 +701,11 @@ namespace vzm
 				graphicsDevice->RenderPassEnd(cmd);
 			}
 
-			wi::profiler::EndFrame(cmd);
+			if (DisplayProfile)
+			{
+				profileFrameFinished = true;
+				wi::profiler::EndFrame(cmd); // cmd must be assigned before SubmitCommandLists
+			}
 			graphicsDevice->SubmitCommandLists();
 		}
 
@@ -1125,10 +754,13 @@ namespace vzm
 				vmCam = (VmCamera*)_vmCam;
 				camEntity = vmCam->componentVID;
 			}
-			std::chrono::duration<double> time_span = std::chrono::duration_cast<std::chrono::duration<double>>(timeStamp_vmUpdate - vmCam->timeStamp);
-			if (time_span.count() > 0)
+			if (vmCam)
 			{
-				return true;
+				std::chrono::duration<double> time_span = std::chrono::duration_cast<std::chrono::duration<double>>(timeStamp_vmUpdate - vmCam->timeStamp);
+				if (time_span.count() > 0)
+				{
+					return true;
+				}
 			}
 			TryResizeRenderTargets();
 
@@ -1628,6 +1260,242 @@ namespace vzm
 		return hierarchy->parentID;
 	}
 #pragma endregion 
+
+#pragma region // VmRenderer
+#define RENDERER_GET VzmRenderer* vrenderer = (VzmRenderer*)renderer;
+	void VmRenderer::SetShadowProps2D(int max_resolution)
+	{
+		RENDERER_GET;
+		vrenderer->ShadowProps2D = max_resolution;
+	}
+	void VmRenderer::SetShadowPropsCube(int max_resolution)
+	{
+		RENDERER_GET;
+		vrenderer->ShadowPropsCube = max_resolution;
+	}
+	void VmRenderer::SetTransparentShadowsEnabled(bool value)
+	{
+		RENDERER_GET;
+		vrenderer->TransparentShadowsEnabled = value;
+	}
+	float VmRenderer::GetTransparentShadowsEnabled()
+	{
+		RENDERER_GET;
+		return vrenderer->TransparentShadowsEnabled;
+	}
+	void VmRenderer::SetWireRender(bool value)
+	{
+		RENDERER_GET;
+		vrenderer->WireRender = value;
+	}
+	bool VmRenderer::IsWireRender()
+	{
+		RENDERER_GET;
+		return vrenderer->WireRender;
+	}
+	void VmRenderer::SetToDrawDebugBoneLines(bool param){}
+	bool VmRenderer::GetToDrawDebugBoneLines()
+	{
+		RENDERER_GET;
+		return vrenderer->DrawDebugBoneLines;
+	}
+	void VmRenderer::SetToDrawDebugPartitionTree(bool param){}
+	bool VmRenderer::GetToDrawDebugPartitionTree()
+	{
+		RENDERER_GET;
+		return vrenderer->DrawDebugPartitionTree;
+	}
+	bool VmRenderer::GetToDrawDebugEnvProbes()
+	{
+		RENDERER_GET;
+		return vrenderer->DrawDebugEnvProbes;
+	}
+	void VmRenderer::SetToDrawDebugEnvProbes(bool value){}
+	void VmRenderer::SetToDrawDebugEmitters(bool param){}
+	bool VmRenderer::GetToDrawDebugEmitters()
+	{
+		RENDERER_GET;
+		return vrenderer->DrawDebugEmitters;
+	}
+	void VmRenderer::SetToDrawDebugForceFields(bool param){}
+	bool VmRenderer::GetToDrawDebugForceFields()
+	{
+		RENDERER_GET;
+		return vrenderer->DrawDebugForceFields;
+	}
+	void VmRenderer::SetToDrawDebugCameras(bool param){}
+	bool VmRenderer::GetToDrawDebugCameras()
+	{
+		RENDERER_GET;
+		return vrenderer->DrawDebugCameras;
+	}
+	void VmRenderer::SetToDrawDebugColliders(bool param){}
+	bool VmRenderer::GetToDrawDebugColliders()
+	{
+		RENDERER_GET;
+		return vrenderer->DrawDebugColliders;
+	}
+	bool VmRenderer::GetToDrawGridHelper()
+	{
+		RENDERER_GET;
+		return vrenderer->DrawGridHelper;
+	}
+	void VmRenderer::SetToDrawGridHelper(bool value)
+	{
+		RENDERER_GET;
+		vrenderer->DrawGridHelper = true;
+	}
+	bool VmRenderer::GetToDrawVoxelHelper()
+	{
+		RENDERER_GET;
+		return vrenderer->DrawVoxelHelper;
+	}
+	void VmRenderer::SetToDrawVoxelHelper(bool value, int clipmap_level){}
+	void VmRenderer::SetDebugLightCulling(bool enabled){}
+	bool VmRenderer::GetDebugLightCulling()
+	{
+		RENDERER_GET;
+		return vrenderer->DebugLightCulling;
+	}
+	void VmRenderer::SetAdvancedLightCulling(bool enabled){}
+	bool VmRenderer::GetAdvancedLightCulling()
+	{
+		RENDERER_GET;
+		return vrenderer->AdvancedLightCulling;
+	}
+	void VmRenderer::SetVariableRateShadingClassification(bool enabled){}
+	bool VmRenderer::GetVariableRateShadingClassification()
+	{
+		RENDERER_GET;
+		return vrenderer->VariableRateShadingClassification;
+	}
+	void VmRenderer::SetVariableRateShadingClassificationDebug(bool enabled){}
+	bool VmRenderer::GetVariableRateShadingClassificationDebug()
+	{
+		RENDERER_GET;
+		return vrenderer->VariableRateShadingClassificationDebug;
+	}
+	void VmRenderer::SetTemporalAAEnabled(bool enabled){}
+	bool VmRenderer::GetTemporalAAEnabled()
+	{
+		RENDERER_GET;
+		return vrenderer->TemporalAAEnabled;
+	}
+	void VmRenderer::SetTemporalAADebugEnabled(bool enabled){}
+	bool VmRenderer::GetTemporalAADebugEnabled()
+	{
+		RENDERER_GET;
+		return vrenderer->TemporalAADebugEnabled;
+	}
+	void VmRenderer::SetFreezeCullingCameraEnabled(bool enabled){}
+	bool VmRenderer::GetFreezeCullingCameraEnabled()
+	{
+		RENDERER_GET;
+		return vrenderer->FreezeCullingCameraEnabled;
+	}
+	void VmRenderer::SetVXGIEnabled(bool enabled){}
+	bool VmRenderer::GetVXGIEnabled()
+	{
+		RENDERER_GET;
+		return vrenderer->VXGIEnabled;
+	}
+	void VmRenderer::SetVXGIReflectionsEnabled(bool enabled){}
+	bool VmRenderer::GetVXGIReflectionsEnabled()
+	{
+		RENDERER_GET;
+		return vrenderer->VXGIReflectionsEnabled;
+	}
+	void VmRenderer::SetGameSpeed(float value){}
+	float VmRenderer::GetGameSpeed()
+	{
+		RENDERER_GET;
+		return vrenderer->GameSpeed;
+	}
+	void VmRenderer::SetRaytraceBounceCount(uint32_t bounces){}
+	uint32_t VmRenderer::GetRaytraceBounceCount()
+	{
+		RENDERER_GET;
+		return vrenderer->RaytraceBounceCount;
+	}
+	void VmRenderer::SetRaytraceDebugBVHVisualizerEnabled(bool value){}
+	bool VmRenderer::GetRaytraceDebugBVHVisualizerEnabled()
+	{
+		RENDERER_GET;
+		return vrenderer->RaytraceDebugBVHVisualizerEnabled;
+	}
+	void VmRenderer::SetRaytracedShadowsEnabled(bool value){}
+	bool VmRenderer::GetRaytracedShadowsEnabled()
+	{
+		RENDERER_GET;
+		return vrenderer->RaytracedShadowsEnabled;
+	}
+	void VmRenderer::SetTessellationEnabled(bool value){}
+	bool VmRenderer::GetTessellationEnabled()
+	{
+		RENDERER_GET;
+		return vrenderer->TessellationEnabled;
+	}
+	void VmRenderer::SetDisableAlbedoMaps(bool value){}
+	bool VmRenderer::IsDisableAlbedoMaps()
+	{
+		RENDERER_GET;
+		return vrenderer->DisableAlbedoMaps;
+	}
+	void VmRenderer::SetForceDiffuseLighting(bool value){}
+	bool VmRenderer::IsForceDiffuseLighting()
+	{
+		RENDERER_GET;
+		return vrenderer->ForceDiffuseLighting;
+	}
+	void VmRenderer::SetScreenSpaceShadowsEnabled(bool value){}
+	bool VmRenderer::GetScreenSpaceShadowsEnabled()
+	{
+		RENDERER_GET;
+		return vrenderer->ScreenSpaceShadowsEnabled;
+	}
+	void VmRenderer::SetSurfelGIEnabled(bool value){}
+	bool VmRenderer::GetSurfelGIEnabled()
+	{
+		RENDERER_GET;
+		return vrenderer->SurfelGIEnabled;
+	}
+	void VmRenderer::SetSurfelGIDebugEnabled(SURFEL_DEBUG value){}
+	VmRenderer::SURFEL_DEBUG VmRenderer::GetSurfelGIDebugEnabled()
+	{
+		RENDERER_GET;
+		return (VmRenderer::SURFEL_DEBUG)vrenderer->SurfelGIDebugEnabled;
+	}
+	void VmRenderer::SetDDGIEnabled(bool value){}
+	bool VmRenderer::GetDDGIEnabled()
+	{
+		RENDERER_GET;
+		return vrenderer->DDGIEnabled;
+	}
+	void VmRenderer::SetDDGIDebugEnabled(bool value){}
+	bool VmRenderer::GetDDGIDebugEnabled()
+	{
+		RENDERER_GET;
+		return vrenderer->DDGIDebugEnabled;
+	}
+	void VmRenderer::SetDDGIRayCount(uint32_t value){}
+	uint32_t VmRenderer::GetDDGIRayCount()
+	{
+		RENDERER_GET;
+		return vrenderer->DDGIRayCount;
+	}
+	void VmRenderer::SetDDGIBlendSpeed(float value){}
+	float VmRenderer::GetDDGIBlendSpeed()
+	{
+		RENDERER_GET;
+		return vrenderer->DDGIBlendSpeed;
+	}
+	void VmRenderer::SetGIBoost(float value){}
+	float VmRenderer::GetGIBoost()
+	{
+		RENDERER_GET;
+		return vrenderer->GIBoost;
+	}
+#pragma endregion
 
 #pragma region // VmCamera
 	void VmCamera::SetPose(const float pos[3], const float view[3], const float up[3])
@@ -2596,6 +2464,9 @@ namespace vzm
 
 		wi::backlog::setFontColor(wi::Color(130, 210, 220, 255));
 
+		// DOJO TO DO
+		// ACTIVATED RENDERER CHECKER ==> this is for info display
+
 		return VZ_OK;
 	}
 
@@ -2691,7 +2562,7 @@ namespace vzm
 
 			vmCam->compType = compType;
 			vmCam->componentVID = ett;
-			vmCam->renderer = (VmRenderer*)renderer;
+			vmCam->renderer = (void*)renderer;
 			renderer->UpdateVmCamera(vmCam);
 			renderer->init(CANVAS_INIT_W, CANVAS_INIT_H, CANVAS_INIT_DPI);
 			renderer->Load(); // Calls renderer->Start()
@@ -2952,7 +2823,7 @@ namespace vzm
 
 			vmCam->compType = COMPONENT_TYPE::CAMERA;
 			vmCam->componentVID = ett;
-			vmCam->renderer = (VmRenderer*)renderer;
+			vmCam->renderer = (void*)renderer;
 			renderer->UpdateVmCamera(vmCam);
 			renderer->init(CANVAS_INIT_W, CANVAS_INIT_H, CANVAS_INIT_DPI);
 			renderer->Load(); // Calls renderer->Start()
@@ -3013,16 +2884,16 @@ namespace vzm
 			return VZ_FAIL;
 		}
 
+		wi::font::UpdateAtlas(renderer->GetDPIScaling());
+
+		renderer->UpdateVmCamera();
+
 		// DOJO TO DO : CHECK updateScene across cameras belonging to a scene and force to use a oldest one...
 		renderer->setSceneUpdateEnabled(updateScene || renderer->FRAMECOUNT == 0);
 		if (!updateScene)
 		{
 			renderer->scene->camera = *renderer->camera;
 		}
-
-		wi::font::UpdateAtlas(renderer->GetDPIScaling());
-
-		renderer->UpdateVmCamera();
 
 		if (!wi::initializer::IsInitializeFinished())
 		{
@@ -3031,7 +2902,11 @@ namespace vzm
 			return VZ_JOB_WAIT;
 		}
 
-		wi::profiler::BeginFrame();
+		if (profileFrameFinished)
+		{
+			profileFrameFinished = false;
+			wi::profiler::BeginFrame();
+		}
 
 		VzmScene* scene = (VzmScene*)renderer->scene;
 
@@ -3113,6 +2988,71 @@ namespace vzm
 	void ReloadShader()
 	{
 		wi::renderer::ReloadShaders();
+	}
+
+	VID DisplayInfo(const int w, const int h, const bool displayProfile, const bool displayEngineStates)
+	{
+		static bool isFirstCall = true;
+		static VID sceneVid = sceneManager.CreateSceneEntity("__VZM_ENGINE_INTERNAL__");
+		VzmScene* sceneInternalState = sceneManager.GetScene(sceneVid);
+		static Entity canvasEtt = sceneInternalState->Entity_CreateCamera("INFO_CANVAS", w, h);
+		static VzmRenderer* sysInfoRenderer = sceneManager.CreateRenderer(canvasEtt);
+
+		if (isFirstCall)
+		{
+			sysInfoRenderer->init(w, h, CANVAS_INIT_DPI);
+
+			sysInfoRenderer->infoDisplay.active = true;
+			sysInfoRenderer->infoDisplay.watermark = true;
+			sysInfoRenderer->infoDisplay.fpsinfo = true;
+			sysInfoRenderer->infoDisplay.resolution = true;
+			sysInfoRenderer->infoDisplay.colorspace = true;
+			sysInfoRenderer->infoDisplay.device_name = true;
+			sysInfoRenderer->infoDisplay.vram_usage = true;
+			sysInfoRenderer->infoDisplay.heap_allocation_counter = true;
+
+			sysInfoRenderer->DisplayProfile = true;
+			wi::profiler::SetEnabled(true);
+
+			{
+				const float fadeSeconds = 0.f;
+				wi::Color fadeColor = wi::Color(0, 0, 0, 255);
+				// Fade manager will activate on fadeout
+				sysInfoRenderer->fadeManager.Clear();
+				sysInfoRenderer->fadeManager.Start(fadeSeconds, fadeColor, []() {
+					sysInfoRenderer->Start();
+					});
+
+				sysInfoRenderer->fadeManager.Update(0); // If user calls ActivatePath without fadeout, it will be instant
+			}
+			isFirstCall = false;
+		}
+
+		sysInfoRenderer->camEntity = canvasEtt;
+		sysInfoRenderer->width = w;
+		sysInfoRenderer->height = h;
+		sysInfoRenderer->UpdateVmCamera();
+
+		sysInfoRenderer->setSceneUpdateEnabled(false);
+		sysInfoRenderer->scene->camera = *sysInfoRenderer->camera;
+
+		wi::font::UpdateAtlas(sysInfoRenderer->GetDPIScaling());
+
+		if (!wi::initializer::IsInitializeFinished())
+		{
+			// Until engine is not loaded, present initialization screen...
+			//sysInfoRenderer->WaitRender();
+			return VZ_JOB_WAIT;
+		}
+
+		if (profileFrameFinished)
+		{
+			profileFrameFinished = false;
+			wi::profiler::BeginFrame();
+		}
+		sysInfoRenderer->RenderFinalize(); // set profileFrameFinished to true inside
+
+		return (VID)canvasEtt;
 	}
 
 	void* GetGraphicsSharedRenderTarget(const int camVid, const void* graphicsDev2, const void* srv_desc_heap2, const int descriptor_index, uint32_t* w, uint32_t* h)

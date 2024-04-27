@@ -58,6 +58,10 @@ namespace vzm
 	// Reload shaders
 	__dojostatic void ReloadShader();
 
+	// Display Engine's states and profiling information
+	//  - return canvas VID (use this as a camVid)
+	__dojostatic VID DisplayInfo(const int w, const int h, const bool displayProfile = true, const bool displayEngineStates = true);
+
 	__dojostatic VZRESULT DeinitEngineLib();
 }
 
@@ -74,4 +78,36 @@ namespace vzm // helper APIs
 		bool Move(const float pos_xy[2]);	// target is camera
 		bool PanMove(const float pos_xy[2]);
 	};
+
+	struct InfoDisplayer
+	{
+		// activate the whole display
+		bool active = false;
+		// display engine version number
+		bool watermark = false;
+		// display framerate
+		bool fpsinfo = false;
+		// display graphics device name
+		bool device_name = false;
+		// display resolution info
+		bool resolution = false;
+		// window's size in logical (DPI scaled) units
+		bool logical_size = false;
+		// HDR status and color space
+		bool colorspace = false;
+		// display number of heap allocations per frame
+		bool heap_allocation_counter = false;
+		// display the active graphics pipeline count
+		bool pipeline_count = false;
+		// display video memory usage and budget
+		bool vram_usage = false;
+		// text size
+		int size = 10;
+		// display default color grading helper texture in top left corner of the screen
+		bool colorgrading_helper = false;
+	};
+	// Set Info Display on Canvas
+	__dojostatic void SetInfoDisplay(const VID camVid, const InfoDisplayer& infoDisplay);
+	// Set Info Display on Canvas
+	__dojostatic void SetRendererOptions(const VID camVid, const InfoDisplayer& infoDisplay);
 }

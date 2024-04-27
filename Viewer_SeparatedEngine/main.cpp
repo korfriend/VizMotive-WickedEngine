@@ -176,8 +176,8 @@ int main(int, char**)
 
 				sid = vzm::NewScene("my scene");
 
-				vzm::VmWeather* vWeather;// = vzm::GetSceneActivatedWeather(sid);
-				vzm::NewSceneComponent(vzm::COMPONENT_TYPE::WEATHER, sid, "weather", 0, CMPP(vWeather));
+				vzm::VmWeather* vWeather = vzm::GetSceneActivatedWeather(sid);
+				//vzm::NewSceneComponent(vzm::COMPONENT_TYPE::WEATHER, sid, "weather", 0, CMPP(vWeather));
 				if (vWeather)
 				{
 					vWeather->SetRealisticSky(true);
@@ -201,6 +201,7 @@ int main(int, char**)
 				glm::fvec3 view = at - pos;
 				vCam->SetPose(__FP pos, __FP view, __FP up);
 				vCam->SetPerspectiveProjection(0.1f, 5000.f, glm::pi<float>() * 0.25f, 1.f);
+				vCam->SetToDrawGridHelper(true);
 
 				auto callbackLoadModel = [&](VID sceneVid, VID rootVid)
 					{
@@ -562,6 +563,21 @@ int main(int, char**)
 				ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
 			}
 			ImGui::End();
+
+			ImGui::Begin("Info");
+			ImVec2 curWindowSize3 = ImGui::GetWindowSize();
+			if (curWindowSize3.x * curWindowSize3.y == 0)
+			{
+				ImGui::SetWindowSize(ImVec2(0, 0));
+				curWindowSize3 = ImGui::GetWindowSize();
+			}
+			VID canvasVis = vzm::DisplayInfo(curWindowSize3.x, curWindowSize3.y);
+			// Note that we pass the GPU SRV handle here, *not* the CPU handle. We're passing the internal pointer value, cast to an ImTextureID
+			uint32_t w, h;
+			ImTextureID texId = vzm::GetGraphicsSharedRenderTarget(canvasVis, g_pd3dDevice, g_pd3dSrvDescHeap, 3, &w, &h);
+			// https://github.com/ocornut/imgui/wiki/Image-Loading-and-Displaying-Examples
+			ImGui::Image(texId, ImVec2((float)w, (float)h));
+			ImGui::End();
 		}
 
 		// Rendering
@@ -689,7 +705,7 @@ bool CreateDeviceD3D(HWND hWnd)
 	{
 		D3D12_DESCRIPTOR_HEAP_DESC desc = {};
 		desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-		desc.NumDescriptors = 3;
+		desc.NumDescriptors = 4;
 		desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 		if (g_pd3dDevice->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&g_pd3dSrvDescHeap)) != S_OK)
 			return false;
