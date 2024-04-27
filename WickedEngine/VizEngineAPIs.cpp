@@ -309,9 +309,6 @@ namespace vzm
 			this->ClearFonts();
 
 			// remove...
-			wi::renderer::SetToDrawGridHelper(true);
-			wi::renderer::SetVXGIReflectionsEnabled(false);
-			wi::renderer::SetTemporalAAEnabled(false);
 			setSSREnabled(false);
 			setFXAAEnabled(false);
 			setReflectionsEnabled(true);
