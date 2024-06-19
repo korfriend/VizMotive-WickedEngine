@@ -38,6 +38,7 @@ namespace wi::ecs
 		uint64_t version = 0; // The ComponentLibrary serialization will modify this by the registered component's version number
 		wi::unordered_set<std::string> resource_registration; // register for resource manager serialization
 		ComponentLibrary* componentlibrary = nullptr;
+		wi::unordered_map<std::string, uint64_t> library_versions;
 
 		~EntitySerializer()
 		{
@@ -49,6 +50,15 @@ namespace wi::ecs
 		uint64_t GetVersion() const
 		{
 			return version;
+		}
+		uint64_t GetVersion(const std::string& name) const
+		{
+			auto it = library_versions.find(name);
+			if (it != library_versions.end())
+			{
+				return it->second;
+			}
+			return 0;
 		}
 
 		void RegisterResource(const std::string& resource_name)
@@ -148,10 +158,17 @@ namespace wi::ecs
 		// Perform deep copy of all the contents of "other" into this
 		inline void Copy(const ComponentManager<Component>& other)
 		{
-			Clear();
-			components = other.components;
-			entities = other.entities;
-			lookup = other.lookup;
+			components.reserve(GetCount() + other.GetCount());
+			entities.reserve(GetCount() + other.GetCount());
+			lookup.reserve(GetCount() + other.GetCount());
+			for (size_t i = 0; i < other.GetCount(); ++i)
+			{
+				Entity entity = other.entities[i];
+				assert(!Contains(entity));
+				entities.push_back(entity);
+				lookup[entity] = components.size();
+				components.push_back(other.components[i]);
+			}
 		}
 
 		// Merge in an other component manager of the same type to this.
@@ -502,6 +519,34 @@ namespace wi::ecs
 			if(archive.IsReadMode())
 			{
 				bool has_next = false;
+				size_t begin = archive.GetPos();
+
+				// First pass, gather component type versions and jump over all data:
+				//	This is so that we can look up other component versions within component serialization if needed
+				do
+				{
+					archive >> has_next;
+					if (has_next)
+					{
+						std::string name;
+						archive >> name;
+						uint64_t jump_pos = 0;
+						archive >> jump_pos;
+						auto it = entries.find(name);
+						if (it != entries.end())
+						{
+							archive >> seri.version;
+							seri.library_versions[name] = seri.version;
+						}
+						archive.Jump(jump_pos);
+					}
+				} while (has_next);
+
+				// Jump back to beginning of component library data
+				archive.Jump(begin);
+
+				// Second pass, read all component data:
+				//	At this point, all existing component type versions are available
 				do
 				{
 					archive >> has_next;
@@ -509,8 +554,8 @@ namespace wi::ecs
 					{
 						std::string name;
 						archive >> name;
-						uint64_t jump_size = 0;
-						archive >> jump_size;
+						uint64_t jump_pos = 0;
+						archive >> jump_pos;
 						auto it = entries.find(name);
 						if(it != entries.end())
 						{
@@ -520,7 +565,7 @@ namespace wi::ecs
 						else
 						{
 							// component manager of this name was not registered, skip serialization by jumping over the data
-							archive.Jump(jump_size);
+							archive.Jump(jump_pos);
 						}
 					}
 				}
@@ -528,6 +573,12 @@ namespace wi::ecs
 			}
 			else
 			{
+				// Save all component type versions:
+				for (auto& it : entries)
+				{
+					seri.library_versions[it.first] = it.second.version;
+				}
+				// Serialize all component data, at this point component type version lookup is also complete
 				for(auto& it : entries)
 				{
 					archive << true;

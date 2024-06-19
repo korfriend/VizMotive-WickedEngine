@@ -38,6 +38,7 @@ namespace wi::scene
 		RunScriptUpdateSystem(ctx);
 
 		ScanAnimationDependencies();
+		ScanSpringDependencies();
 
 		// Terrains updates kick off:
 		if (dt > 0)
@@ -129,6 +130,28 @@ namespace wi::scene
 			}
 		}
 		materialArrayMapped = (ShaderMaterial*)materialUploadBuffer[device->GetBufferIndex()].mapped_data;
+
+		if (textureStreamingFeedbackBuffer.desc.size < materialArraySize * sizeof(uint32_t))
+		{
+			GPUBufferDesc desc;
+			desc.stride = sizeof(uint32_t);
+			desc.size = desc.stride * materialArraySize * 2; // *2 to grow fast
+			desc.bind_flags = BindFlag::UNORDERED_ACCESS;
+			desc.format = Format::R32_UINT;
+			device->CreateBuffer(&desc, nullptr, &textureStreamingFeedbackBuffer);
+			device->SetName(&textureStreamingFeedbackBuffer, "Scene::textureStreamingFeedbackBuffer");
+
+			// Readback buffer shouldn't be used by shaders:
+			desc.usage = Usage::READBACK;
+			desc.bind_flags = BindFlag::NONE;
+			desc.misc_flags = ResourceMiscFlag::NONE;
+			for (int i = 0; i < arraysize(materialUploadBuffer); ++i)
+			{
+				device->CreateBuffer(&desc, nullptr, &textureStreamingFeedbackBuffer_readback[i]);
+				device->SetName(&textureStreamingFeedbackBuffer_readback[i], "Scene::textureStreamingFeedbackBuffer_readback");
+			}
+		}
+		textureStreamingFeedbackMapped = (const uint32_t*)textureStreamingFeedbackBuffer_readback[device->GetBufferIndex()].mapped_data;
 
 		// Occlusion culling read:
 		if(wi::renderer::GetOcclusionCullingEnabled() && !wi::renderer::GetFreezeCullingCameraEnabled())
@@ -583,13 +606,6 @@ namespace wi::scene
 				device->CreateBuffer(&buf, nullptr, &ddgi.ray_buffer);
 				device->SetName(&ddgi.ray_buffer, "ddgi.ray_buffer");
 
-				buf.stride = sizeof(DDGIProbeOffset);
-				buf.size = buf.stride * probe_count;
-				buf.bind_flags = BindFlag::UNORDERED_ACCESS | BindFlag::SHADER_RESOURCE;
-				buf.misc_flags = ResourceMiscFlag::BUFFER_RAW;
-				device->CreateBuffer(&buf, nullptr, &ddgi.offset_buffer);
-				device->SetName(&ddgi.offset_buffer, "ddgi.offset_buffer");
-
 				buf.stride = sizeof(DDGIVarianceDataPacked);
 				buf.size = buf.stride * probe_count * DDGI_COLOR_RESOLUTION * DDGI_COLOR_RESOLUTION;
 				buf.misc_flags = ResourceMiscFlag::BUFFER_STRUCTURED;
@@ -666,6 +682,16 @@ namespace wi::scene
 				tex.layout = ResourceState::SHADER_RESOURCE;
 				device->CreateTexture(&tex, nullptr, &ddgi.depth_texture);
 				device->SetName(&ddgi.depth_texture, "ddgi.depth_texture");
+
+				tex.type = TextureDesc::Type::TEXTURE_3D;
+				tex.width = ddgi.grid_dimensions.x;
+				tex.height = ddgi.grid_dimensions.z;
+				tex.depth = ddgi.grid_dimensions.y;
+				tex.format = Format::R10G10B10A2_UNORM;
+				tex.bind_flags = BindFlag::SHADER_RESOURCE | BindFlag::UNORDERED_ACCESS;
+				tex.layout = ResourceState::SHADER_RESOURCE_COMPUTE;
+				device->CreateTexture(&tex, nullptr, &ddgi.offset_texture);
+				device->SetName(&ddgi.offset_texture, "ddgi.offset_texture");
 			}
 			ddgi.grid_min = bounds.getMin();
 			ddgi.grid_min.x -= 1;
@@ -871,6 +897,7 @@ namespace wi::scene
 			shaderscene.materialbuffer = device->GetDescriptorIndex(&materialBuffer, SubresourceType::SRV);
 		}
 		shaderscene.meshletbuffer = device->GetDescriptorIndex(&meshletBuffer, SubresourceType::SRV);
+		shaderscene.texturestreamingbuffer = device->GetDescriptorIndex(&textureStreamingFeedbackBuffer, SubresourceType::UAV);
 		if (weather.skyMap.IsValid())
 		{
 			shaderscene.globalenvmap = device->GetDescriptorIndex(&weather.skyMap.GetTexture(), SubresourceType::SRV, weather.skyMap.GetTextureSRGBSubresource());
@@ -949,7 +976,7 @@ namespace wi::scene
 		shaderscene.ddgi.depth_texture_resolution_rcp = float2(1.0f / shaderscene.ddgi.depth_texture_resolution.x, 1.0f / shaderscene.ddgi.depth_texture_resolution.y);
 		shaderscene.ddgi.color_texture = device->GetDescriptorIndex(&ddgi.color_texture, SubresourceType::SRV);
 		shaderscene.ddgi.depth_texture = device->GetDescriptorIndex(&ddgi.depth_texture, SubresourceType::SRV);
-		shaderscene.ddgi.offset_buffer = device->GetDescriptorIndex(&ddgi.offset_buffer, SubresourceType::SRV);
+		shaderscene.ddgi.offset_texture = device->GetDescriptorIndex(&ddgi.offset_texture, SubresourceType::SRV);
 		shaderscene.ddgi.grid_min = ddgi.grid_min;
 		shaderscene.ddgi.grid_extents.x = abs(ddgi.grid_max.x - ddgi.grid_min.x);
 		shaderscene.ddgi.grid_extents.y = abs(ddgi.grid_max.y - ddgi.grid_min.y);
@@ -1125,6 +1152,54 @@ namespace wi::scene
 		collider_count_cpu = collider_allocator_cpu.load();
 		collider_count_gpu = collider_allocator_gpu.load();
 		collider_bvh.Build(aabb_colliders_cpu, collider_count_cpu);
+	}
+	Entity Scene::Instantiate(Scene& prefab, bool attached)
+	{
+		wi::Timer timer;
+
+		// Duplicate prefab into tmp scene
+		//	Note: we directly use componentLibrary.Serialize instead of serializing whole scene
+		//	Because prefab scene's resources are already in memory, and we don't need to handle them
+		//	Also other generic scene serialization can be skipped
+		Scene tmp;
+		wi::Archive archive;
+		EntitySerializer seri;
+
+		archive.SetReadModeAndResetPos(false);
+		prefab.componentLibrary.Serialize(archive, seri);
+
+		archive.SetReadModeAndResetPos(true);
+		tmp.componentLibrary.Serialize(archive, seri);
+
+		Entity rootEntity = INVALID_ENTITY;
+
+		if (attached)
+		{
+			// Create root entity
+			rootEntity = CreateEntity();
+			tmp.transforms.Create(rootEntity);
+			tmp.layers.Create(rootEntity).layerMask = ~0;
+
+			// Parent all unparented transforms to new root entity
+			for (size_t i = 0; i < tmp.transforms.GetCount(); ++i)
+			{
+				Entity entity = tmp.transforms.GetEntity(i);
+				if (entity != rootEntity && !tmp.hierarchy.Contains(entity))
+				{
+					tmp.Component_Attach(entity, rootEntity);
+				}
+			}
+		}
+
+		wi::jobsystem::Wait(seri.ctx); // wait for completion of component serializations background threads here
+
+		Merge(tmp);
+
+		char text[64] = {};
+		snprintf(text, arraysize(text), "Scene::Instantiate took %.2f ms", timer.elapsed_milliseconds());
+		wi::backlog::post(text);
+
+		return rootEntity;
 	}
 	void Scene::FindAllEntities(wi::unordered_set<wi::ecs::Entity>& entities) const
 	{
@@ -1419,7 +1494,7 @@ namespace wi::scene
 		{
 			SoundComponent& sound = sounds.Create(entity);
 			sound.filename = filename;
-			sound.soundResource = wi::resourcemanager::Load(filename, wi::resourcemanager::Flags::IMPORT_RETAIN_FILEDATA);
+			sound.soundResource = wi::resourcemanager::Load(filename);
 			wi::audio::CreateSoundInstance(&sound.soundResource.GetSound(), &sound.soundinstance);
 		}
 
@@ -1442,7 +1517,7 @@ namespace wi::scene
 		{
 			VideoComponent& video = videos.Create(entity);
 			video.filename = filename;
-			video.videoResource = wi::resourcemanager::Load(filename, wi::resourcemanager::Flags::IMPORT_RETAIN_FILEDATA);
+			video.videoResource = wi::resourcemanager::Load(filename);
 			wi::video::CreateVideoInstance(&video.videoResource.GetVideo(), &video.videoinstance);
 		}
 
@@ -2147,7 +2222,7 @@ namespace wi::scene
 							{
 								t = (animation.timer - left) / (right - left);
 							}
-							t = wi::math::saturate(t);
+							t = saturate(t);
 
 							switch (path_data_type)
 							{
@@ -2227,7 +2302,7 @@ namespace wi::scene
 							{
 								t = (animation.timer - left) / (right - left);
 							}
-							t = wi::math::saturate(t);
+							t = saturate(t);
 
 							const float t2 = t * t;
 							const float t3 = t2 * t;
@@ -2712,12 +2787,12 @@ namespace wi::scene
 					if (blink_state < 0.5f)
 					{
 						// closing
-						expression.weight = wi::math::Lerp(0, 1, wi::math::saturate(blink_state * 2));
+						expression.weight = wi::math::Lerp(0, 1, saturate(blink_state * 2));
 					}
 					else
 					{
 						// opening
-						expression.weight = wi::math::Lerp(1, 0, wi::math::saturate((blink_state - 0.5f) * 2));
+						expression.weight = wi::math::Lerp(1, 0, saturate((blink_state - 0.5f) * 2));
 					}
 					if (expression_mastering.blink_timer >= 1 + all_blink_length)
 					{
@@ -2734,10 +2809,10 @@ namespace wi::scene
 				// Roll new random look direction for next look away event:
 				float vertical = wi::random::GetRandom(-1.0f, 1.0f);
 				float horizontal = wi::random::GetRandom(-1.0f, 1.0f);
-				expression_mastering.look_weights[0] = wi::math::saturate(vertical);
-				expression_mastering.look_weights[1] = wi::math::saturate(-vertical);
-				expression_mastering.look_weights[2] = wi::math::saturate(horizontal);
-				expression_mastering.look_weights[3] = wi::math::saturate(-horizontal);
+				expression_mastering.look_weights[0] = saturate(vertical);
+				expression_mastering.look_weights[1] = saturate(-vertical);
+				expression_mastering.look_weights[2] = saturate(horizontal);
+				expression_mastering.look_weights[3] = saturate(-horizontal);
 			}
 			expression_mastering.look_timer += expression_mastering.look_frequency * dt;
 			if (expression_mastering.look_timer >= 1)
@@ -2758,11 +2833,11 @@ namespace wi::scene
 						float look_state = wi::math::InverseLerp(0, expression_mastering.look_length * expression_mastering.look_frequency, expression_mastering.look_timer - 1);
 						if (look_state < 0.25f)
 						{
-							expression.weight = wi::math::Lerp(0, weight, wi::math::saturate(look_state * 4));
+							expression.weight = wi::math::Lerp(0, weight, saturate(look_state * 4));
 						}
 						else
 						{
-							expression.weight = wi::math::Lerp(weight, 0, wi::math::saturate((look_state - 0.75f) * 4));
+							expression.weight = wi::math::Lerp(weight, 0, saturate((look_state - 0.75f) * 4));
 						}
 						expression.SetDirty();
 					}
@@ -2941,7 +3016,7 @@ namespace wi::scene
 				if (mouth >= 0 && mouth < expression_mastering.expressions.size())
 				{
 					ExpressionComponent::Expression& expression = expression_mastering.expressions[mouth];
-					expression.weight *= 1 - wi::math::saturate(overrideMouthBlend);
+					expression.weight *= 1 - saturate(overrideMouthBlend);
 				}
 			}
 			const int blinks[] = {
@@ -2954,7 +3029,7 @@ namespace wi::scene
 				if (blink >= 0 && blink < expression_mastering.expressions.size())
 				{
 					ExpressionComponent::Expression& expression = expression_mastering.expressions[blink];
-					expression.weight *= 1 - wi::math::saturate(overrideBlinkBlend);
+					expression.weight *= 1 - saturate(overrideBlinkBlend);
 				}
 			}
 			const int looks[] = {
@@ -2968,7 +3043,7 @@ namespace wi::scene
 				if (look >= 0 && look < expression_mastering.expressions.size())
 				{
 					ExpressionComponent::Expression& expression = expression_mastering.expressions[look];
-					expression.weight *= 1 - wi::math::saturate(overrideLookBlend);
+					expression.weight *= 1 - saturate(overrideLookBlend);
 				}
 			}
 
@@ -3053,6 +3128,8 @@ namespace wi::scene
 					for (size_t humanoid_idx = 0; (humanoid_idx < humanoids.GetCount()) && !constrain; ++humanoid_idx)
 					{
 						const HumanoidComponent& humanoid = humanoids[humanoid_idx];
+						Entity humanoidEntity = humanoids.GetEntity(humanoid_idx);
+						const float facing = GetHumanoidDefaultFacing(humanoid, humanoidEntity);
 						int bone_type_idx = 0;
 						for (auto& bone : humanoid.bones)
 						{
@@ -3077,7 +3154,24 @@ namespace wi::scene
 								}
 							}
 							if (constrain)
+							{
+								// Constraint swapping fixes for flipped model orientations:
+								if (facing < 0)
+								{
+									// Note: this is a fix for VRM 1.0 and Mixamo model
+									std::swap(constraint_min, constraint_max);
+								}
+								const TransformComponent* bone_transform = transforms.GetComponent(bone);
+								if (bone_transform != nullptr)
+								{
+									if (bone_transform->GetForward().z < 0)
+									{
+										// Note: this is a fix for FBX Mixamo models
+										std::swap(constraint_min, constraint_max);
+									}
+								}
 								break;
+							}
 							bone_type_idx++;
 						}
 					}
@@ -3088,13 +3182,14 @@ namespace wi::scene
 						// Apply constrained rotation:
 						Q = XMQuaternionIdentity();
 						XMMATRIX W = XMLoadFloat4x4(&parent_transform.world);
+						const float iteration_count_rcp = 1.0f / (float)ik.iteration_count;
 						for (int axis_idx = 0; axis_idx < 3; ++axis_idx)
 						{
 							XMFLOAT3 axis_floats = XMFLOAT3(0, 0, 0);
 							((float*)&axis_floats)[axis_idx] = 1;
 							XMVECTOR axis = XMLoadFloat3(&axis_floats);
-							const float axis_min = ((float*)&constraint_min)[axis_idx] / (float)ik.iteration_count;
-							const float axis_max = ((float*)&constraint_max)[axis_idx] / (float)ik.iteration_count;
+							const float axis_min = ((float*)&constraint_min)[axis_idx] * iteration_count_rcp;
+							const float axis_max = ((float*)&constraint_max)[axis_idx] * iteration_count_rcp;
 							axis = XMVector3Normalize(XMVector3TransformNormal(axis, W));
 							const XMVECTOR projA = XMVector3Normalize(dir_parent_to_ik - axis * XMVector3Dot(axis, dir_parent_to_ik));
 							const XMVECTOR projB = XMVector3Normalize(dir_parent_to_target - axis * XMVector3Dot(axis, dir_parent_to_target));
@@ -3166,6 +3261,7 @@ namespace wi::scene
 
 		for (size_t i = 0; i < humanoids.GetCount(); ++i)
 		{
+			Entity humanoidEntity = humanoids.GetEntity(i);
 			HumanoidComponent& humanoid = humanoids[i];
 
 			// The head is always taken as reference frame transform even for the eyes:
@@ -3180,7 +3276,7 @@ namespace wi::scene
 
 			const XMVECTOR UP = XMVectorSet(0, 1, 0, 0);
 			const XMVECTOR SIDE = XMVectorSet(1, 0, 0, 0);
-			const XMVECTOR FORWARD = XMLoadFloat3(&humanoid.default_look_direction);
+			const XMVECTOR FORWARD = XMVectorSet(0, 0, GetHumanoidDefaultFacing(humanoid, humanoidEntity), 0);
 
 			struct LookAtSource
 			{
@@ -3408,7 +3504,7 @@ namespace wi::scene
 				colliders_gpu[index] = collider;
 			}
 
-		});
+			});
 
 		wi::jobsystem::Wait(ctx);
 		collider_count_cpu = collider_allocator_cpu.load();
@@ -3416,183 +3512,11 @@ namespace wi::scene
 		collider_bvh.Build(aabb_colliders_cpu, collider_count_cpu);
 
 		// Springs:
-		const XMVECTOR windDir = XMLoadFloat3(&weather.windDirection);
-		for (size_t i = 0; i < springs.GetCount(); ++i)
-		{
-			SpringComponent& spring = springs[i];
-			if (spring.IsDisabled())
-			{
-				continue;
-			}
-			Entity entity = springs.GetEntity(i);
-			size_t transform_index = transforms.GetIndex(entity);
-			if (transform_index == ~0ull)
-			{
-				continue;
-			}
-			TransformComponent& transform = transforms[transform_index];
-
-			XMMATRIX parentWorldMatrix = XMMatrixIdentity();
-
-			const HierarchyComponent* hier = hierarchy.GetComponent(entity);
-			size_t parent_index = hier == nullptr ? ~0ull : transforms.GetIndex(hier->parentID);
-			if (parent_index != ~0ull)
-			{
-				// Spring hierarchy resolve depends on spring component order!
-				//	It works best when parent spring is located before child spring!
-				//	It will work the other way, but results will be less convincing
-				const TransformComponent& parent_transform = transforms[parent_index];
-				transform.UpdateTransform_Parented(parent_transform);
-				parentWorldMatrix = XMLoadFloat4x4(&parent_transform.world);
-			}
-
-			XMVECTOR position_root = transform.GetPositionV();
-
-			if (spring.IsResetting())
-			{
-				spring.Reset(false);
-
-				XMVECTOR tail = position_root + XMVectorSet(0, 1, 0, 0);
-				// Search for child to find the rest pose tail position:
-				bool child_found = false;
-				for (size_t j = 0; j < hierarchy.GetCount(); ++j)
-				{
-					const HierarchyComponent& hier = hierarchy[j];
-					Entity child = hierarchy.GetEntity(j);
-					if (hier.parentID == entity && transforms.Contains(child))
-					{
-						const TransformComponent& child_transform = *transforms.GetComponent(child);
-						tail = child_transform.GetPositionV();
-						child_found = true;
-						break;
-					}
-				}
-				if (!child_found)
-				{
-					// No child, try to guess tail position compared to parent (if it has parent):
-					const HierarchyComponent* hier = hierarchy.GetComponent(entity);
-					if (hier != nullptr && transforms.Contains(hier->parentID))
-					{
-						const TransformComponent& parent_transform = *transforms.GetComponent(hier->parentID);
-						XMVECTOR ab = position_root - parent_transform.GetPositionV();
-						tail = position_root + ab;
-					}
-				}
-
-				XMVECTOR axis = tail - position_root;
-				XMMATRIX parentWorldMatrixInverse = XMMatrixInverse(nullptr, parentWorldMatrix);
-				axis = XMVector3TransformNormal(axis, parentWorldMatrixInverse);
-				XMStoreFloat3(&spring.boneAxis, axis);
-				XMStoreFloat3(&spring.currentTail, tail);
-				spring.prevTail = spring.currentTail;
-			}
-
-			XMVECTOR boneAxis = XMLoadFloat3(&spring.boneAxis);
-			boneAxis = XMVector3TransformNormal(boneAxis, parentWorldMatrix);
-
-			const float boneLength = XMVectorGetX(XMVector3Length(boneAxis));
-			boneAxis /= boneLength;
-			const float dragForce = spring.dragForce;
-			const float stiffnessForce = spring.stiffnessForce;
-			const XMVECTOR gravityDir = XMLoadFloat3(&spring.gravityDir);
-			const float gravityPower = spring.gravityPower;
-
-#if 0
-			// Debug axis:
-			wi::renderer::RenderableLine line;
-			line.color_start = line.color_end = XMFLOAT4(1, 1, 0, 1);
-			XMStoreFloat3(&line.start, position_root);
-			XMStoreFloat3(&line.end, position_root + boneAxis * boneLength);
-			wi::renderer::DrawLine(line);
-#endif
-
-			const XMVECTOR tail_current = XMLoadFloat3(&spring.currentTail);
-			const XMVECTOR tail_prev = XMLoadFloat3(&spring.prevTail);
-
-			XMVECTOR inertia = (tail_current - tail_prev) * (1 - dragForce);
-			XMVECTOR stiffness = boneAxis * stiffnessForce;
-			XMVECTOR external = XMVectorZero();
-
-			if (spring.windForce > 0)
-			{
-				external += std::sin(time * weather.windSpeed + XMVectorGetX(XMVector3Dot(tail_current, windDir))) * windDir * spring.windForce;
-			}
-			if (spring.IsGravityEnabled())
-			{
-				external += gravityDir * gravityPower;
-			}
-
-			XMVECTOR tail_next = tail_current + inertia + dt * (stiffness + external);
-			XMVECTOR to_tail = XMVector3Normalize(tail_next - position_root);
-
-			if (!spring.IsStretchEnabled())
-			{
-				// Limit offset to keep distance from parent:
-				tail_next = position_root + to_tail * boneLength;
-			}
-
-#if 1
-			// Collider checks:
-			//	apply scaling to radius:
-			XMFLOAT3 scale = transform.GetScale();
-			const float hitRadius = spring.hitRadius * std::max(scale.x, std::max(scale.y, scale.z));
-			wi::primitive::Sphere tail_sphere;
-			XMStoreFloat3(&tail_sphere.center, tail_next);
-			tail_sphere.radius = hitRadius;
-
-			if (colliders_cpu != nullptr)
-			{
-				collider_bvh.Intersects(tail_sphere, 0, [&](uint32_t collider_index) {
-					const ColliderComponent& collider = colliders_cpu[collider_index];
-
-					float dist = 0;
-					XMFLOAT3 direction = {};
-					switch (collider.shape)
-					{
-					default:
-					case ColliderComponent::Shape::Sphere:
-						tail_sphere.intersects(collider.sphere, dist, direction);
-						break;
-					case ColliderComponent::Shape::Capsule:
-						tail_sphere.intersects(collider.capsule, dist, direction);
-						break;
-					case ColliderComponent::Shape::Plane:
-						tail_sphere.intersects(collider.plane, dist, direction);
-						break;
-					}
-
-					if (dist < 0)
-					{
-						tail_next = tail_next - XMLoadFloat3(&direction) * dist;
-						to_tail = XMVector3Normalize(tail_next - position_root);
-
-						if (!spring.IsStretchEnabled())
-						{
-							// Limit offset to keep distance from parent:
-							tail_next = position_root + to_tail * boneLength;
-						}
-
-						XMStoreFloat3(&tail_sphere.center, tail_next);
-						tail_sphere.radius = hitRadius;
-					}
-				});
-			}
-#endif
-
-			XMStoreFloat3(&spring.prevTail, tail_current);
-			XMStoreFloat3(&spring.currentTail, tail_next);
-
-			// Rotate to face tail position:
-			const XMVECTOR axis = XMVector3Normalize(XMVector3Cross(boneAxis, to_tail));
-			const float angle = XMScalarACos(XMVectorGetX(XMVector3Dot(boneAxis, to_tail)));
-			const XMVECTOR Q = XMQuaternionNormalize(XMQuaternionRotationNormal(axis, angle));
-			TransformComponent tmp = transform;
-			tmp.ApplyTransform();
-			tmp.Rotate(Q);
-			tmp.UpdateTransform();
-			transform.world = tmp.world; // only store world space result, not modifying actual local space!
-
-		}
+		wi::jobsystem::Wait(spring_dependency_scan_workload);
+		wi::jobsystem::Dispatch(ctx, (uint32_t)spring_queues.size(), 1, [this](wi::jobsystem::JobArgs args){
+			UpdateSpringsTopDownRecursive(nullptr, *spring_queues[args.jobIndex]);
+		});
+		wi::jobsystem::Wait(ctx);
 
 		wi::profiler::EndRange(range);
 	}
@@ -3887,6 +3811,23 @@ namespace wi::scene
 				int descriptor = GetDevice()->GetDescriptorIndex(&video->videoinstance.output.texture, SubresourceType::SRV, video->videoinstance.output.subresource_srgb);
 				material.WriteShaderTextureSlot(materialArrayMapped + args.jobIndex, BASECOLORMAP, descriptor);
 				material.WriteShaderTextureSlot(materialArrayMapped + args.jobIndex, EMISSIVEMAP, descriptor);
+			}
+
+			if (textureStreamingFeedbackMapped != nullptr)
+			{
+				const uint32_t request_packed = textureStreamingFeedbackMapped[args.jobIndex];
+				if (request_packed != 0)
+				{
+					const uint32_t request_uvset0 = request_packed & 0xFFFF;
+					const uint32_t request_uvset1 = (request_packed >> 16u) & 0xFFFF;
+					for (auto& slot : material.textures)
+					{
+						if (slot.resource.IsValid())
+						{
+							slot.resource.StreamingRequestResolution(slot.uvset == 0 ? request_uvset0 : request_uvset1);
+						}
+					}
+				}
 			}
 
 		});
@@ -4267,6 +4208,7 @@ namespace wi::scene
 				inst.center = object.center;
 				inst.radius = object.radius;
 				inst.vb_ao = object.vb_ao_srv;
+				inst.alphaTest = 1 - object.alphaRef;
 				inst.SetUserStencilRef(object.userStencilRef);
 
 				std::memcpy(instanceArrayMapped + args.jobIndex, &inst, sizeof(inst)); // memcpy whole structure into mapped pointer to avoid read from uncached memory
@@ -4955,7 +4897,7 @@ namespace wi::scene
 		{
 			SoundComponent& sound = sounds[i];
 
-			if (!sound.soundinstance.IsValid())
+			if (!sound.soundinstance.IsValid() && sound.soundResource.IsValid())
 			{
 				sound.soundinstance.SetLooped(sound.IsLooped());
 				wi::audio::CreateSoundInstance(&sound.soundResource.GetSound(), &sound.soundinstance);
@@ -5024,8 +4966,10 @@ namespace wi::scene
 
 			if (script.IsPlaying())
 			{
-				if (script.script.empty() && script.resource.IsValid())
+				if (script.resource.IsValid() && (script.script.empty() || script.script_hash != script.resource.GetScriptHash()))
 				{
+					script.script.clear();
+					script.script_hash = script.resource.GetScriptHash();
 					std::string str = script.resource.GetScript();
 					wi::lua::AttachScriptParameters(str, script.filename, wi::lua::GeneratePID(), "local function GetEntity() return " + std::to_string(entity) + "; end;", "");
 					wi::lua::CompileText(str, script.script);
@@ -5092,6 +5036,8 @@ namespace wi::scene
 		if ((filterMask & FILTER_COLLIDER) && collider_bvh.IsValid())
 		{
 			collider_bvh.Intersects(ray, 0, [&](uint32_t collider_index) {
+				if (colliders.GetCount() <= collider_index)
+					return;
 				const ColliderComponent& collider = colliders_cpu[collider_index];
 
 				if ((collider.layerMask & layerMask) == 0)
@@ -5137,7 +5083,8 @@ namespace wi::scene
 
 		if (filterMask & FILTER_OBJECT_ALL)
 		{
-			for (size_t objectIndex = 0; objectIndex < aabb_objects.size(); ++objectIndex)
+			const size_t objectCount = std::min(objects.GetCount(), aabb_objects.size());
+			for (size_t objectIndex = 0; objectIndex < objectCount; ++objectIndex)
 			{
 				const AABB& aabb = aabb_objects[objectIndex];
 				if (!ray.intersects(aabb) || (layerMask & aabb.layerMask) == 0)
@@ -5317,6 +5264,8 @@ namespace wi::scene
 		if ((filterMask & FILTER_COLLIDER) && collider_bvh.IsValid())
 		{
 			collider_bvh.IntersectsFirst(ray, [&](uint32_t collider_index) {
+				if (colliders.GetCount() <= collider_index)
+					return false;
 				const ColliderComponent& collider = colliders_cpu[collider_index];
 
 				if ((collider.layerMask & layerMask) == 0)
@@ -5353,7 +5302,8 @@ namespace wi::scene
 
 		if (filterMask & FILTER_OBJECT_ALL)
 		{
-			for (size_t objectIndex = 0; objectIndex < aabb_objects.size(); ++objectIndex)
+			const size_t objectCount = std::min(objects.GetCount(), aabb_objects.size());
+			for (size_t objectIndex = 0; objectIndex < objectCount; ++objectIndex)
 			{
 				const AABB& aabb = aabb_objects[objectIndex];
 				if (!ray.intersects(aabb) || (layerMask & aabb.layerMask) == 0)
@@ -5484,6 +5434,8 @@ namespace wi::scene
 		if ((filterMask & FILTER_COLLIDER) && collider_bvh.IsValid())
 		{
 			collider_bvh.Intersects(sphere, 0, [&](uint32_t collider_index) {
+				if (colliders.GetCount() <= collider_index)
+					return;
 				const ColliderComponent& collider = colliders_cpu[collider_index];
 
 				if ((collider.layerMask & layerMask) == 0)
@@ -5525,7 +5477,8 @@ namespace wi::scene
 
 		if (filterMask & FILTER_OBJECT_ALL)
 		{
-			for (size_t objectIndex = 0; objectIndex < aabb_objects.size(); ++objectIndex)
+			const size_t objectCount = std::min(objects.GetCount(), aabb_objects.size());
+			for (size_t objectIndex = 0; objectIndex < objectCount; ++objectIndex)
 			{
 				const AABB& aabb = aabb_objects[objectIndex];
 				if (!sphere.intersects(aabb) || (layerMask & aabb.layerMask) == 0)
@@ -5765,6 +5718,8 @@ namespace wi::scene
 		if ((filterMask & FILTER_COLLIDER) && collider_bvh.IsValid())
 		{
 			collider_bvh.Intersects(capsule_aabb, 0, [&](uint32_t collider_index) {
+				if (colliders.GetCount() <= collider_index)
+					return;
 				const ColliderComponent& collider = colliders_cpu[collider_index];
 
 				if ((collider.layerMask & layerMask) == 0)
@@ -5806,7 +5761,8 @@ namespace wi::scene
 
 		if (filterMask & FILTER_OBJECT_ALL)
 		{
-			for (size_t objectIndex = 0; objectIndex < aabb_objects.size(); ++objectIndex)
+			const size_t objectCount = std::min(objects.GetCount(), aabb_objects.size());
+			for (size_t objectIndex = 0; objectIndex < objectCount; ++objectIndex)
 			{
 				const AABB& aabb = aabb_objects[objectIndex];
 				if (capsule_aabb.intersects(aabb) == AABB::INTERSECTION_TYPE::OUTSIDE || (layerMask & aabb.layerMask) == 0)
@@ -6561,26 +6517,27 @@ namespace wi::scene
 					Entity bone_source = humanoid_source.bones[humanoidBoneIndex];
 					if (bone_source == channel.target)
 					{
-						retarget_valid = true;
-						found = true;
 						Entity bone_dest = humanoid_dest->bones[humanoidBoneIndex];
-
-						auto& retarget_channel = animation.channels.emplace_back();
-						retarget_channel = channel;
-						retarget_channel.target = bone_dest;
-						retarget_channel.samplerIndex = (int)animation.samplers.size();
-
-						auto& sampler = animation_source->samplers[channel.samplerIndex];
-
-						auto& retarget_sampler = animation.samplers.emplace_back();
-						retarget_sampler = sampler;
-						retarget_sampler.backwards_compatibility_data = {};
-						retarget_sampler.scene = src_scene == this ? nullptr : src_scene;
 
 						TransformComponent* transform_source = src_scene->transforms.GetComponent(bone_source);
 						TransformComponent* transform_dest = transforms.GetComponent(bone_dest);
 						if (transform_source != nullptr && transform_dest != nullptr)
 						{
+							retarget_valid = true;
+							found = true;
+
+							auto& retarget_channel = animation.channels.emplace_back();
+							retarget_channel = channel;
+							retarget_channel.target = bone_dest;
+							retarget_channel.samplerIndex = (int)animation.samplers.size();
+
+							auto& sampler = animation_source->samplers[channel.samplerIndex];
+
+							auto& retarget_sampler = animation.samplers.emplace_back();
+							retarget_sampler = sampler;
+							retarget_sampler.backwards_compatibility_data = {};
+							retarget_sampler.scene = src_scene == this ? nullptr : src_scene;
+
 							XMMATRIX srcParentMatrix = src_scene->ComputeParentMatrixRecursive(bone_source);
 							XMMATRIX srcMatrix = transform_source->GetLocalMatrix() * srcParentMatrix;
 							XMMATRIX inverseSrcMatrix = XMMatrixInverse(nullptr, srcMatrix);
@@ -6654,6 +6611,7 @@ namespace wi::scene
 								XMStoreFloat4x4(&retarget.srcRelativeParentMatrix, srcRelativeParentMatrix);
 							}
 						}
+
 						break;
 					}
 				}
@@ -6668,9 +6626,9 @@ namespace wi::scene
 		return INVALID_ENTITY;
 	}
 
-	XMMATRIX Scene::FindBoneRestPose(wi::ecs::Entity bone) const
+	XMMATRIX Scene::GetRestPose(wi::ecs::Entity entity) const
 	{
-		if (bone != INVALID_ENTITY)
+		if (entity != INVALID_ENTITY)
 		{
 			for (size_t i = 0; i < armatures.GetCount(); ++i)
 			{
@@ -6679,7 +6637,7 @@ namespace wi::scene
 				for (auto& x : armature.boneCollection)
 				{
 					boneIndex++;
-					if (x == bone)
+					if (x == entity)
 					{
 						XMMATRIX inverseBindMatrix = XMLoadFloat4x4(armature.inverseBindMatrices.data() + boneIndex);
 						XMMATRIX bindMatrix = XMMatrixInverse(nullptr, inverseBindMatrix);
@@ -6687,8 +6645,34 @@ namespace wi::scene
 					}
 				}
 			}
+
+			const TransformComponent* transform = transforms.GetComponent(entity);
+			if (transform != nullptr)
+			{
+				return XMLoadFloat4x4(&transform->world);
+			}
 		}
 		return XMMatrixIdentity();
+	}
+
+	float Scene::GetHumanoidDefaultFacing(const HumanoidComponent& humanoid, Entity humanoidEntity) const
+	{
+		Entity left_shoulder = humanoid.bones[(size_t)HumanoidComponent::HumanoidBone::LeftUpperArm];
+		Entity right_shoulder = humanoid.bones[(size_t)HumanoidComponent::HumanoidBone::RightUpperArm];
+		XMVECTOR left_shoulder_pos = GetRestPose(left_shoulder).r[3];
+		XMVECTOR right_shoulder_pos = GetRestPose(right_shoulder).r[3];
+		const TransformComponent* transform = transforms.GetComponent(humanoidEntity);
+		if (transform != nullptr)
+		{
+			XMVECTOR S = transform->GetScaleV();
+			left_shoulder_pos *= S;
+			right_shoulder_pos *= S;
+		}
+		if (XMVectorGetX(right_shoulder_pos) < XMVectorGetX(left_shoulder_pos))
+		{
+			return -1;
+		}
+		return 1;
 	}
 
 	void Scene::ScanAnimationDependencies()
@@ -6753,6 +6737,245 @@ namespace wi::scene
 		});
 
 		// We don't wait for this job here, it will be waited just before animation update
+	}
+
+	void Scene::ScanSpringDependencies()
+	{
+		wi::jobsystem::Execute(spring_dependency_scan_workload, [this](wi::jobsystem::JobArgs args){
+			auto range = wi::profiler::BeginRangeCPU("Spring Dependencies");
+			spring_queues.clear();
+			// First, reset all spring temp state:
+			for (size_t i = 0; i < springs.GetCount(); ++i)
+			{
+				SpringComponent& spring = springs[i];
+				spring.children.clear();
+				spring.entity = INVALID_ENTITY;
+				spring.transform = nullptr;
+				spring.parent_transform = nullptr;
+			}
+			// Then determine dependencies and set temp values:
+			for (size_t i = 0; i < springs.GetCount(); ++i)
+			{
+				SpringComponent& spring = springs[i];
+				if (spring.IsDisabled())
+					continue;
+				Entity entity = springs.GetEntity(i);
+				TransformComponent* transform = transforms.GetComponent(entity);
+				if (transform == nullptr)
+					continue;
+				spring.entity = entity;
+				spring.transform = transform;
+				const HierarchyComponent* hier = hierarchy.GetComponent(entity);
+				if (hier == nullptr)
+				{
+					// This is a root spring
+					spring_queues.push_back(&spring);
+				}
+				else
+				{
+					spring.parent_transform = transforms.GetComponent(hier->parentID);
+					SpringComponent* parent = springs.GetComponent(hier->parentID);
+					if (parent == nullptr)
+					{
+						// This is a root spring
+						spring_queues.push_back(&spring);
+					}
+					else
+					{
+						// This has a parent
+						parent->children.push_back(&spring);
+					}
+				}
+			}
+			wi::profiler::EndRange(range);
+		});
+
+		// We don't wait for this job here, it will be waited just before spring update
+	}
+	void Scene::UpdateSpringsTopDownRecursive(SpringComponent* parent_spring, SpringComponent& spring)
+	{
+		Entity entity = spring.entity;
+		TransformComponent& transform = *spring.transform;
+
+		if (spring.IsResetting())
+		{
+			spring.Reset(false);
+
+			// Note: the spring resetting works on the rest pose, not the current pose!
+
+			XMMATRIX parentWorldMatrix = XMMatrixIdentity();
+			{
+				const HierarchyComponent* hier = hierarchy.GetComponent(entity);
+				if (hier != nullptr)
+				{
+					parentWorldMatrix = GetRestPose(hier->parentID);
+				}
+			}
+			XMMATRIX parentWorldMatrixInverse = XMMatrixInverse(nullptr, parentWorldMatrix);
+
+			XMVECTOR position_root = GetRestPose(entity).r[3];
+			XMVECTOR tail = position_root + XMVectorSet(0, 1, 0, 0);
+			// Search for child to find the rest pose tail position:
+			bool child_found = false;
+			for (size_t j = 0; j < hierarchy.GetCount(); ++j)
+			{
+				const HierarchyComponent& hier = hierarchy[j];
+				Entity child = hierarchy.GetEntity(j);
+				if (hier.parentID == entity && transforms.Contains(child))
+				{
+					tail = GetRestPose(child).r[3];
+					child_found = true;
+					break;
+				}
+			}
+			if (!child_found)
+			{
+				// No child, try to guess tail position compared to parent:
+				const XMVECTOR parent_pos = parentWorldMatrix.r[3];
+				const XMVECTOR ab = position_root - parent_pos;
+				tail = position_root + ab;
+			}
+
+			XMVECTOR axis = tail - position_root;
+			axis = XMVector3TransformNormal(axis, parentWorldMatrixInverse);
+			XMStoreFloat3(&spring.boneAxis, axis);
+			XMStoreFloat3(&spring.currentTail, tail);
+			spring.prevTail = spring.currentTail;
+		}
+
+		XMMATRIX parentWorldMatrix = XMMatrixIdentity();
+		if (spring.parent_transform != nullptr)
+		{
+			transform.UpdateTransform_Parented(*spring.parent_transform);
+			parentWorldMatrix = XMLoadFloat4x4(&spring.parent_transform->world);
+		}
+
+		XMVECTOR position_root = transform.GetPositionV();
+
+		// fixup spring locations by snapping position to parent's tail:
+		//	(This is done after resetting code intentionally)
+		if (parent_spring != nullptr)
+		{
+			position_root = XMLoadFloat3(&parent_spring->currentTail);
+		}
+
+		XMVECTOR boneAxis = XMLoadFloat3(&spring.boneAxis);
+		boneAxis = XMVector3TransformNormal(boneAxis, parentWorldMatrix);
+
+		const float boneLength = XMVectorGetX(XMVector3Length(boneAxis));
+		boneAxis /= boneLength;
+		const float dragForce = spring.dragForce;
+		const float stiffnessForce = spring.stiffnessForce;
+		const XMVECTOR gravityDir = XMLoadFloat3(&spring.gravityDir);
+		const float gravityPower = spring.gravityPower;
+
+		const XMVECTOR tail_current = XMLoadFloat3(&spring.currentTail);
+		const XMVECTOR tail_prev = XMLoadFloat3(&spring.prevTail);
+
+		XMVECTOR inertia = (tail_current - tail_prev) * (1 - dragForce);
+		XMVECTOR stiffness = boneAxis * stiffnessForce;
+		XMVECTOR external = XMVectorZero();
+
+		if (spring.windForce > 0)
+		{
+			const XMVECTOR windDir = XMLoadFloat3(&weather.windDirection);
+			external += std::sin(time * weather.windSpeed + XMVectorGetX(XMVector3Dot(tail_current, windDir))) * windDir * spring.windForce;
+		}
+		if (spring.IsGravityEnabled())
+		{
+			external += gravityDir * gravityPower;
+		}
+
+		XMVECTOR tail_next = tail_current + inertia + dt * (stiffness + external);
+		XMVECTOR to_tail = XMVector3Normalize(tail_next - position_root);
+
+		// Limit offset to keep distance from parent:
+		tail_next = position_root + to_tail * boneLength;
+
+#if 1
+		// Collider checks:
+		//	apply scaling to radius:
+		XMFLOAT3 scale = transform.GetScale();
+		const float hitRadius = spring.hitRadius * std::max(scale.x, std::max(scale.y, scale.z));
+		wi::primitive::Sphere tail_sphere;
+		XMStoreFloat3(&tail_sphere.center, tail_next);
+		tail_sphere.radius = hitRadius;
+
+		if (colliders_cpu != nullptr && collider_bvh.IsValid())
+		{
+			collider_bvh.Intersects(tail_sphere, 0, [&](uint32_t collider_index) {
+				if (colliders.GetCount() <= collider_index)
+					return;
+				const ColliderComponent& collider = colliders_cpu[collider_index];
+
+				float dist = 0;
+				XMFLOAT3 direction = {};
+				switch (collider.shape)
+				{
+				default:
+				case ColliderComponent::Shape::Sphere:
+					tail_sphere.intersects(collider.sphere, dist, direction);
+					break;
+				case ColliderComponent::Shape::Capsule:
+					tail_sphere.intersects(collider.capsule, dist, direction);
+					break;
+				case ColliderComponent::Shape::Plane:
+					tail_sphere.intersects(collider.plane, dist, direction);
+					break;
+				}
+
+				if (dist < 0)
+				{
+					tail_next = tail_next - XMLoadFloat3(&direction) * dist;
+					to_tail = XMVector3Normalize(tail_next - position_root);
+
+					// Limit offset to keep distance from parent:
+					tail_next = position_root + to_tail * boneLength;
+
+					XMStoreFloat3(&tail_sphere.center, tail_next);
+					tail_sphere.radius = hitRadius;
+				}
+				});
+		}
+#endif
+
+		XMStoreFloat3(&spring.prevTail, tail_current);
+		XMStoreFloat3(&spring.currentTail, tail_next);
+
+		// Rotate to face tail position:
+		const XMVECTOR axis = XMVector3Normalize(XMVector3Cross(boneAxis, to_tail));
+		const float angle = XMScalarACos(XMVectorGetX(XMVector3Dot(boneAxis, to_tail)));
+		const XMVECTOR Q = XMQuaternionNormalize(XMQuaternionRotationNormal(axis, angle));
+
+		// Modify world matrix:
+		XMMATRIX M = XMLoadFloat4x4(&transform.world);
+		XMVECTOR S, R, T;
+		XMMatrixDecompose(&S, &R, &T, M);
+
+		T = position_root;
+		R = XMQuaternionMultiply(R, Q);
+		R = XMQuaternionNormalize(R);
+
+		M = XMMatrixScalingFromVector(S) * XMMatrixRotationQuaternion(R) * XMMatrixTranslationFromVector(T);
+
+		XMStoreFloat4x4(&transform.world, M);
+
+#if 0
+		// Debug axis:
+		static wi::SpinLock dbglocker;
+		wi::renderer::RenderableLine line;
+		line.color_start = line.color_end = XMFLOAT4(1, 1, 0, 1);
+		XMStoreFloat3(&line.start, position_root);
+		line.end = spring.currentTail;
+		dbglocker.lock();
+		wi::renderer::DrawLine(line);
+		dbglocker.unlock();
+#endif
+
+		for (SpringComponent* child : spring.children)
+		{
+			UpdateSpringsTopDownRecursive(&spring, *child);
+		}
 	}
 
 }

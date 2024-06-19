@@ -4,7 +4,7 @@
 #include "wiRandom.h"
 
 #include "Utility/stb_image.h"
-#include "Utility/dds_write.h"
+#include "Utility/dds.h"
 
 #define TINYGLTF_IMPLEMENTATION
 #define TINYGLTF_NO_FS
@@ -15,11 +15,6 @@
 using namespace wi::graphics;
 using namespace wi::scene;
 using namespace wi::ecs;
-
-
-// Transform the data from glTF space to engine-space:
-static const bool transform_to_LH = true;
-
 
 namespace tinygltf
 {
@@ -148,7 +143,7 @@ struct LoaderState
 void Import_Extension_VRM(LoaderState& state);
 void Import_Extension_VRMC(LoaderState& state);
 void VRM_ToonMaterialCustomize(const std::string& name, MaterialComponent& material);
-void Import_Mixamo_Bone(LoaderState& state, Entity armatureEntity, Entity boneEntity, const tinygltf::Node& node);
+void Import_Mixamo_Bone(LoaderState& state, Entity boneEntity, const tinygltf::Node& node);
 
 // Recursively loads nodes and resolves hierarchy:
 void LoadNode(int nodeIndex, Entity parent, LoaderState& state)
@@ -1664,7 +1659,7 @@ Entity ImportModel_GLTF(const std::string& fileName, Scene& scene)
 
 			armature.boneCollection[i] = boneEntity;
 
-			Import_Mixamo_Bone(state, armatureEntity, boneEntity, state.gltfModel.nodes[jointIndex]);
+			Import_Mixamo_Bone(state, boneEntity, state.gltfModel.nodes[jointIndex]);
 		}
 	}
 
@@ -1947,6 +1942,8 @@ Entity ImportModel_GLTF(const std::string& fileName, Scene& scene)
 						size_t filesize = imagefiledata.size();
 						int width, height, bpp;
 						wi::Color* rgba = (wi::Color*)stbi_load_from_memory(filedata, (int)filesize, &width, &height, &bpp, 4);
+						if (rgba == nullptr)
+							continue;
 						wi::vector<XMFLOAT3SE>& hdr_data = hdr_datas[idx];
 						hdr_data.resize(width * height);
 						for (int y = 0; y < height; ++y)
@@ -1981,10 +1978,10 @@ Entity ImportModel_GLTF(const std::string& fileName, Scene& scene)
 				}
 
 				wi::vector<uint8_t> dds;
-				dds.resize(sizeof(dds_write::Header) + wholeDataSize);
-				dds_write::write_header(
+				dds.resize(sizeof(dds::Header) + wholeDataSize);
+				dds::write_header(
 					dds.data(),
-					dds_write::DXGI_FORMAT_R9G9B9E5_SHAREDEXP,
+					dds::DXGI_FORMAT_R9G9B9E5_SHAREDEXP,
 					desc.width,
 					desc.height,
 					desc.mip_levels,
@@ -1992,7 +1989,7 @@ Entity ImportModel_GLTF(const std::string& fileName, Scene& scene)
 					true
 				);
 
-				size_t offset = sizeof(dds_write::Header);
+				size_t offset = sizeof(dds::Header);
 				for (auto& x : hdr_datas)
 				{
 					std::memcpy(dds.data() + offset, x.data(), x.size() * sizeof(XMFLOAT3SE));
@@ -2798,7 +2795,6 @@ void Import_Extension_VRMC(LoaderState& state)
 				state.scene->names.Create(entity) = "humanoid";
 			}
 			HumanoidComponent& component = state.scene->humanoids.Create(entity);
-			component.default_look_direction = XMFLOAT3(0, 0, -1);
 
 			const auto& humanoid = ext_vrm->second.Get("humanoid");
 			if (humanoid.Has("humanBones"))
@@ -3233,14 +3229,13 @@ void VRM_ToonMaterialCustomize(const std::string& name, MaterialComponent& mater
 	}
 }
 
-void Import_Mixamo_Bone(LoaderState& state, Entity armatureEntity, Entity boneEntity, const tinygltf::Node& node)
+void Import_Mixamo_Bone(LoaderState& state, Entity boneEntity, const tinygltf::Node& node)
 {
 	auto get_humanoid = [&]() -> HumanoidComponent& {
-		HumanoidComponent* component = state.scene->humanoids.GetComponent(armatureEntity);
+		HumanoidComponent* component = state.scene->humanoids.GetComponent(state.rootEntity);
 		if (component == nullptr)
 		{
-			component = &state.scene->humanoids.Create(armatureEntity);
-			component->default_look_direction = XMFLOAT3(0, 0, -1);
+			component = &state.scene->humanoids.Create(state.rootEntity);
 		}
 		return *component;
 	};

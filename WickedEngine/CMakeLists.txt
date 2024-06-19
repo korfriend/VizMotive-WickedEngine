@@ -152,6 +152,7 @@ set(HEADER_FILES
   		wiPathQuery_BindLua.h
 		wiTrailRenderer.h
 		wiTrailRenderer_BindLua.h
+		wiAsync_BindLua.h
 		)
 
 add_library(${TARGET_NAME} ${WICKED_LIBRARY_TYPE}
@@ -198,7 +199,6 @@ add_library(${TARGET_NAME} ${WICKED_LIBRARY_TYPE}
 	wiNetwork_BindLua.cpp
 	wiNetwork_Linux.cpp
 	wiNetwork_Windows.cpp
-	wiNetwork_UWP.cpp
 	wiOcean.cpp
 	wiPhysics_Bullet.cpp
 	wiPhysics_BindLua.cpp
@@ -232,6 +232,7 @@ add_library(${TARGET_NAME} ${WICKED_LIBRARY_TYPE}
   	wiPathQuery_BindLua.cpp
 	wiTrailRenderer.cpp
 	wiTrailRenderer_BindLua.cpp
+	wiAsync_BindLua.cpp
 	${HEADER_FILES}
 )
 add_library(WickedEngine ALIAS ${TARGET_NAME})

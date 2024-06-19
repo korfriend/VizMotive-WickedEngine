@@ -24,6 +24,7 @@
 #include "wiVoxelGrid_BindLua.h"
 #include "wiPathQuery_BindLua.h"
 #include "wiTrailRenderer_BindLua.h"
+#include "wiAsync_BindLua.h"
 #include "wiTimer.h"
 #include "wiVector.h"
 
@@ -48,6 +49,25 @@ namespace wi::lua
 	{
 		static LuaInternal luainternal;
 		return luainternal;
+	}
+
+	void PostErrorMsg(lua_State* L)
+	{
+		const char* str = lua_tostring(L, -1);
+
+		if (str == nullptr)
+			return;
+
+		std::string ss;
+		ss += WILUA_ERROR_PREFIX;
+		ss += str;
+		wi::backlog::post(ss, wi::backlog::LogLevel::Error);
+		lua_pop(L, 1); // remove error message
+	}
+
+	void PostErrorMsg()
+	{
+		PostErrorMsg(lua_internal().m_luaState);
 	}
 
 	uint32_t GeneratePID()
@@ -76,7 +96,8 @@ namespace wi::lua
 		std::string filepath = filename;
 		std::replace(filepath.begin(), filepath.end(), '\\', '/');
 
-		std::string dynamic_inject = "local function script_file() return \"" + filepath + "\" end;";
+		std::string dynamic_inject = "--[[" + filepath + "--]]";
+		dynamic_inject += "local function script_file() return \"" + filepath + "\" end;";
 		dynamic_inject += "local function script_pid() return \"" + std::to_string(PID) + "\" end;";
 		dynamic_inject += "local function script_dir() return \"" + wi::helper::GetDirectoryFromPath(filepath) + "\" end;";
 		dynamic_inject += persistent_inject;
@@ -91,10 +112,18 @@ namespace wi::lua
 
 		if (argc > 0)
 		{
-			uint32_t PID = 0;
+			uint32_t PID;
 
 			std::string filename = SGetString(L, 1);
-			if(argc >= 2) PID = SGetInt(L, 2);
+			if (argc >= 2)
+			{
+				PID = SGetInt(L, 2);
+			}
+			else
+			{
+				PID = GeneratePID();
+			}
+				
 			std::string customparameters_prepend;
 			if(argc >= 3) customparameters_prepend = SGetString(L, 3);
 			std::string customparameters_append;
@@ -107,25 +136,24 @@ namespace wi::lua
 				std::string command = std::string(filedata.begin(), filedata.end());
 				PID = AttachScriptParameters(command, filename, PID, customparameters_prepend, customparameters_append);
 
+				lua_settop(L, 0);
+
 				int status = luaL_loadstring(L, command.c_str());
 				if (status == 0)
 				{
 					status = lua_pcall(L, 0, LUA_MULTRET, 0);
-					auto return_PID = std::to_string(PID);
-					SSetString(L, return_PID);
+				}
+
+				if (status == 0)
+				{
+					SSetString(L, std::to_string(PID));
+					lua_insert(L, 1);
+					return lua_gettop(L);
 				}
 				else
 				{
-					const char* str = lua_tostring(L, -1);
-
-					if (str == nullptr)
-						return 0;
-
-					std::string ss;
-					ss += WILUA_ERROR_PREFIX;
-					ss += str;
-					wi::backlog::post(ss, wi::backlog::LogLevel::Error);
-					lua_pop(L, 1); // remove error message
+					PostErrorMsg(L);
+					return 0;
 				}
 			}
 		}
@@ -134,7 +162,7 @@ namespace wi::lua
 			SError(L, "dofile(string filename) not enough arguments!");
 		}
 
-		return 1;
+		return 0;
 	}
 	int Internal_DoBinaryFile(lua_State* L)
 	{
@@ -207,6 +235,7 @@ namespace wi::lua
 		VoxelGrid_BindLua::Bind();
 		PathQuery_BindLua::Bind();
 		TrailRenderer_BindLua::Bind();
+		Async_BindLua::Bind();
 
 		wi::backlog::post("wi::lua Initialized (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
 	}
@@ -216,17 +245,6 @@ namespace wi::lua
 		return lua_internal().m_luaState;
 	}
 
-	void PostErrorMsg()
-	{
-		const char* str = lua_tostring(lua_internal().m_luaState, -1);
-		if (str == nullptr)
-			return;
-		std::string ss;
-		ss += WILUA_ERROR_PREFIX;
-		ss += str;
-		wi::backlog::post(ss, wi::backlog::LogLevel::Error);
-		lua_pop(lua_internal().m_luaState, 1); // remove error message
-	}
 	bool RunScript()
 	{
 		if(lua_pcall(lua_internal().m_luaState, 0, LUA_MULTRET, 0) != LUA_OK)
@@ -336,6 +354,25 @@ namespace wi::lua
 	bool SIsNumber(lua_State* L, int stackpos)
 	{
 		return lua_isnumber(L, stackpos) != 0;
+	}
+	bool SIsBool(lua_State* L, int stackpos)
+	{
+		return lua_isboolean(L, stackpos);
+	}
+	bool SIsCFunction(lua_State* L, int stackpos)
+	{
+		return lua_iscfunction(L, stackpos);
+	}
+	bool SIsUserdata(lua_State* L, int stackpos)
+	{
+		return lua_isuserdata(L, stackpos);
+	}
+	bool SIsNil(lua_State* L, int stackpos) {
+		return lua_isnil(L, stackpos);
+	}
+	int SGetType(lua_State* L, int stackpos)
+	{
+		return lua_type(L, stackpos);
 	}
 	int SGetInt(lua_State* L, int stackpos)
 	{

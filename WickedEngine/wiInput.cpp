@@ -18,12 +18,6 @@
 #include <SDL2/SDL.h>
 #endif // SDL2
 
-#ifdef PLATFORM_UWP
-#include <winrt/Windows.Foundation.h>
-#include <winrt/Windows.UI.Input.h>
-#include <winrt/Windows.Devices.Input.h>
-#endif // PLATFORM_UWP
-
 #ifdef PLATFORM_PS5
 #include "wiInput_PS5.h"
 #endif // PLATFORM_PS5
@@ -31,13 +25,8 @@
 namespace wi::input
 {
 #ifdef _WIN32
-#ifndef PLATFORM_UWP
 #define KEY_DOWN(vk_code) (GetAsyncKeyState(vk_code) < 0)
 #define KEY_TOGGLE(vk_code) ((GetAsyncKeyState(vk_code) & 1) != 0)
-#else
-#define KEY_DOWN(vk_code) ((int)winrt::Windows::UI::Core::CoreWindow::GetForCurrentThread().GetAsyncKeyState((winrt::Windows::System::VirtualKey)vk_code) < 0)
-#define KEY_TOGGLE(vk_code) (((int)winrt::Windows::UI::Core::CoreWindow::GetForCurrentThread().GetAsyncKeyState((winrt::Windows::System::VirtualKey)vk_code) & 1) != 0)
-#endif //PLATFORM_UWP
 #else
 #define KEY_DOWN(vk_code) 0
 #define KEY_TOGGLE(vk_code) 0
@@ -50,6 +39,11 @@ namespace wi::input
 	MouseState mouse;
 	Pen pen;
 	bool pen_override = false;
+	bool double_click = false;
+	wi::Timer doubleclick_timer;
+	XMFLOAT2 doubleclick_prevpos = XMFLOAT2(0, 0);
+	CURSOR cursor_current = CURSOR_DEFAULT;
+	CURSOR cursor_next = CURSOR_DEFAULT;
 
 	const KeyboardState& GetKeyboardState() { return keyboard; }
 	const MouseState& GetMouseState() { return mouse; }
@@ -131,7 +125,6 @@ namespace wi::input
         mouse.middle_button_press |= KEY_DOWN(VK_MBUTTON);
         mouse.right_button_press |= KEY_DOWN(VK_RBUTTON);
 
-#ifndef PLATFORM_UWP
 		// Since raw input doesn't contain absolute mouse position, we get it with regular winapi:
 		POINT p;
 		GetCursorPos(&p);
@@ -140,7 +133,6 @@ namespace wi::input
 		mouse.position.y = (float)p.y;
 		mouse.position.x /= canvas.GetDPIScaling();
 		mouse.position.y /= canvas.GetDPIScaling();
-#endif // PLATFORM_UWP
 
 #elif SDL2
 		wi::input::sdlinput::GetMouseState(&mouse);
@@ -149,89 +141,6 @@ namespace wi::input
 		wi::input::sdlinput::GetKeyboardState(&keyboard);
 		//TODO controllers
 		//TODO touch
-#endif
-
-#ifdef PLATFORM_UWP
-		static bool isRegisteredUWP = false;
-		if (!isRegisteredUWP)
-		{
-			isRegisteredUWP = true;
-			using namespace winrt::Windows::UI::Core;
-			using namespace winrt::Windows::Devices::Input;
-
-			auto window = CoreWindow::GetForCurrentThread();
-			window.PointerPressed([](CoreWindow, PointerEventArgs args) {
-				auto p = args.CurrentPoint();
-
-				if (p.Properties().IsPrimary())
-				{
-					mouse.position = XMFLOAT2(p.Position().X, p.Position().Y);
-					// UWP mouse position already has DPI applied, so only apply custom scale factor in here:
-					mouse.position.x /= canvas.scaling;
-					mouse.position.y /= canvas.scaling;
-					mouse.left_button_press = p.Properties().IsLeftButtonPressed();
-					mouse.middle_button_press = p.Properties().IsMiddleButtonPressed();
-					mouse.right_button_press = p.Properties().IsRightButtonPressed();
-					mouse.pressure = p.Properties().Pressure();
-				}
-
-				Touch touch;
-				touch.state = Touch::TOUCHSTATE_PRESSED;
-				touch.pos = XMFLOAT2(p.Position().X, p.Position().Y);
-				touches.push_back(touch);
-			});
-			window.PointerReleased([](CoreWindow, PointerEventArgs args) {
-				auto p = args.CurrentPoint();
-
-				if (p.Properties().IsPrimary())
-				{
-					mouse.left_button_press = p.Properties().IsLeftButtonPressed();
-					mouse.middle_button_press = p.Properties().IsMiddleButtonPressed();
-					mouse.right_button_press = p.Properties().IsRightButtonPressed();
-					mouse.pressure = p.Properties().Pressure();
-				}
-
-				Touch touch;
-				touch.state = Touch::TOUCHSTATE_RELEASED;
-				touch.pos = XMFLOAT2(p.Position().X, p.Position().Y);
-				touches.push_back(touch);
-			});
-			window.PointerMoved([](CoreWindow, PointerEventArgs args) {
-				auto p = args.CurrentPoint();
-
-				if (p.Properties().IsPrimary())
-				{
-					mouse.position = XMFLOAT2(p.Position().X, p.Position().Y);
-					// UWP mouse position already has DPI applied, so only apply custom scale factor in here:
-					mouse.position.x /= canvas.scaling;
-					mouse.position.y /= canvas.scaling;
-					mouse.pressure = p.Properties().Pressure();
-				}
-
-				Touch touch;
-				touch.state = Touch::TOUCHSTATE_MOVED;
-				touch.pos = XMFLOAT2(p.Position().X, p.Position().Y);
-				touches.push_back(touch);
-			});
-			window.PointerWheelChanged([](CoreWindow, PointerEventArgs args) {
-				auto p = args.CurrentPoint();
-
-				if (p.Properties().IsPrimary())
-				{
-					mouse.delta_wheel += (float)p.Properties().MouseWheelDelta() / WHEEL_DELTA;
-				}
-
-				Touch touch;
-				touch.state = Touch::TOUCHSTATE_RELEASED;
-				touch.pos = XMFLOAT2(p.Position().X, p.Position().Y);
-				touches.push_back(touch);
-			});
-			MouseDevice::GetForCurrentView().MouseMoved([](MouseDevice, MouseEventArgs args) {
-				mouse.delta_position.x += float(args.MouseDelta().X);
-				mouse.delta_position.y += float(args.MouseDelta().Y);
-			});
-		}
-
 #endif
 
 		if (pen_override)
@@ -428,6 +337,55 @@ namespace wi::input
 				++iter;
 			}
 		}
+
+		double_click = false;
+		if (Press(MOUSE_BUTTON_LEFT))
+		{
+			XMFLOAT2 pos = mouse.position;
+			double elapsed = doubleclick_timer.record_elapsed_seconds();
+			if (elapsed < 0.5 && wi::math::Distance(doubleclick_prevpos, pos) < 5)
+			{
+				double_click = true;
+			}
+			doubleclick_prevpos = pos;
+		}
+
+		// Cursor update:
+		if(cursor_next != cursor_current || cursor_next != CURSOR_DEFAULT)
+		{
+#ifdef PLATFORM_WINDOWS_DESKTOP
+			static HCURSOR cursor_table[] = {
+				::LoadCursor(nullptr, IDC_ARROW),
+				::LoadCursor(nullptr, IDC_IBEAM),
+				::LoadCursor(nullptr, IDC_SIZEALL),
+				::LoadCursor(nullptr, IDC_SIZENS),
+				::LoadCursor(nullptr, IDC_SIZEWE),
+				::LoadCursor(nullptr, IDC_SIZENESW),
+				::LoadCursor(nullptr, IDC_SIZENWSE),
+				::LoadCursor(nullptr, IDC_HAND),
+				::LoadCursor(nullptr, IDC_NO)
+			};
+			::SetCursor(cursor_table[cursor_next]);
+#endif // PLATFORM_WINDOWS_DESKTOP
+
+#ifdef SDL2
+			static SDL_Cursor* cursor_table[] = {
+				SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW),
+				SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_IBEAM),
+				SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZEALL),
+				SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENS),
+				SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZEWE),
+				SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENESW),
+				SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENWSE),
+				SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND),
+				SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NO),
+			};
+			SDL_SetCursor(cursor_table[cursor_next] ? cursor_table[cursor_next] : cursor_table[CURSOR_DEFAULT]);
+#endif // SDL2
+
+			cursor_current = cursor_next;
+		}
+		cursor_next = CURSOR_DEFAULT;
 
 		wi::profiler::EndRange(range);
 	}
@@ -700,7 +658,7 @@ namespace wi::input
 	}
 	void SetPointer(const XMFLOAT4& props)
 	{
-#ifdef PLATFORM_WINDOWS_DESKTOP
+#if defined(PLATFORM_WINDOWS_DESKTOP)
 		HWND hWnd = window;
 		const float dpiscaling = (float)GetDpiForWindow(hWnd) / 96.0f;
 		POINT p;
@@ -708,22 +666,28 @@ namespace wi::input
 		p.y = (LONG)(props.y * dpiscaling);
 		ClientToScreen(hWnd, &p);
 		SetCursorPos(p.x, p.y);
-#endif // PLATFORM_WINDOWS_DESKTOP
-
-#ifdef PLATFORM_UWP
-		auto window = winrt::Windows::UI::Core::CoreWindow::GetForCurrentThread();
-		auto& bounds = window.Bounds();
-		window.PointerPosition(winrt::Windows::Foundation::Point(props.x + bounds.X, props.y + bounds.Y));
-#endif // PLATFORM_UWP
-
-#ifdef SDL2
+#elif defined(SDL2)
+	// Keeping with the trend of 'Set Pointer' API on different platforms, 
+	// SDL_WarpMouseInWindow is used in the case of SDL2. This unfortunately 
+	// causes SDL2 to generate a mouse event for the delta between the old 
+	// and new positions leading to 'rubber banding'. 
+	// The current solution is to artifically generate a motion event of our own
+	// which will 'undo' this unwanted motion event during the mouse motion
+	// accumulation in wiSDLInput.cpp Update()
+	XMFLOAT4 currentPointer = GetPointer();
+	SDL_MouseMotionEvent motionEvent = {0};
+	motionEvent.type = SDL_MOUSEMOTION;
+	motionEvent.x = motionEvent.y = 0; // doesn't matter
+	motionEvent.xrel = currentPointer.x - props.x;
+	motionEvent.yrel = currentPointer.y - props.y;
+	SDL_PushEvent((SDL_Event*)&motionEvent);
 	SDL_WarpMouseInWindow(window, props.x, props.y);
-#endif // _WIN32
+
+#endif // SDL2
 	}
 	void HidePointer(bool value)
 	{
 #ifdef _WIN32
-#ifndef PLATFORM_UWP
 		if (value)
 		{
 			while (ShowCursor(false) >= 0) {};
@@ -732,21 +696,14 @@ namespace wi::input
 		{
 			while (ShowCursor(true) < 0) {};
 		}
-#else
-		auto window = winrt::Windows::UI::Core::CoreWindow::GetForCurrentThread();
-		static auto cursor = window.PointerCursor();
-		if (value)
-		{
-			window.PointerCursor(nullptr);
-		}
-		else
-		{
-			window.PointerCursor(cursor);
-		}
-#endif
 #elif SDL2
 		SDL_ShowCursor(value ? SDL_DISABLE : SDL_ENABLE);
 #endif // _WIN32
+	}
+
+	bool IsDoubleClicked()
+	{
+		return double_click;
 	}
 
 	XMFLOAT4 GetAnalog(GAMEPAD_ANALOG analog, int playerindex)
@@ -803,6 +760,11 @@ namespace wi::input
 	const wi::vector<Touch>& GetTouches()
 	{
 		return touches;
+	}
+
+	void SetCursor(CURSOR cursor)
+	{
+		cursor_next = cursor;
 	}
 
 }

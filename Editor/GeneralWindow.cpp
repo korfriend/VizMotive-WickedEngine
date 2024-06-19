@@ -11,9 +11,10 @@ void GeneralWindow::Create(EditorComponent* _editor)
 {
 	editor = _editor;
 
-	wi::gui::Window::Create("General", wi::gui::Window::WindowControls::COLLAPSE);
+	wi::gui::Window::Create("General", wi::gui::Window::WindowControls::CLOSE | wi::gui::Window::WindowControls::RESIZE_RIGHT);
+	SetText("General Options " ICON_GENERALOPTIONS);
 
-	SetSize(XMFLOAT2(580, 680));
+	SetSize(XMFLOAT2(300, 740));
 
 	physicsDebugCheckBox.Create("Physics visualizer: ");
 	physicsDebugCheckBox.SetTooltip("Visualize the physics world");
@@ -44,7 +45,7 @@ void GeneralWindow::Create(EditorComponent* _editor)
 	aabbDebugCheckBox.SetCheck(wi::renderer::GetToDrawDebugPartitionTree());
 	AddWidget(&aabbDebugCheckBox);
 
-	boneLinesCheckBox.Create("Bone line visualizer: ");
+	boneLinesCheckBox.Create(ICON_ARMATURE " Bone line visualizer: ");
 	boneLinesCheckBox.SetTooltip("Visualize bones of armatures");
 	boneLinesCheckBox.SetScriptTip("SetDebugBonesEnabled(bool enabled)");
 	boneLinesCheckBox.OnClick([](wi::gui::EventArgs args) {
@@ -53,7 +54,7 @@ void GeneralWindow::Create(EditorComponent* _editor)
 	boneLinesCheckBox.SetCheck(wi::renderer::GetToDrawDebugBoneLines());
 	AddWidget(&boneLinesCheckBox);
 
-	debugEmittersCheckBox.Create("Emitter visualizer: ");
+	debugEmittersCheckBox.Create(ICON_EMITTER " Emitter visualizer: ");
 	debugEmittersCheckBox.SetTooltip("Visualize emitters");
 	debugEmittersCheckBox.SetScriptTip("SetDebugEmittersEnabled(bool enabled)");
 	debugEmittersCheckBox.OnClick([](wi::gui::EventArgs args) {
@@ -62,7 +63,7 @@ void GeneralWindow::Create(EditorComponent* _editor)
 	debugEmittersCheckBox.SetCheck(wi::renderer::GetToDrawDebugEmitters());
 	AddWidget(&debugEmittersCheckBox);
 
-	debugForceFieldsCheckBox.Create("Force Field visualizer: ");
+	debugForceFieldsCheckBox.Create(ICON_FORCE " Force Field visualizer: ");
 	debugForceFieldsCheckBox.SetTooltip("Visualize force fields");
 	debugForceFieldsCheckBox.SetScriptTip("SetDebugForceFieldsEnabled(bool enabled)");
 	debugForceFieldsCheckBox.OnClick([](wi::gui::EventArgs args) {
@@ -79,7 +80,7 @@ void GeneralWindow::Create(EditorComponent* _editor)
 	debugRaytraceBVHCheckBox.SetCheck(wi::renderer::GetRaytraceDebugBVHVisualizerEnabled());
 	AddWidget(&debugRaytraceBVHCheckBox);
 
-	envProbesCheckBox.Create("Env probe visualizer: ");
+	envProbesCheckBox.Create(ICON_ENVIRONMENTPROBE " Env probe visualizer: ");
 	envProbesCheckBox.SetTooltip("Toggle visualization of environment probes as reflective spheres");
 	envProbesCheckBox.OnClick([](wi::gui::EventArgs args) {
 		wi::renderer::SetToDrawDebugEnvProbes(args.bValue);
@@ -87,7 +88,7 @@ void GeneralWindow::Create(EditorComponent* _editor)
 	envProbesCheckBox.SetCheck(wi::renderer::GetToDrawDebugEnvProbes());
 	AddWidget(&envProbesCheckBox);
 
-	cameraVisCheckBox.Create("Camera visualizer: ");
+	cameraVisCheckBox.Create(ICON_CAMERA " Camera visualizer: ");
 	cameraVisCheckBox.SetTooltip("Toggle visualization of camera proxies in the scene");
 	cameraVisCheckBox.OnClick([](wi::gui::EventArgs args) {
 		wi::renderer::SetToDrawDebugCameras(args.bValue);
@@ -95,13 +96,21 @@ void GeneralWindow::Create(EditorComponent* _editor)
 	cameraVisCheckBox.SetCheck(wi::renderer::GetToDrawDebugCameras());
 	AddWidget(&cameraVisCheckBox);
 
-	colliderVisCheckBox.Create("Collider visualizer: ");
+	colliderVisCheckBox.Create(ICON_COLLIDER " Collider visualizer: ");
 	colliderVisCheckBox.SetTooltip("Toggle visualization of colliders in the scene");
 	colliderVisCheckBox.OnClick([](wi::gui::EventArgs args) {
 		wi::renderer::SetToDrawDebugColliders(args.bValue);
 		});
 	colliderVisCheckBox.SetCheck(wi::renderer::GetToDrawDebugColliders());
 	AddWidget(&colliderVisCheckBox);
+
+	springVisCheckBox.Create(ICON_SPRING " Spring visualizer: ");
+	springVisCheckBox.SetTooltip("Toggle visualization of springs in the scene");
+	springVisCheckBox.OnClick([](wi::gui::EventArgs args) {
+		wi::renderer::SetToDrawDebugSprings(args.bValue);
+		});
+	springVisCheckBox.SetCheck(wi::renderer::GetToDrawDebugSprings());
+	AddWidget(&springVisCheckBox);
 
 	gridHelperCheckBox.Create("Grid helper: ");
 	gridHelperCheckBox.SetTooltip("Toggle showing of unit visualizer grid in the world origin");
@@ -197,9 +206,8 @@ void GeneralWindow::Create(EditorComponent* _editor)
 	otherinfoCheckBox.SetCheck(editor->main->infoDisplay.heap_allocation_counter);
 
 	saveModeComboBox.Create("Save Mode: ");
-	saveModeComboBox.AddItem("Embed resources " ICON_SAVE_EMBED, (uint64_t)wi::resourcemanager::Mode::ALLOW_RETAIN_FILEDATA);
-	saveModeComboBox.AddItem("No embedding " ICON_SAVE_NO_EMBED, (uint64_t)wi::resourcemanager::Mode::ALLOW_RETAIN_FILEDATA_BUT_DISABLE_EMBEDDING);
-	saveModeComboBox.AddItem("Dump to header " ICON_SAVE_HEADER, (uint64_t)wi::resourcemanager::Mode::ALLOW_RETAIN_FILEDATA);
+	saveModeComboBox.AddItem("Embed resources " ICON_SAVE_EMBED, (uint64_t)wi::resourcemanager::Mode::EMBED_FILE_DATA);
+	saveModeComboBox.AddItem("No embedding " ICON_SAVE_NO_EMBED, (uint64_t)wi::resourcemanager::Mode::NO_EMBEDDING);
 	saveModeComboBox.SetTooltip("Choose whether to embed resources (textures, sounds...) in the scene file when saving, or keep them as separate files.\nThe Dump to header (" ICON_SAVE_HEADER ") option will use embedding and create a C++ header file with byte data of the scene to be used with wi::Archive serialization.");
 	saveModeComboBox.SetColor(wi::Color(50, 180, 100, 180), wi::gui::IDLE);
 	saveModeComboBox.SetColor(wi::Color(50, 220, 140, 255), wi::gui::FOCUS);
@@ -237,7 +245,7 @@ void GeneralWindow::Create(EditorComponent* _editor)
 	});
 	AddWidget(&bonePickerOpacitySlider);
 
-	skeletonsVisibleCheckBox.Create("Skeletons always visible: ");
+	skeletonsVisibleCheckBox.Create(ICON_BONE " Skeletons always visible: ");
 	skeletonsVisibleCheckBox.SetTooltip("Armature skeletons will be always visible, even when not selected.");
 	AddWidget(&skeletonsVisibleCheckBox);
 
@@ -270,7 +278,6 @@ void GeneralWindow::Create(EditorComponent* _editor)
 		{
 			editor->SetLocalization(editor->default_localization);
 			editor->main->config.GetSection("options").Set("language", "English");
-			editor->main->config.Commit();
 			return;
 		}
 
@@ -280,7 +287,6 @@ void GeneralWindow::Create(EditorComponent* _editor)
 		{
 			editor->SetLocalization(editor->current_localization);
 			editor->main->config.GetSection("options").Set("language", language);
-			editor->main->config.Commit();
 		}
 		else
 		{
@@ -362,13 +368,11 @@ void GeneralWindow::Create(EditorComponent* _editor)
 			theme_color_idle = wi::Color(46, 52, 64, 255);
 			theme_color_focus = wi::Color(59, 66, 82, 255);
 			dark_point = wi::Color(46, 52, 64, 255);
-			theme.shadow_color = wi::Color(46, 52, 64, 200);
+			theme.shadow_color = wi::Color(106, 112, 124, 200);
 			theme.font.color = wi::Color(236, 239, 244, 255);
 			theme.font.shadow_color = wi::Color::Shadow();
 			break;
 		}
-	
-		editor->main->config.Commit();
 
 		theme.tooltipImage = theme.image;
 		theme.tooltipImage.color = theme_color_idle;
@@ -424,39 +428,33 @@ void GeneralWindow::Create(EditorComponent* _editor)
 		}
 
 		// customize individual elements:
+		editor->loadmodel_font.params.color = theme.font.color;
+		XMFLOAT4 highlight = theme_color_focus;
+		highlight.x *= 2;
+		highlight.y *= 2;
+		highlight.z *= 2;
+		editor->newEntityCombo.SetAngularHighlightColor(highlight);
+		editor->componentsWnd.newComponentCombo.SetAngularHighlightColor(highlight);
 		editor->componentsWnd.materialWnd.textureSlotButton.SetColor(wi::Color::White(), wi::gui::IDLE);
 		editor->componentsWnd.spriteWnd.textureButton.SetColor(wi::Color::White(), wi::gui::IDLE);
-		editor->optionsWnd.paintToolWnd.brushTextureButton.SetColor(wi::Color::White(), wi::gui::IDLE);
-		editor->optionsWnd.paintToolWnd.revealTextureButton.SetColor(wi::Color::White(), wi::gui::IDLE);
+		editor->paintToolWnd.brushTextureButton.SetColor(wi::Color::White(), wi::gui::IDLE);
+		editor->paintToolWnd.revealTextureButton.SetColor(wi::Color::White(), wi::gui::IDLE);
 		editor->aboutLabel.sprites[wi::gui::FOCUS] = editor->aboutLabel.sprites[wi::gui::IDLE];
-		for (int i = 0; i < arraysize(wi::gui::Widget::sprites); ++i)
-		{
-			editor->optionsWnd.sprites[i].params.enableCornerRounding();
-			editor->optionsWnd.sprites[i].params.corners_rounding[1].radius = 10;
-			editor->optionsWnd.resizeDragger_UpperRight.sprites[i].params.enableCornerRounding();
-			editor->optionsWnd.resizeDragger_UpperRight.sprites[i].params.corners_rounding[1].radius = 10;
-		}
-		for (int i = 0; i < arraysize(wi::gui::Widget::sprites); ++i)
-		{
-			editor->componentsWnd.sprites[i].params.enableCornerRounding();
-			editor->componentsWnd.sprites[i].params.corners_rounding[0].radius = 10;
-			editor->componentsWnd.resizeDragger_UpperLeft.sprites[i].params.enableCornerRounding();
-			editor->componentsWnd.resizeDragger_UpperLeft.sprites[i].params.corners_rounding[0].radius = 10;
-		}
 		int scene_id = 0;
 		for (auto& editorscene : editor->scenes)
 		{
-			for (int i = 0; i < arraysize(editorscene->tabSelectButton.sprites); ++i)
+			if (scene_id > 0)
 			{
-				editorscene->tabSelectButton.sprites[i].params.enableCornerRounding();
-				editorscene->tabSelectButton.sprites[i].params.corners_rounding[0].radius = 10;
-				editorscene->tabSelectButton.sprites[i].params.corners_rounding[2].radius = 10;
+				for (int i = 0; i < arraysize(editorscene->tabSelectButton.sprites); ++i)
+				{
+					editorscene->tabSelectButton.sprites[i].params.enableCornerRounding();
+					editorscene->tabSelectButton.sprites[i].params.corners_rounding[0].radius = 10;
+				}
 			}
 			for (int i = 0; i < arraysize(editorscene->tabCloseButton.sprites); ++i)
 			{
 				editorscene->tabCloseButton.sprites[i].params.enableCornerRounding();
 				editorscene->tabCloseButton.sprites[i].params.corners_rounding[1].radius = 10;
-				editorscene->tabCloseButton.sprites[i].params.corners_rounding[3].radius = 10;
 			}
 
 			if (editor->current_scene == scene_id)
@@ -473,10 +471,76 @@ void GeneralWindow::Create(EditorComponent* _editor)
 		for (int i = 0; i < arraysize(editor->newSceneButton.sprites); ++i)
 		{
 			editor->newSceneButton.sprites[i].params.enableCornerRounding();
-			editor->newSceneButton.sprites[i].params.corners_rounding[0].radius = 10;
-			editor->newSceneButton.sprites[i].params.corners_rounding[1].radius = 10;
-			editor->newSceneButton.sprites[i].params.corners_rounding[2].radius = 10;
-			editor->newSceneButton.sprites[i].params.corners_rounding[3].radius = 10;
+			editor->newSceneButton.sprites[i].params.corners_rounding[0].radius = 20;
+			editor->newSceneButton.sprites[i].params.corners_rounding[1].radius = 20;
+			editor->newSceneButton.sprites[i].params.corners_rounding[2].radius = 20;
+			editor->newSceneButton.sprites[i].params.corners_rounding[3].radius = 20;
+
+			editor->newEntityCombo.sprites[i].params.enableCornerRounding();
+			editor->newEntityCombo.sprites[i].params.corners_rounding[0].radius = 20;
+			editor->newEntityCombo.sprites[i].params.corners_rounding[1].radius = 20;
+			editor->newEntityCombo.sprites[i].params.corners_rounding[2].radius = 20;
+			editor->newEntityCombo.sprites[i].params.corners_rounding[3].radius = 20;
+
+			editor->generalButton.sprites[i].params.enableCornerRounding();
+			editor->generalButton.sprites[i].params.corners_rounding[0].radius = 20;
+			editor->generalButton.sprites[i].params.corners_rounding[1].radius = 20;
+			editor->generalButton.sprites[i].params.corners_rounding[2].radius = 20;
+			editor->generalButton.sprites[i].params.corners_rounding[3].radius = 20;
+
+			editor->graphicsButton.sprites[i].params.enableCornerRounding();
+			editor->graphicsButton.sprites[i].params.corners_rounding[0].radius = 20;
+			editor->graphicsButton.sprites[i].params.corners_rounding[1].radius = 20;
+			editor->graphicsButton.sprites[i].params.corners_rounding[2].radius = 20;
+			editor->graphicsButton.sprites[i].params.corners_rounding[3].radius = 20;
+
+			editor->cameraButton.sprites[i].params.enableCornerRounding();
+			editor->cameraButton.sprites[i].params.corners_rounding[0].radius = 20;
+			editor->cameraButton.sprites[i].params.corners_rounding[1].radius = 20;
+			editor->cameraButton.sprites[i].params.corners_rounding[2].radius = 20;
+			editor->cameraButton.sprites[i].params.corners_rounding[3].radius = 20;
+
+			editor->materialsButton.sprites[i].params.enableCornerRounding();
+			editor->materialsButton.sprites[i].params.corners_rounding[0].radius = 20;
+			editor->materialsButton.sprites[i].params.corners_rounding[1].radius = 20;
+			editor->materialsButton.sprites[i].params.corners_rounding[2].radius = 20;
+			editor->materialsButton.sprites[i].params.corners_rounding[3].radius = 20;
+
+			editor->paintToolButton.sprites[i].params.enableCornerRounding();
+			editor->paintToolButton.sprites[i].params.corners_rounding[0].radius = 20;
+			editor->paintToolButton.sprites[i].params.corners_rounding[1].radius = 20;
+			editor->paintToolButton.sprites[i].params.corners_rounding[2].radius = 20;
+			editor->paintToolButton.sprites[i].params.corners_rounding[3].radius = 20;
+
+			editor->componentsWnd.newComponentCombo.sprites[i].params.enableCornerRounding();
+			editor->componentsWnd.newComponentCombo.sprites[i].params.corners_rounding[0].radius = 20;
+			editor->componentsWnd.newComponentCombo.sprites[i].params.corners_rounding[1].radius = 20;
+			editor->componentsWnd.newComponentCombo.sprites[i].params.corners_rounding[2].radius = 20;
+			editor->componentsWnd.newComponentCombo.sprites[i].params.corners_rounding[3].radius = 20;
+
+			editor->dummyButton.sprites[i].params.enableCornerRounding();
+			editor->dummyButton.sprites[i].params.corners_rounding[0].radius = 10;
+			editor->dummyButton.sprites[i].params.corners_rounding[1].radius = 10;
+			editor->dummyButton.sprites[i].params.corners_rounding[2].radius = 10;
+			editor->dummyButton.sprites[i].params.corners_rounding[3].radius = 10;
+
+			editor->physicsButton.sprites[i].params.enableCornerRounding();
+			editor->physicsButton.sprites[i].params.corners_rounding[0].radius = 10;
+			editor->physicsButton.sprites[i].params.corners_rounding[1].radius = 10;
+			editor->physicsButton.sprites[i].params.corners_rounding[2].radius = 10;
+			editor->physicsButton.sprites[i].params.corners_rounding[3].radius = 10;
+
+			editor->navtestButton.sprites[i].params.enableCornerRounding();
+			editor->navtestButton.sprites[i].params.corners_rounding[0].radius = 10;
+			editor->navtestButton.sprites[i].params.corners_rounding[1].radius = 10;
+			editor->navtestButton.sprites[i].params.corners_rounding[2].radius = 10;
+			editor->navtestButton.sprites[i].params.corners_rounding[3].radius = 10;
+
+			editor->cinemaButton.sprites[i].params.enableCornerRounding();
+			editor->cinemaButton.sprites[i].params.corners_rounding[0].radius = 10;
+			editor->cinemaButton.sprites[i].params.corners_rounding[1].radius = 10;
+			editor->cinemaButton.sprites[i].params.corners_rounding[2].radius = 10;
+			editor->cinemaButton.sprites[i].params.corners_rounding[3].radius = 10;
 		}
 		for (int i = 0; i < arraysize(wi::gui::Widget::sprites); ++i)
 		{
@@ -492,6 +556,12 @@ void GeneralWindow::Create(EditorComponent* _editor)
 			eliminateCoarseCascadesButton.sprites[i].params.corners_rounding[2].radius = 8;
 			eliminateCoarseCascadesButton.sprites[i].params.corners_rounding[3].radius = 8;
 
+			ddsConvButton.sprites[i].params.enableCornerRounding();
+			ddsConvButton.sprites[i].params.corners_rounding[0].radius = 8;
+			ddsConvButton.sprites[i].params.corners_rounding[1].radius = 8;
+			ddsConvButton.sprites[i].params.corners_rounding[2].radius = 8;
+			ddsConvButton.sprites[i].params.corners_rounding[3].radius = 8;
+
 			ktxConvButton.sprites[i].params.enableCornerRounding();
 			ktxConvButton.sprites[i].params.corners_rounding[0].radius = 8;
 			ktxConvButton.sprites[i].params.corners_rounding[1].radius = 8;
@@ -503,41 +573,35 @@ void GeneralWindow::Create(EditorComponent* _editor)
 			editor->aboutWindow.sprites[i].params.corners_rounding[1].radius = 10;
 			editor->aboutWindow.sprites[i].params.corners_rounding[2].radius = 10;
 			editor->aboutWindow.sprites[i].params.corners_rounding[3].radius = 10;
-			editor->aboutWindow.resizeDragger_UpperLeft.sprites[i].params.enableCornerRounding();
-			editor->aboutWindow.resizeDragger_UpperLeft.sprites[i].params.corners_rounding[0].radius = 10;
-			editor->aboutWindow.resizeDragger_UpperRight.sprites[i].params.enableCornerRounding();
-			editor->aboutWindow.resizeDragger_UpperRight.sprites[i].params.corners_rounding[1].radius = 10;
-			editor->aboutWindow.resizeDragger_BottomLeft.sprites[i].params.enableCornerRounding();
-			editor->aboutWindow.resizeDragger_BottomLeft.sprites[i].params.corners_rounding[2].radius = 10;
-			editor->aboutWindow.resizeDragger_BottomRight.sprites[i].params.enableCornerRounding();
-			editor->aboutWindow.resizeDragger_BottomRight.sprites[i].params.corners_rounding[3].radius = 10;
 		}
 		for (int i = 0; i < arraysize(wi::gui::Widget::sprites); ++i)
 		{
 			editor->saveButton.sprites[i].params.enableCornerRounding();
-			editor->saveButton.sprites[i].params.corners_rounding[2].radius = 10;
+			editor->saveButton.sprites[i].params.corners_rounding[0].radius = 10;
 
 			editor->playButton.sprites[i].params.enableCornerRounding();
-			editor->playButton.sprites[i].params.corners_rounding[2].radius = 40;
+			editor->playButton.sprites[i].params.corners_rounding[0].radius = 10;
 
 			editor->stopButton.sprites[i].params.enableCornerRounding();
-			editor->stopButton.sprites[i].params.corners_rounding[3].radius = 40;
+			editor->stopButton.sprites[i].params.corners_rounding[1].radius = 10;
 
 			editor->translateButton.sprites[i].params.enableCornerRounding();
-			editor->translateButton.sprites[i].params.corners_rounding[2].radius = 40;
+			editor->translateButton.sprites[i].params.corners_rounding[0].radius = 10;
+			editor->translateButton.sprites[i].params.corners_rounding[1].radius = 10;
 
 			editor->scaleButton.sprites[i].params.enableCornerRounding();
-			editor->scaleButton.sprites[i].params.corners_rounding[3].radius = 40;
+			editor->scaleButton.sprites[i].params.corners_rounding[2].radius = 10;
+			editor->scaleButton.sprites[i].params.corners_rounding[3].radius = 10;
 
 			editor->dummyButton.sprites[i].params.enableCornerRounding();
-			editor->dummyButton.sprites[i].params.corners_rounding[3].radius = 40;
+			editor->dummyButton.sprites[i].params.corners_rounding[3].radius = 10;
 
 			editor->navtestButton.sprites[i].params.enableCornerRounding();
-			editor->navtestButton.sprites[i].params.corners_rounding[2].radius = 40;
+			editor->navtestButton.sprites[i].params.corners_rounding[2].radius = 10;
 
 			editor->physicsButton.sprites[i].params.enableCornerRounding();
-			editor->physicsButton.sprites[i].params.corners_rounding[2].radius = 40;
-			editor->physicsButton.sprites[i].params.corners_rounding[3].radius = 40;
+			editor->physicsButton.sprites[i].params.corners_rounding[2].radius = 10;
+			editor->physicsButton.sprites[i].params.corners_rounding[3].radius = 10;
 		}
 		editor->componentsWnd.weatherWnd.default_sky_horizon = dark_point;
 		editor->componentsWnd.weatherWnd.default_sky_zenith = theme_color_idle;
@@ -623,6 +687,49 @@ void GeneralWindow::Create(EditorComponent* _editor)
 	AddWidget(&eliminateCoarseCascadesButton);
 
 
+	ddsConvButton.Create("DDS Convert");
+	ddsConvButton.SetTooltip("All material textures in the scene will be converted to DDS format.\nDDS format is optimal for GPU and can be streamed.");
+	ddsConvButton.SetSize(XMFLOAT2(100, 18));
+	ddsConvButton.OnClick([=](wi::gui::EventArgs args) {
+
+		Scene& scene = editor->GetCurrentScene();
+
+		wi::unordered_map<std::string, wi::Resource> conv;
+		for (uint32_t i = 0; i < scene.materials.GetCount(); ++i)
+		{
+			MaterialComponent& material = scene.materials[i];
+			for (auto& x : material.textures)
+			{
+				if (x.GetGPUResource() == nullptr)
+					continue;
+				if (wi::helper::GetExtensionFromFileName(x.name).compare("DDS"))
+				{
+					x.name = wi::helper::ReplaceExtension(x.name, "DDS");
+					conv[x.name] = x.resource;
+				}
+			}
+		}
+
+		for (auto& x : conv)
+		{
+			wi::vector<uint8_t> filedata;
+			if (wi::helper::saveTextureToMemoryFile(x.second.GetTexture(), "DDS", filedata))
+			{
+				x.second = wi::resourcemanager::Load(x.first, wi::resourcemanager::Flags::NONE, filedata.data(), filedata.size());
+				x.second.SetFileData(std::move(filedata));
+			}
+		}
+
+		for (uint32_t i = 0; i < scene.materials.GetCount(); ++i)
+		{
+			MaterialComponent& material = scene.materials[i];
+			material.CreateRenderData();
+		}
+
+		});
+	AddWidget(&ddsConvButton);
+
+
 	ktxConvButton.Create("KTX2 Convert");
 	ktxConvButton.SetTooltip("All material textures in the scene will be converted to KTX2 format.\nTHIS MIGHT TAKE LONG, SO GET YOURSELF A COFFEE OR TEA!");
 	ktxConvButton.SetSize(XMFLOAT2(100, 18));
@@ -649,14 +756,10 @@ void GeneralWindow::Create(EditorComponent* _editor)
 		for (auto& x : conv)
 		{
 			wi::vector<uint8_t> filedata;
-			if (wi::helper::saveTextureToMemory(x.second.GetTexture(), filedata))
+			if (wi::helper::saveTextureToMemoryFile(x.second.GetTexture(), "KTX2", filedata))
 			{
+				x.second = wi::resourcemanager::Load(x.first, wi::resourcemanager::Flags::NONE, filedata.data(), filedata.size());
 				x.second.SetFileData(std::move(filedata));
-				wi::vector<uint8_t> filedata_ktx2;
-				if (wi::helper::saveTextureToMemoryFile(x.second.GetFileData(), x.second.GetTexture().desc, "KTX2", filedata_ktx2))
-				{
-					x.second = wi::resourcemanager::Load(x.first, wi::resourcemanager::Flags::IMPORT_RETAIN_FILEDATA, filedata_ktx2.data(), filedata_ktx2.size());
-				}
 			}
 		}
 
@@ -668,6 +771,8 @@ void GeneralWindow::Create(EditorComponent* _editor)
 
 		});
 	AddWidget(&ktxConvButton);
+
+	SetVisible(false);
 }
 
 void GeneralWindow::RefreshLanguageSelectionAfterWholeGUIWasInitialized()
@@ -765,6 +870,7 @@ void GeneralWindow::ResizeLayout()
 	add_right(envProbesCheckBox);
 	add_right(cameraVisCheckBox);
 	add_right(colliderVisCheckBox);
+	add_right(springVisCheckBox);
 
 	y += jump;
 
@@ -784,5 +890,6 @@ void GeneralWindow::ResizeLayout()
 	width = prev_width;
 
 	add_fullwidth(eliminateCoarseCascadesButton);
+	add_fullwidth(ddsConvButton);
 	add_fullwidth(ktxConvButton);
 }

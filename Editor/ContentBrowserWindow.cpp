@@ -9,9 +9,7 @@ void ContentBrowserWindow::Create(EditorComponent* _editor)
 	editor = _editor;
 	control_size = 30;
 
-	wi::gui::Window::WindowControls controls = wi::gui::Window::WindowControls::ALL;
-	controls &= ~wi::gui::Window::WindowControls::RESIZE_BOTTOMLEFT;
-	wi::gui::Window::Create("Content Browser", controls);
+	wi::gui::Window::Create("Content Browser");
 
 	RemoveWidget(&scrollbar_horizontal);
 
@@ -49,25 +47,6 @@ void ContentBrowserWindow::Update(const wi::Canvas& canvas, float dt)
 		sprites[i].params.corners_rounding[1].radius = radius;
 		sprites[i].params.corners_rounding[2].radius = radius;
 		sprites[i].params.corners_rounding[3].radius = radius;
-		resizeDragger_UpperLeft.sprites[i].params.enableCornerRounding();
-		resizeDragger_UpperLeft.sprites[i].params.corners_rounding[0].radius = radius;
-		resizeDragger_UpperRight.sprites[i].params.enableCornerRounding();
-		resizeDragger_UpperRight.sprites[i].params.corners_rounding[1].radius = radius;
-		resizeDragger_BottomLeft.sprites[i].params.enableCornerRounding();
-		resizeDragger_BottomLeft.sprites[i].params.corners_rounding[2].radius = radius;
-		resizeDragger_BottomRight.sprites[i].params.enableCornerRounding();
-		resizeDragger_BottomRight.sprites[i].params.corners_rounding[3].radius = radius;
-
-		if (IsCollapsed())
-		{
-			resizeDragger_UpperLeft.sprites[i].params.corners_rounding[2].radius = radius;
-			resizeDragger_UpperRight.sprites[i].params.corners_rounding[3].radius = radius;
-		}
-		else
-		{
-			resizeDragger_UpperLeft.sprites[i].params.corners_rounding[2].radius = 0;
-			resizeDragger_UpperRight.sprites[i].params.corners_rounding[3].radius = 0;
-		}
 
 		openFolderButton.sprites[i].params.enableCornerRounding();
 		openFolderButton.sprites[i].params.corners_rounding[0].radius = radius;
@@ -130,6 +109,7 @@ void ContentBrowserWindow::ResizeLayout()
 	openFolderButton.SetSize(XMFLOAT2(separator - padding * 2, openFolderButton.GetSize().y));
 	openFolderButton.AttachTo(this);
 
+	size_t seli = 0;
 	for (auto& x : folderButtons)
 	{
 		x.Detach();
@@ -137,6 +117,9 @@ void ContentBrowserWindow::ResizeLayout()
 		x.SetSize(XMFLOAT2(separator - padding * 2, x.GetSize().y));
 		y += x.GetSize().y + padding;
 		x.AttachTo(this);
+		seli++;
+		if (seli == SELECTION_RECENTFOLDER_BEGIN)
+			y += x.GetSize().y + padding;
 	}
 
 	y = padding + 10;
@@ -157,9 +140,6 @@ void ContentBrowserWindow::ResizeLayout()
 
 void ContentBrowserWindow::RefreshContent()
 {
-#ifdef PLATFORM_UWP
-	content_folder = wi::helper::GetCurrentPath() + "/";
-#else
 	content_folder = wi::helper::GetCurrentPath() + "/Content/";
 	wi::helper::MakePathAbsolute(content_folder);
 	if (!wi::helper::FileExists(content_folder))
@@ -167,7 +147,6 @@ void ContentBrowserWindow::RefreshContent()
 		content_folder = wi::helper::GetCurrentPath() + "/../Content/";
 		wi::helper::MakePathAbsolute(content_folder);
 	}
-#endif // PLATFORM_UWP
 
 	float hei = 25;
 	float wid = 120;
@@ -181,6 +160,7 @@ void ContentBrowserWindow::RefreshContent()
 	{
 		wi::gui::Button& button = folderButtons[SELECTION_RECENT];
 		button.Create("Recently Used");
+		button.SetTooltip("List all recently used files, not grouped by folders.");
 		button.SetLocalizationEnabled(false);
 		button.SetSize(XMFLOAT2(wid, hei));
 		button.OnClick([this](wi::gui::EventArgs args) {
@@ -196,6 +176,7 @@ void ContentBrowserWindow::RefreshContent()
 	{
 		wi::gui::Button& button = folderButtons[SELECTION_SCRIPTS];
 		button.Create("Scripts");
+		button.SetTooltip(content_folder + "scripts");
 		button.SetLocalizationEnabled(false);
 		button.SetSize(XMFLOAT2(wid, hei));
 		button.OnClick([this](wi::gui::EventArgs args) {
@@ -211,6 +192,7 @@ void ContentBrowserWindow::RefreshContent()
 	{
 		wi::gui::Button& button = folderButtons[SELECTION_MODELS];
 		button.Create("Models");
+		button.SetTooltip(content_folder + "models");
 		button.SetLocalizationEnabled(false);
 		button.SetSize(XMFLOAT2(wid, hei));
 		button.OnClick([this](wi::gui::EventArgs args) {
@@ -220,6 +202,29 @@ void ContentBrowserWindow::RefreshContent()
 		if (current_selection == SELECTION_COUNT)
 		{
 			current_selection = SELECTION_MODELS;
+		}
+	}
+
+	for (size_t i = 0; i < editor->recentFolders.size(); ++i)
+	{
+		wi::gui::Button& button = folderButtons[SELECTION_RECENTFOLDER_BEGIN + i];
+		std::string folder = editor->recentFolders[editor->recentFolders.size() - 1 - i];
+		while (!folder.empty() && (folder.back() == '/' || folder.back() == '\\'))
+		{
+			folder.pop_back();
+		}
+		folder = folder.substr(folder.find_last_of("/\\"));
+		button.Create(folder);
+		button.SetTooltip(editor->recentFolders[editor->recentFolders.size() - 1 - i]); // full folder name!
+		button.SetLocalizationEnabled(false);
+		button.SetSize(XMFLOAT2(wid, hei));
+		button.OnClick([this, i](wi::gui::EventArgs args) {
+			SetSelection((SELECTION)(SELECTION_RECENTFOLDER_BEGIN + i));
+		});
+		AddWidget(&button, wi::gui::Window::AttachmentOptions::NONE);
+		if (current_selection == SELECTION_COUNT)
+		{
+			current_selection = (SELECTION)(SELECTION_RECENTFOLDER_BEGIN + i);
 		}
 	}
 
@@ -244,7 +249,6 @@ void ContentBrowserWindow::SetSelection(SELECTION selection)
 
 		switch (selection)
 		{
-		default:
 		case SELECTION_SCRIPTS:
 			AddItems(content_folder + "scripts/", "lua", ICON_SCRIPT);
 			openFolderButton.OnClick([this](wi::gui::EventArgs args) {
@@ -254,8 +258,10 @@ void ContentBrowserWindow::SetSelection(SELECTION selection)
 			break;
 		case SELECTION_MODELS:
 			AddItems(content_folder + "models/", "wiscene", ICON_OBJECT);
+			AddItems(content_folder + "models/", "vrm", ICON_HUMANOID);
 			AddItems(content_folder + "models/", "gltf", ICON_OBJECT);
 			AddItems(content_folder + "models/", "glb", ICON_OBJECT);
+			AddItems(content_folder + "models/", "fbx", ICON_OBJECT);
 			AddItems(content_folder + "models/", "obj", ICON_OBJECT);
 			openFolderButton.OnClick([this](wi::gui::EventArgs args) {
 				wi::helper::OpenUrl(content_folder + "models/");
@@ -275,6 +281,10 @@ void ContentBrowserWindow::SetSelection(SELECTION selection)
 				{
 					AddItem(filename, ICON_OBJECT);
 				}
+				if (!ext.compare("VRM"))
+				{
+					AddItem(filename, ICON_HUMANOID);
+				}
 				if (!ext.compare("GLTF"))
 				{
 					AddItem(filename, ICON_OBJECT);
@@ -283,10 +293,31 @@ void ContentBrowserWindow::SetSelection(SELECTION selection)
 				{
 					AddItem(filename, ICON_OBJECT);
 				}
+				if (!ext.compare("FBX"))
+				{
+					AddItem(filename, ICON_OBJECT);
+				}
 				if (!ext.compare("OBJ"))
 				{
 					AddItem(filename, ICON_OBJECT);
 				}
+			}
+			break;
+		default:
+			{
+				size_t i = selection - SELECTION_RECENTFOLDER_BEGIN;
+				i = std::min(i, editor->recentFolders.size() - 1);
+				const std::string& folder = editor->recentFolders[editor->recentFolders.size() - 1 - i];
+				AddItems(folder, "wiscene", ICON_OBJECT);
+				AddItems(folder, "vrm", ICON_HUMANOID);
+				AddItems(folder, "gltf", ICON_OBJECT);
+				AddItems(folder, "glb", ICON_OBJECT);
+				AddItems(folder, "fbx", ICON_OBJECT);
+				AddItems(folder, "obj", ICON_OBJECT);
+				openFolderButton.OnClick([this, folder](wi::gui::EventArgs args) {
+					wi::helper::OpenUrl(folder);
+				});
+				AddWidget(&openFolderButton, wi::gui::Window::AttachmentOptions::NONE);
 			}
 			break;
 		}
@@ -297,7 +328,7 @@ void ContentBrowserWindow::SetSelection(SELECTION selection)
 		}
 
 		// Refresh theme:
-		editor->optionsWnd.generalWnd.themeCombo.SetSelected(editor->optionsWnd.generalWnd.themeCombo.GetSelected());
+		editor->generalWnd.themeCombo.SetSelected(editor->generalWnd.themeCombo.GetSelected());
 
 	});
 }
@@ -322,8 +353,12 @@ void ContentBrowserWindow::AddItem(const std::string& filename, const std::strin
 {
 	static const XMFLOAT2 siz = XMFLOAT2(240, 120);
 
+	if (!wi::helper::FileExists(filename))
+		return;
+
 	std::string itemname = wi::helper::GetFileNameFromPath(filename);
 	std::string foldername = wi::helper::GetDirectoryFromPath(filename);
+	std::string ext = wi::helper::toUpper(wi::helper::GetExtensionFromFileName(filename));
 
 	wi::gui::Button& button = itemButtons.emplace_back();
 	button.Create(icon);
@@ -340,17 +375,32 @@ void ContentBrowserWindow::AddItem(const std::string& filename, const std::strin
 	button.font_description.params.h_align = wi::font::WIFALIGN_CENTER;
 	button.font_description.params.v_align = wi::font::WIFALIGN_TOP;
 	button.font.params.size = 42;
-	std::string thumbnailName = foldername + "/thumbnail.png";
-	if (wi::helper::FileExists(thumbnailName))
+	if (ext.compare("WISCENE") == 0)
 	{
-		wi::Resource thumbnail = wi::resourcemanager::Load(thumbnailName);
-		if (thumbnail.IsValid())
+		wi::graphics::Texture archiveThumbnail = wi::Archive::PeekThumbnail(filename);
+		if (archiveThumbnail.IsValid())
 		{
 			for (int i = 0; i < arraysize(sprites); ++i)
 			{
-				button.sprites[i].textureResource = thumbnail;
+				button.sprites[i].textureResource.SetTexture(archiveThumbnail);
 			}
 			button.SetText("");
+		}
+	}
+	else
+	{
+		std::string thumbnailName = foldername + "/thumbnail.png";
+		if (wi::helper::FileExists(thumbnailName))
+		{
+			wi::Resource thumbnail = wi::resourcemanager::Load(thumbnailName);
+			if (thumbnail.IsValid())
+			{
+				for (int i = 0; i < arraysize(sprites); ++i)
+				{
+					button.sprites[i].textureResource = thumbnail;
+				}
+				button.SetText("");
+			}
 		}
 	}
 }

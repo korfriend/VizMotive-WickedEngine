@@ -317,6 +317,8 @@ local function Character(model_entity, start_position, face, controllable, anim_
 		face_next = Vector(0,0,1), -- forward direction in current frame
 		movement_velocity = Vector(),
 		velocity = Vector(),
+		leaning_next = 0, -- leaning sideways when turning
+		leaning = 0, -- leaning sideways when turning (smoothed)
 		savedPointerPos = Vector(),
 		walk_speed = 0.1,
 		jog_speed = 0.2,
@@ -331,7 +333,7 @@ local function Character(model_entity, start_position, face, controllable, anim_
 		controllable = true,
 		fixed_update_remain = 0,
 		timestep_occured = false,
-		root_bone_offset = 0,
+		root_offset = 0,
 		foot_placed_left = false,
 		foot_placed_right = false,
 		mood = Mood.Neutral,
@@ -392,26 +394,21 @@ local function Character(model_entity, start_position, face, controllable, anim_
 				end
 			end
 
-			-- Create a base capsule collider if it's not yet configured for character:
-			--	It will be used for movement logic and GPU collision effects
-			if scene.Component_GetCollider(self.humanoid) == nil then
-				local collider = scene.Component_CreateCollider(self.model)
-				self.collider = self.model
-				collider.SetCPUEnabled(false)
-				collider.SetGPUEnabled(true)
-				collider.Shape = ColliderShape.Capsule
-				collider.Radius = 0.3
-				collider.Offset = Vector(0, collider.Radius, 0)
-				collider.Tail = Vector(0, 1.4, 0)
-				local head_transform = scene.Component_GetTransform(self.head)
-				if head_transform ~= nil then
-					collider.Tail = head_transform.GetPosition()
-				end
-			else
-				self.collider = self.humanoid
+			-- Create a base capsule collider for character:
+			local collider = scene.Component_CreateCollider(self.model)
+			self.collider = self.model
+			collider.SetCPUEnabled(false)
+			collider.SetGPUEnabled(true)
+			collider.Shape = ColliderShape.Capsule
+			collider.Radius = 0.3
+			collider.Offset = Vector(0, collider.Radius, 0)
+			collider.Tail = Vector(0, 1.4, 0)
+			local head_transform = scene.Component_GetTransform(self.head)
+			if head_transform ~= nil then
+				collider.Tail = head_transform.GetPosition()
 			end
 
-			self.root = scene.Entity_FindByName("Root", self.model)
+			self.root = self.humanoid
 			
 			self.anims[States.IDLE] = scene.RetargetAnimation(self.humanoid, animations.IDLE, false, anim_scene)
 			self.anims[States.WALK] = scene.RetargetAnimation(self.humanoid, animations.WALK, false, anim_scene)
@@ -440,7 +437,7 @@ local function Character(model_entity, start_position, face, controllable, anim_
 		end,
 		MoveDirection = function(self,dir)
 			local rotation_matrix = matrix.Multiply(matrix.RotationY(self.target_rot_horizontal), matrix.RotationX(self.target_rot_vertical))
-			dir = vector.Transform(dir.Normalize(), rotation_matrix)
+			dir = vector.TransformNormal(dir.Normalize(), rotation_matrix)
 			dir.SetY(0)
 			local dot = vector.Dot(self.face, dir)
 			if(dot < 0) then
@@ -470,10 +467,12 @@ local function Character(model_entity, start_position, face, controllable, anim_
 			local humanoid = scene.Component_GetHumanoid(self.humanoid)
 			humanoid.SetLookAtEnabled(false)
 
+			local face_rotation = matrix.LookTo(Vector(),self.face)
+
 			local model_transform = scene.Component_GetTransform(self.model)
 			local savedPos = model_transform.GetPosition()
 			model_transform.ClearTransform()
-			model_transform.MatrixTransform(matrix.LookTo(Vector(),self.face):Inverse())
+			model_transform.MatrixTransform(matrix.Inverse(face_rotation))
 			model_transform.Scale(self.scale)
 			model_transform.Rotate(self.rotation)
 			model_transform.Translate(savedPos)
@@ -770,6 +769,8 @@ local function Character(model_entity, start_position, face, controllable, anim_
 				self.face = vector.Lerp(self.face, self.face_next, 0.1) -- smooth the turning in fixed update
 				self.face.SetY(0)
 				self.face = self.face.Normalize()
+				self.leaning_next = math.lerp(self.leaning_next, vector.TransformNormal(vector.Subtract(self.face_next, self.face), face_rotation).GetX() * self.velocity.Length() * 0.08, 0.05)
+				self.leaning = math.lerp(self.leaning, self.leaning_next, 0.05)
 
 				-- Animation blending
 				if current_anim ~= nil then
@@ -795,6 +796,7 @@ local function Character(model_entity, start_position, face, controllable, anim_
 			end
 
 			model_transform.Translate(vector.Subtract(capsulepos, original_capsulepos)) -- transform by the capsule offset
+			model_transform.Rotate(Vector(0, 0, self.leaning * math.pi))
 			model_transform.UpdateTransform()
 
 			self.movement_velocity = Vector()
@@ -847,8 +849,8 @@ local function Character(model_entity, start_position, face, controllable, anim_
 			local base_y = self.position.GetY()
 			local ik_foot = INVALID_ENTITY
 			local ik_pos = Vector()
-			-- Compute root bone offset:
-			--	I determine which foot wants to step on lower ground, that will offset root bone of skeleton downwards
+			-- Compute root offset:
+			--	I determine which foot wants to step on lower ground, that will offset whole root downwards
 			--	The other foot will be the upper foot which will be later attached an Inverse Kinematics (IK) effector
 			if (self.state == States.IDLE or self.state == States.DANCE) and self.velocity.GetY() == 0 then
 				local pos_left = scene.Component_GetTransform(self.left_foot).GetPosition()
@@ -882,19 +884,16 @@ local function Character(model_entity, start_position, face, controllable, anim_
 						ik_pos = collPos_right
 					end
 				end
-				self.root_bone_offset = math.lerp(self.root_bone_offset, diff, 0.1)
+				self.root_offset = math.lerp(self.root_offset, diff, 0.1)
 			else
-				self.root_bone_offset = math.lerp(self.root_bone_offset, 0, 0.1)
+				self.root_offset = math.lerp(self.root_offset, 0, 0.1)
 			end
 
 			-- Offset root transform to lower foot pos:
-			local root_bone_transform = scene.Component_GetTransform(self.root)
-			if root_bone_transform ~= nil then
-				root_bone_transform.ClearTransform()
-				local root_pos = root_bone_transform.GetPosition()
-				root_bone_transform.Translate(Vector(0, self.root_bone_offset))
-				--DrawDebugText(self.root_bone_offset, self.position, Vector(1,1,1,1), 0.1, DEBUG_TEXT_CAMERA_FACING)
-				--DrawPoint(vector.Add(root_pos, Vector(0, self.root_bone_offset)), 0.1, Vector(1,0,0,1))
+			local root_transform = scene.Component_GetTransform(self.root)
+			if root_transform ~= nil then
+				root_transform.Translation_local = Vector(0, self.root_offset)
+				root_transform.SetDirty(true)
 			end
 
 			-- Remove IK effectors by default:
@@ -1080,7 +1079,7 @@ local function ThirdPersonCamera(character)
 			local character_position = character_transform.GetPosition()
 			self.target_rot_horizontal = math.lerp(self.target_rot_horizontal, self.character.target_rot_horizontal, 0.1)
 			self.target_rot_vertical = math.lerp(self.target_rot_vertical, self.character.target_rot_vertical, 0.1)
-			self.target_height = math.lerp(self.target_height, character_position.GetY() + self.character.target_height, 0.1)
+			self.target_height = math.lerp(self.target_height, character_position.GetY() + self.character.target_height + self.character.root_offset, 0.1)
 
 			local camera_transform = scene.Component_GetTransform(self.camera)
 			local target_transform = TransformComponent()

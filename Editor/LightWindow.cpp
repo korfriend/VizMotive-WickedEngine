@@ -22,7 +22,7 @@ void LightWindow::Create(EditorComponent* _editor)
 
 		editor->RecordEntity(archive, entity);
 
-		editor->optionsWnd.RefreshEntityTree();
+		editor->componentsWnd.RefreshEntityTree();
 		});
 
 	float x = 130;
@@ -282,7 +282,7 @@ void LightWindow::Create(EditorComponent* _editor)
 				params.extensions = wi::resourcemanager::GetSupportedImageExtensions();
 				wi::helper::FileDialog(params, [this, light, i](std::string fileName) {
 					wi::eventhandler::Subscribe_Once(wi::eventhandler::EVENT_THREAD_SAFE_POINT, [=](uint64_t userdata) {
-						light->lensFlareRimTextures[i] = wi::resourcemanager::Load(fileName, wi::resourcemanager::Flags::IMPORT_RETAIN_FILEDATA);
+						light->lensFlareRimTextures[i] = wi::resourcemanager::Load(fileName);
 						light->lensFlareNames[i] = fileName;
 						lensflare_Button[i].SetText(wi::helper::GetFileNameFromPath(fileName));
 					});
@@ -300,8 +300,6 @@ void LightWindow::Create(EditorComponent* _editor)
 
 void LightWindow::SetEntity(Entity entity)
 {
-	if (this->entity == entity)
-		return;
 	this->entity = entity;
 
 	const LightComponent* light = editor->GetCurrentScene().lights.GetComponent(entity);
@@ -345,29 +343,6 @@ void LightWindow::SetEntity(Entity entity)
 			}
 			lensflare_Button[i].SetEnabled(true);
 		}
-	}
-	else
-	{
-		rangeSlider.SetEnabled(false);
-		radiusSlider.SetEnabled(false);
-		lengthSlider.SetEnabled(false);
-		outerConeAngleSlider.SetEnabled(false);
-		innerConeAngleSlider.SetEnabled(false);
-		shadowCheckBox.SetEnabled(false);
-		haloCheckBox.SetEnabled(false);
-		volumetricsCheckBox.SetEnabled(false);
-		staticCheckBox.SetEnabled(false);
-		volumetricCloudsCheckBox.SetEnabled(false);
-		intensitySlider.SetEnabled(false);
-		colorPicker.SetEnabled(false);
-		shadowResolutionComboBox.SetEnabled(false);
-
-		for (size_t i = 0; i < arraysize(lensflare_Button); ++i)
-		{
-			lensflare_Button[i].SetEnabled(false);
-		}
-
-		RefreshCascades();
 	}
 }
 void LightWindow::SetLightType(LightComponent::LightType type)
@@ -463,7 +438,7 @@ void LightWindow::RefreshCascades()
 	addCascadeButton.SetEnabled(true);
 
 	// refresh theme:
-	editor->optionsWnd.generalWnd.themeCombo.SetSelected(editor->optionsWnd.generalWnd.themeCombo.GetSelected());
+	editor->generalWnd.themeCombo.SetSelected(editor->generalWnd.themeCombo.GetSelected());
 
 }
 

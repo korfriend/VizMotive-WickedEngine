@@ -18,13 +18,22 @@ namespace wi::jobsystem
 		void* sharedmemory;		// stack memory shared within the current group (jobs within a group execute serially)
 	};
 
-	uint32_t GetThreadCount();
+	enum class Priority
+	{
+		High,		// Default
+		Low,		// Pool of low priority threads, useful for generic tasks that shouldn't interfere with high priority tasks
+		Streaming,	// Single low priority thread, for streaming resources
+		Count
+	};
 
 	// Defines a state of execution, can be waited on
 	struct context
 	{
 		std::atomic<uint32_t> counter{ 0 };
+		Priority priority = Priority::High;
 	};
+
+	uint32_t GetThreadCount(Priority priority = Priority::High);
 
 	// Add a task to execute asynchronously. Any idle thread will execute this.
 	void Execute(context& ctx, const std::function<void(JobArgs)>& task);

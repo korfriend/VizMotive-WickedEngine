@@ -3,6 +3,7 @@
 #include "wiMath.h"
 #include "wiVector.h"
 #include "wiColor.h"
+#include "wiGraphics.h"
 
 #include <string>
 
@@ -20,9 +21,13 @@ namespace wi
 		size_t pos = 0; // position of the next memory operation, relative to the data's beginning
 		wi::vector<uint8_t> DATA; // data suitable for read/write operations
 		const uint8_t* data_ptr = nullptr; // this can either be a memory mapped pointer (read only), or the DATA's pointer
+		size_t data_ptr_size = 0;
 
 		std::string fileName; // save to this file on closing if not empty
 		std::string directory; // the directory part from the fileName
+
+		size_t thumbnail_data_size = 0;
+		const uint8_t* thumbnail_data_ptr = nullptr;
 
 		void CreateEmpty(); // creates new archive in write mode
 
@@ -36,7 +41,7 @@ namespace wi
 		//	If readMode == false, the file will be written when the archive is destroyed or Close() is called
 		Archive(const std::string& fileName, bool readMode = true);
 		// Creates a memory mapped archive in read mode
-		Archive(const uint8_t* data);
+		Archive(const uint8_t* data, size_t size);
 		~Archive() { Close(); }
 
 		Archive& operator=(const Archive&) = default;
@@ -67,6 +72,15 @@ namespace wi
 		//	The file's name will include the directory as well
 		const std::string& GetSourceFileName() const;
 
+		// If Archive contains thumbnail image data, then creates a Texture from it:
+		wi::graphics::Texture CreateThumbnailTexture() const;
+
+		// Set a Texture as the thumbnail. This resets the archive, so you should usually do this before writing data:
+		void SetThumbnailAndResetPos(const wi::graphics::Texture& texture);
+
+		// Open just the tumbnail data from an archive, and return it as a Texture:
+		static wi::graphics::Texture PeekThumbnail(const std::string& filename);
+
 		// Appends the current archive write offset as uint64_t to the archive
 		//	Returns the previous write offset of the archive, which can be used by PatchUnknownJumpPosition()
 		//	to write the current archive position to that previous position
@@ -90,6 +104,14 @@ namespace wi
 		void Jump(uint64_t jump_pos)
 		{
 			pos = jump_pos;
+		}
+
+		// This is like reading a vector<uint8_t>, but instead of copying the data, it returns the memory mapped pointer and size
+		inline void MapVector(const uint8_t*& data, size_t& size)
+		{
+			(*this) >> size;
+			data = data_ptr + pos;
+			pos += size;
 		}
 
 		// It could be templated but we have to be extremely careful of different datasizes on different platforms
@@ -430,6 +452,7 @@ namespace wi
 			{
 				DATA.resize(_right * 2);
 				data_ptr = DATA.data();
+				data_ptr_size = DATA.size();
 			}
 			*(T*)(DATA.data() + pos) = data;
 			pos = _right;
@@ -441,6 +464,7 @@ namespace wi
 		{
 			assert(readMode);
 			assert(data_ptr != nullptr);
+			assert(pos < data_ptr_size);
 			data = *(const T*)(data_ptr + pos);
 			pos += (size_t)(sizeof(data));
 		}

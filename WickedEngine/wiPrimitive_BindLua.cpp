@@ -260,6 +260,13 @@ namespace wi::lua::primitive
 		int argc = wi::lua::SGetArgCount(L);
 		if (argc > 0)
 		{
+			Vector_BindLua* _vec = Luna<Vector_BindLua>::lightcheck(L, 1);
+			if (_vec)
+			{
+				wi::lua::SSetBool(L, aabb.intersects(_vec->GetFloat3()));
+				return 1;
+			}
+
 			AABB_BindLua* _aabb = Luna<AABB_BindLua>::lightcheck(L, 1);
 			if (_aabb)
 			{
@@ -446,6 +453,14 @@ namespace wi::lua::primitive
 		int argc = wi::lua::SGetArgCount(L);
 		if (argc > 0)
 		{
+			Vector_BindLua* _vec = Luna<Vector_BindLua>::lightcheck(L, 1);
+			if (_vec)
+			{
+				bool intersects = sphere.intersects(_vec->GetFloat3());
+				wi::lua::SSetBool(L, intersects);
+				return 1;
+			}
+
 			AABB_BindLua* _aabb = Luna<AABB_BindLua>::lightcheck(L, 1);
 			if (_aabb)
 			{
@@ -458,6 +473,14 @@ namespace wi::lua::primitive
 			if (_sphere)
 			{
 				bool intersects = sphere.intersects(_sphere->sphere);
+				wi::lua::SSetBool(L, intersects);
+				return 1;
+			}
+
+			Capsule_BindLua* _capsule = Luna<Capsule_BindLua>::lightcheck(L, 1);
+			if (_capsule)
+			{
+				bool intersects = sphere.intersects(_capsule->capsule);
 				wi::lua::SSetBool(L, intersects);
 				return 1;
 			}

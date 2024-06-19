@@ -22,6 +22,7 @@ This is a reference and explanation of Lua scripting features in Wicked Engine.
 		3. [SoundInstance3D](#soundinstance3d)
 	7. [Vector](#vector)
 	8. [Matrix](#matrix)
+	8. [Async](#async)
 	9. [Scene](#scene)
 		1. [Entity](#entity)
 		2. [Scene](#scene)
@@ -133,8 +134,8 @@ You can use the Renderer with the following functions, all of which are in the g
 - GetScreenWidth() : float result  -- (deprecated, use application.GetCanvas().GetLogicalWidth() instead)
 - GetScreenHeight() : float result  -- (deprecated, use application.GetCanvas().GetLogicalHeight() instead)
 - HairParticleSettings(opt int lod0, opt int lod1, opt int lod2)
-- SetShadowProps2D(int resolution, int count)
-- SetShadowPropsCube(int resolution, int count)
+- SetShadowProps2D(int resolution)
+- SetShadowPropsCube(int resolution)
 - SetDebugPartitionTreeEnabled(bool enabled)
 - SetDebugBonesEnabled(bool enabled)
 - SetDebugEittersEnabled(bool enabled)
@@ -147,11 +148,11 @@ You can use the Renderer with the following functions, all of which are in the g
 - SetDebugCamerasEnabled(bool value)
 - SetVSyncEnabled(opt bool enabled)
 - SetOcclusionCullingEnabled(bool enabled)
-- DrawLine(Vector origin,end, opt Vector color)
-- DrawPoint(Vector origin, opt float size, opt Vector color)
-- DrawBox(Matrix boxMatrix, opt Vector color)
-- DrawSphere(Sphere sphere, opt Vector color)
-- DrawCapsule(Capsule capsule, opt Vector color)
+- DrawLine(Vector origin,end, opt Vector color, opt bool depth = false)
+- DrawPoint(Vector origin, opt float size, opt Vector color, opt bool depth = false)
+- DrawBox(Matrix boxMatrix, opt Vector color, opt bool depth = true)
+- DrawSphere(Sphere sphere, opt Vector color, opt bool depth = true)
+- DrawCapsule(Capsule capsule, opt Vector color, opt bool depth = true)
 - DrawDebugText(string text, opt Vector position, opt Vector color, opt float scaling, opt int flags)
 	DrawDebugText flags, these can be combined with binary OR operator:
 	[outer]DEBUG_TEXT_DEPTH_TEST		-- text can be occluded by geometry
@@ -196,6 +197,8 @@ Render images on the screen.
 - GetTexture() : Texture
 - SetMaskTexture(Texture texture)
 - GetMaskTexture() : Texture
+- SetBackgroundTexture(Texture texture)
+- GetBackgroundTexture() : Texture
 - SetHidden(bool value)
 - IsHidden() : bool
 
@@ -231,7 +234,8 @@ Specify Sprite properties, like position, size, etc.
 - IsDrawRectEnabled() : bool result
 - IsDrawRect2Enabled() : bool result
 - IsMirrorEnabled() : bool result
-- IsBackgroundBlurEnabled() : bool result
+- IsBackgroundEnabled() : bool result
+- IsDistortionMaskEnabled() : bool result
 - SetPos(Vector pos)
 - SetSize(Vector size)
 - SetPivot(Vector value)
@@ -253,8 +257,10 @@ Specify Sprite properties, like position, size, etc.
 - DisableDrawRect2()
 - EnableMirror()
 - DisableMirror()
-- EnableBackgroundBlur(opt float mip = 0)
-- DisableBackgroundBlur()
+- EnableBackground()
+- DisableBackground()
+- EnableDistortionMask()
+- DisableDistortionMask()
 - SetMaskAlphaRange(float start, end)
 - GetMaskAlphaRange() : float start, end
 
@@ -434,6 +440,14 @@ Just holds texture information in VRAM.
 	int perlin_seed = 1234, 
 	int perlin_octaves = 8, 
 	float perlin_persistence = 0.5) -- creates a gradient texture from parameters
+- CreateLensDistortionNormalMap(
+	int width = 256,
+	int height = 256,
+	Vector uv_start = Vecctor(0.5, 0.5),
+	float radius = 0.5,
+	float squish = 1,
+	float blend = 1,
+	float edge_smoothness = 0.04) -- creates a lens distortion normal map (16-bit precision)
 - Save(string filename) -- saves texture into a file. Provide the extension in the filename, it should be one of the following: .JPG, .PNG, .TGA, .BMP, .DDS, .KTX2, .BASIS
 
 ```lua
@@ -641,6 +655,13 @@ A four by four matrix, efficient calculations with SIMD support.
 - GetRight(Matrix mat) : Vector -- returns right direction of parameter matrix
 
 
+### Async
+The Async object can be used for tracking or Wait for completion of functions that are running on background threads. 
+
+- [constructor]Async() -- constructs a new Async tracker object
+- Wait() -- wait for completion of async tasks on this tracker
+- IsCompleted() : bool -- checks if all async tasks on this tracker have been completed
+
 ### Scene System (using entity-component system)
 Manipulate the 3D scene with these components.
 
@@ -676,11 +697,13 @@ The scene holds components. Entity handles can be used to retrieve associated co
 - Clear()  -- deletes every entity and component inside the scene
 - Merge(Scene other)  -- moves contents from an other scene into this one. The other scene will be empty after this operation (contents are moved, not copied)
 - UpdateHierarchy()	-- updates the full scene hierarchy system. Useful if you modified for example a parent transform and children immediately need up to date result in the script
+- Instantiate(Scene prefab, opt bool attached = false) : Entity  -- Duplicates everything in the prefab scene into the current scene. If attached parameter is set to `true` then everything in prefab scene will be attached to a common root entity (with TransformComponent and LayerComponent) and the function will return that root entity.
 
 - CreateEntity() : int entity  -- creates an empty entity and returns it
 - FindAllEntities() : table[entities] -- returns a table with all the entities present in the given scene
 - Entity_FindByName(string value, opt Entity ancestor = INVALID_ENTITY) : int entity  -- returns an entity ID if it exists, and INVALID_ENTITY otherwise. You can specify an ancestor entity if you only want to find entities that are descendants of ancestor entity
 - Entity_Remove(Entity entity, bool recursive = true, bool keep_sorted = false)  -- removes an entity and deletes all its components if it exists. If recursive is specified, then all children will be removed as well (enabled by default). If keep_sorted is specified, then component order will be kept (disabled by default, slower)
+- Entity_Remove_Async(Async async, Entity entity, bool recursive = true, bool keep_sorted = false)  -- Same as Entity_Remove, but it runs on a background thread, status can be tracked by the [Async](#async) object that you provide
 - Entity_Duplicate(Entity entity) : int entity  -- duplicates all of an entity's components and creates a new entity with them. Returns the clone entity handle
 - Entity_IsDescendant(Entity entity, Entity ancestor) : bool result	-- Check whether entity is a descendant of ancestor. Returns `true` if entity is in the hierarchy tree of ancestor, `false` otherwise
 
@@ -1341,30 +1364,30 @@ Describes a Collider object.
 - GetRagdollHeadSize() : float
 
 [outer] HumanoidBone = {
-	Hips = 0,
-	Spine = 1,
+	Hips = 0,	-- included in ragdoll
+	Spine = 1,	-- included in ragdoll
 	Chest = 2,
 	UpperChest = 3,
-	Neck = 4,
-	Head = 5,
+	Neck = 4,	-- included in ragdoll
+	Head = 5,	-- included in ragdoll if Neck is not available
 	LeftEye = 6,
 	RightEye = 7,
 	Jaw = 8,
-	LeftUpperLeg = 9,
-	LeftLowerLeg = 10,
+	LeftUpperLeg = 9,	-- included in ragdoll
+	LeftLowerLeg = 10,	-- included in ragdoll
 	LeftFoot = 11,
 	LeftToes = 12,
-	RightUpperLeg = 13,
-	RightLowerLeg = 14,
+	RightUpperLeg = 13,	-- included in ragdoll
+	RightLowerLeg = 14,	-- included in ragdoll
 	RightFoot = 15,
 	RightToes = 16,
 	LeftShoulder = 17,
-	LeftUpperArm = 18,
-	LeftLowerArm = 19,
+	LeftUpperArm = 18,	-- included in ragdoll
+	LeftLowerArm = 19,	-- included in ragdoll
 	LeftHand = 20,
 	RightShoulder = 21,
-	RightUpperArm = 22,
-	RightLowerArm = 23,
+	RightUpperArm = 22,	-- included in ragdoll
+	RightLowerArm = 23,	-- included in ragdoll
 	RightHand = 24,
 	LeftThumbMetacarpal = 25,
 	LeftThumbProximal = 26,
@@ -1523,7 +1546,9 @@ It inherits functions from RenderPath2D, so it can render a 2D overlay.
 - SetCropTop(float value) -- Sets cropping from top of the screen in logical units
 - SetCropRight(float value) -- Sets cropping from right of the screen in logical units
 - SetCropBottom(float value) -- Sets cropping from bottom of the screen in logical units
+- GetLastPostProcessRT() : Texture -- returns the last post process render texture
 
+```lua
 FSR2_Preset = {
 	Quality = 0,			-- 1.5x scaling, -1.58 sampler LOD bias
 	Balanced = 1,			-- 1.7x scaling, -1.76 sampler LOD bias
@@ -1535,6 +1560,7 @@ Tonemap = {
 	Reinhard = 0,
 	ACES = 1,
 }
+```
 
 #### LoadingScreen
 It is a RenderPath2D but one that internally manages resource loading and can display information about the process.
@@ -1547,6 +1573,16 @@ It inherits functions from RenderPath2D.
 - GetProgress() : int -- returns percentage of loading complete (0% - 100%)
 - SetBackgroundTexture(Texture tex) -- set a full screen background texture that wil be displayed when loading screen is active
 - GetBackgroundTexture() : Texture
+- SetBackgroundMode(BackgroundMode mode) -- sets the alignment of the background image
+- GetBackgroundMode() : int
+
+```lua
+BackgroundMode = {
+	Fill,	-- fill the whole screen, will cut off parts of the image if aspects don't match
+	Fit,	-- fit the image completely inside the screen, will result in black bars on screen if aspects don't match
+	Stretch	-- fill the whole screen, and stretch the image if needed
+}
+```
 
 ### Primitives
 
@@ -1580,6 +1616,7 @@ Axis Aligned Bounding Box. Can be intersected with other primitives.
 - Intersects(AABB aabb) : bool result
 - Intersects(Sphere sphere) : bool result
 - Intersects(Ray ray) : bool result
+- Intersects(Vector point) : bool result
 - GetMin() : Vector result
 - GetMax() : Vector result
 - SetMin(Vector vector)
@@ -1599,7 +1636,9 @@ Sphere defined by center Vector and radius. Can be intersected with other primit
 - [constructor]Sphere(Vector center, float radius)
 - Intersects(AABB aabb) : bool result
 - Intersects(Sphere sphere) : bool result
+- Intersects(Capsule capsule) : bool result
 - Intersects(Ray ray) : bool result
+- Intersects(Vector point) : bool result
 - GetCenter() : Vector result
 - GetRadius() : float result
 - SetCenter(Vector value)

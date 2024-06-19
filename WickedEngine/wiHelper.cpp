@@ -5,7 +5,7 @@
 #include "wiMath.h"
 
 #include "Utility/lodepng.h"
-#include "Utility/dds_write.h"
+#include "Utility/dds.h"
 #include "Utility/stb_image_write.h"
 #include "Utility/basis_universal/encoder/basisu_comp.h"
 #include "Utility/basis_universal/encoder/basisu_gpu_texture.h"
@@ -25,19 +25,8 @@
 #if defined(_WIN32)
 #include <direct.h>
 #include <Psapi.h> // GetProcessMemoryInfo
-#ifdef PLATFORM_UWP
-#include <winrt/Windows.UI.Popups.h>
-#include <winrt/Windows.Storage.h>
-#include <winrt/Windows.Storage.Pickers.h>
-#include <winrt/Windows.Storage.AccessCache.h>
-#include <winrt/Windows.Storage.Streams.h>
-#include <winrt/Windows.Foundation.h>
-#include <winrt/Windows.Foundation.Collections.h>
-#include <winrt/Windows.System.h>
-#else
 #include <Commdlg.h> // openfile
 #include <WinBase.h>
-#endif // PLATFORM_UWP
 #elif defined(PLATFORM_PS5)
 #else
 #include "Utility/portable-file-dialogs.h"
@@ -72,16 +61,6 @@ namespace wi::helper
 #ifdef PLATFORM_WINDOWS_DESKTOP
 		MessageBoxA(GetActiveWindow(), msg.c_str(), caption.c_str(), 0);
 #endif // PLATFORM_WINDOWS_DESKTOP
-
-#ifdef PLATFORM_UWP
-		std::wstring wmessage, wcaption;
-		StringConvert(msg, wmessage);
-		StringConvert(caption, wcaption);
-		// UWP can only show message box on main thread:
-		wi::eventhandler::Subscribe_Once(wi::eventhandler::EVENT_THREAD_SAFE_POINT, [=](uint64_t userdata) {
-			winrt::Windows::UI::Popups::MessageDialog(wmessage, wcaption).ShowAsync();
-			});
-#endif // PLATFORM_UWP
 
 #ifdef SDL2
 		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, caption.c_str(), msg.c_str(), NULL);
@@ -161,7 +140,7 @@ namespace wi::helper
 
 		if (stagingTex.mapped_data != nullptr)
 		{
-			texturedata.resize(stagingTex.mapped_size);
+			texturedata.resize(ComputeTextureMemorySizeInBytes(desc));
 
 			const uint32_t data_stride = GetFormatStride(desc.format);
 			const uint32_t block_size = GetFormatBlockSize(desc.format);
@@ -229,197 +208,197 @@ namespace wi::helper
 
 		if (extension.compare("DDS") == 0)
 		{
-			filedata.resize(sizeof(dds_write::Header) + texturedata.size());
-			dds_write::DXGI_FORMAT dds_format = dds_write::DXGI_FORMAT_UNKNOWN;
+			filedata.resize(sizeof(dds::Header) + texturedata.size());
+			dds::DXGI_FORMAT dds_format = dds::DXGI_FORMAT_UNKNOWN;
 			switch (desc.format)
 			{
 			case wi::graphics::Format::R32G32B32A32_FLOAT:
-				dds_format = dds_write::DXGI_FORMAT_R32G32B32A32_FLOAT;
+				dds_format = dds::DXGI_FORMAT_R32G32B32A32_FLOAT;
 				break;
 			case wi::graphics::Format::R32G32B32A32_UINT:
-				dds_format = dds_write::DXGI_FORMAT_R32G32B32A32_UINT;
+				dds_format = dds::DXGI_FORMAT_R32G32B32A32_UINT;
 				break;
 			case wi::graphics::Format::R32G32B32A32_SINT:
-				dds_format = dds_write::DXGI_FORMAT_R32G32B32A32_SINT;
+				dds_format = dds::DXGI_FORMAT_R32G32B32A32_SINT;
 				break;
 			case wi::graphics::Format::R32G32B32_FLOAT:
-				dds_format = dds_write::DXGI_FORMAT_R32G32B32_FLOAT;
+				dds_format = dds::DXGI_FORMAT_R32G32B32_FLOAT;
 				break;
 			case wi::graphics::Format::R32G32B32_UINT:
-				dds_format = dds_write::DXGI_FORMAT_R32G32B32_UINT;
+				dds_format = dds::DXGI_FORMAT_R32G32B32_UINT;
 				break;
 			case wi::graphics::Format::R32G32B32_SINT:
-				dds_format = dds_write::DXGI_FORMAT_R32G32B32_SINT;
+				dds_format = dds::DXGI_FORMAT_R32G32B32_SINT;
 				break;
 			case wi::graphics::Format::R16G16B16A16_FLOAT:
-				dds_format = dds_write::DXGI_FORMAT_R16G16B16A16_FLOAT;
+				dds_format = dds::DXGI_FORMAT_R16G16B16A16_FLOAT;
 				break;
 			case wi::graphics::Format::R16G16B16A16_UNORM:
-				dds_format = dds_write::DXGI_FORMAT_R16G16B16A16_UNORM;
+				dds_format = dds::DXGI_FORMAT_R16G16B16A16_UNORM;
 				break;
 			case wi::graphics::Format::R16G16B16A16_UINT:
-				dds_format = dds_write::DXGI_FORMAT_R16G16B16A16_UINT;
+				dds_format = dds::DXGI_FORMAT_R16G16B16A16_UINT;
 				break;
 			case wi::graphics::Format::R16G16B16A16_SNORM:
-				dds_format = dds_write::DXGI_FORMAT_R16G16B16A16_SNORM;
+				dds_format = dds::DXGI_FORMAT_R16G16B16A16_SNORM;
 				break;
 			case wi::graphics::Format::R16G16B16A16_SINT:
-				dds_format = dds_write::DXGI_FORMAT_R16G16B16A16_SINT;
+				dds_format = dds::DXGI_FORMAT_R16G16B16A16_SINT;
 				break;
 			case wi::graphics::Format::R32G32_FLOAT:
-				dds_format = dds_write::DXGI_FORMAT_R32G32_FLOAT;
+				dds_format = dds::DXGI_FORMAT_R32G32_FLOAT;
 				break;
 			case wi::graphics::Format::R32G32_UINT:
-				dds_format = dds_write::DXGI_FORMAT_R32G32_UINT;
+				dds_format = dds::DXGI_FORMAT_R32G32_UINT;
 				break;
 			case wi::graphics::Format::R32G32_SINT:
-				dds_format = dds_write::DXGI_FORMAT_R32G32_SINT;
+				dds_format = dds::DXGI_FORMAT_R32G32_SINT;
 				break;
 			case wi::graphics::Format::R10G10B10A2_UNORM:
-				dds_format = dds_write::DXGI_FORMAT_R10G10B10A2_UNORM;
+				dds_format = dds::DXGI_FORMAT_R10G10B10A2_UNORM;
 				break;
 			case wi::graphics::Format::R10G10B10A2_UINT:
-				dds_format = dds_write::DXGI_FORMAT_R10G10B10A2_UINT;
+				dds_format = dds::DXGI_FORMAT_R10G10B10A2_UINT;
 				break;
 			case wi::graphics::Format::R11G11B10_FLOAT:
-				dds_format = dds_write::DXGI_FORMAT_R11G11B10_FLOAT;
+				dds_format = dds::DXGI_FORMAT_R11G11B10_FLOAT;
 				break;
 			case wi::graphics::Format::R8G8B8A8_UNORM:
-				dds_format = dds_write::DXGI_FORMAT_R8G8B8A8_UNORM;
+				dds_format = dds::DXGI_FORMAT_R8G8B8A8_UNORM;
 				break;
 			case wi::graphics::Format::R8G8B8A8_UNORM_SRGB:
-				dds_format = dds_write::DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+				dds_format = dds::DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
 				break;
 			case wi::graphics::Format::R8G8B8A8_UINT:
-				dds_format = dds_write::DXGI_FORMAT_R8G8B8A8_UINT;
+				dds_format = dds::DXGI_FORMAT_R8G8B8A8_UINT;
 				break;
 			case wi::graphics::Format::R8G8B8A8_SNORM:
-				dds_format = dds_write::DXGI_FORMAT_R8G8B8A8_SNORM;
+				dds_format = dds::DXGI_FORMAT_R8G8B8A8_SNORM;
 				break;
 			case wi::graphics::Format::R8G8B8A8_SINT:
-				dds_format = dds_write::DXGI_FORMAT_R8G8B8A8_SINT;
+				dds_format = dds::DXGI_FORMAT_R8G8B8A8_SINT;
 				break;
 			case wi::graphics::Format::B8G8R8A8_UNORM:
-				dds_format = dds_write::DXGI_FORMAT_B8G8R8A8_UNORM;
+				dds_format = dds::DXGI_FORMAT_B8G8R8A8_UNORM;
 				break;
 			case wi::graphics::Format::B8G8R8A8_UNORM_SRGB:
-				dds_format = dds_write::DXGI_FORMAT_R16G16_SINT;
+				dds_format = dds::DXGI_FORMAT_R16G16_SINT;
 				break;
 			case wi::graphics::Format::R16G16_FLOAT:
-				dds_format = dds_write::DXGI_FORMAT_R16G16_FLOAT;
+				dds_format = dds::DXGI_FORMAT_R16G16_FLOAT;
 				break;
 			case wi::graphics::Format::R16G16_UNORM:
-				dds_format = dds_write::DXGI_FORMAT_R16G16_UNORM;
+				dds_format = dds::DXGI_FORMAT_R16G16_UNORM;
 				break;
 			case wi::graphics::Format::R16G16_UINT:
-				dds_format = dds_write::DXGI_FORMAT_R16G16_UINT;
+				dds_format = dds::DXGI_FORMAT_R16G16_UINT;
 				break;
 			case wi::graphics::Format::R16G16_SNORM:
-				dds_format = dds_write::DXGI_FORMAT_R16G16_SNORM;
+				dds_format = dds::DXGI_FORMAT_R16G16_SNORM;
 				break;
 			case wi::graphics::Format::R16G16_SINT:
-				dds_format = dds_write::DXGI_FORMAT_R16G16_SINT;
+				dds_format = dds::DXGI_FORMAT_R16G16_SINT;
 				break;
 			case wi::graphics::Format::D32_FLOAT:
 			case wi::graphics::Format::R32_FLOAT:
-				dds_format = dds_write::DXGI_FORMAT_R32_FLOAT;
+				dds_format = dds::DXGI_FORMAT_R32_FLOAT;
 				break;
 			case wi::graphics::Format::R32_UINT:
-				dds_format = dds_write::DXGI_FORMAT_R32_UINT;
+				dds_format = dds::DXGI_FORMAT_R32_UINT;
 				break;
 			case wi::graphics::Format::R32_SINT:
-				dds_format = dds_write::DXGI_FORMAT_R32_SINT;
+				dds_format = dds::DXGI_FORMAT_R32_SINT;
 				break;
 			case wi::graphics::Format::R9G9B9E5_SHAREDEXP:
-				dds_format = dds_write::DXGI_FORMAT_R9G9B9E5_SHAREDEXP;
+				dds_format = dds::DXGI_FORMAT_R9G9B9E5_SHAREDEXP;
 				break;
 			case wi::graphics::Format::R8G8_UNORM:
-				dds_format = dds_write::DXGI_FORMAT_R8G8_UNORM;
+				dds_format = dds::DXGI_FORMAT_R8G8_UNORM;
 				break;
 			case wi::graphics::Format::R8G8_UINT:
-				dds_format = dds_write::DXGI_FORMAT_R8G8_UINT;
+				dds_format = dds::DXGI_FORMAT_R8G8_UINT;
 				break;
 			case wi::graphics::Format::R8G8_SNORM:
-				dds_format = dds_write::DXGI_FORMAT_R8G8_SNORM;
+				dds_format = dds::DXGI_FORMAT_R8G8_SNORM;
 				break;
 			case wi::graphics::Format::R8G8_SINT:
-				dds_format = dds_write::DXGI_FORMAT_R8G8_SINT;
+				dds_format = dds::DXGI_FORMAT_R8G8_SINT;
 				break;
 			case wi::graphics::Format::R16_FLOAT:
-				dds_format = dds_write::DXGI_FORMAT_R16_FLOAT;
+				dds_format = dds::DXGI_FORMAT_R16_FLOAT;
 				break;
 			case wi::graphics::Format::D16_UNORM:
 			case wi::graphics::Format::R16_UNORM:
-				dds_format = dds_write::DXGI_FORMAT_R16_UNORM;
+				dds_format = dds::DXGI_FORMAT_R16_UNORM;
 				break;
 			case wi::graphics::Format::R16_UINT:
-				dds_format = dds_write::DXGI_FORMAT_R16_UINT;
+				dds_format = dds::DXGI_FORMAT_R16_UINT;
 				break;
 			case wi::graphics::Format::R16_SNORM:
-				dds_format = dds_write::DXGI_FORMAT_R16_SNORM;
+				dds_format = dds::DXGI_FORMAT_R16_SNORM;
 				break;
 			case wi::graphics::Format::R16_SINT:
-				dds_format = dds_write::DXGI_FORMAT_R16_SINT;
+				dds_format = dds::DXGI_FORMAT_R16_SINT;
 				break;
 			case wi::graphics::Format::R8_UNORM:
-				dds_format = dds_write::DXGI_FORMAT_R8_UNORM;
+				dds_format = dds::DXGI_FORMAT_R8_UNORM;
 				break;
 			case wi::graphics::Format::R8_UINT:
-				dds_format = dds_write::DXGI_FORMAT_R8_UINT;
+				dds_format = dds::DXGI_FORMAT_R8_UINT;
 				break;
 			case wi::graphics::Format::R8_SNORM:
-				dds_format = dds_write::DXGI_FORMAT_R8_SNORM;
+				dds_format = dds::DXGI_FORMAT_R8_SNORM;
 				break;
 			case wi::graphics::Format::R8_SINT:
-				dds_format = dds_write::DXGI_FORMAT_R8_SINT;
+				dds_format = dds::DXGI_FORMAT_R8_SINT;
 				break;
 			case wi::graphics::Format::BC1_UNORM:
-				dds_format = dds_write::DXGI_FORMAT_BC1_UNORM;
+				dds_format = dds::DXGI_FORMAT_BC1_UNORM;
 				break;
 			case wi::graphics::Format::BC1_UNORM_SRGB:
-				dds_format = dds_write::DXGI_FORMAT_BC1_UNORM_SRGB;
+				dds_format = dds::DXGI_FORMAT_BC1_UNORM_SRGB;
 				break;
 			case wi::graphics::Format::BC2_UNORM:
-				dds_format = dds_write::DXGI_FORMAT_BC2_UNORM;
+				dds_format = dds::DXGI_FORMAT_BC2_UNORM;
 				break;
 			case wi::graphics::Format::BC2_UNORM_SRGB:
-				dds_format = dds_write::DXGI_FORMAT_BC2_UNORM_SRGB;
+				dds_format = dds::DXGI_FORMAT_BC2_UNORM_SRGB;
 				break;
 			case wi::graphics::Format::BC3_UNORM:
-				dds_format = dds_write::DXGI_FORMAT_BC3_UNORM;
+				dds_format = dds::DXGI_FORMAT_BC3_UNORM;
 				break;
 			case wi::graphics::Format::BC3_UNORM_SRGB:
-				dds_format = dds_write::DXGI_FORMAT_BC3_UNORM_SRGB;
+				dds_format = dds::DXGI_FORMAT_BC3_UNORM_SRGB;
 				break;
 			case wi::graphics::Format::BC4_UNORM:
-				dds_format = dds_write::DXGI_FORMAT_BC4_UNORM;
+				dds_format = dds::DXGI_FORMAT_BC4_UNORM;
 				break;
 			case wi::graphics::Format::BC4_SNORM:
-				dds_format = dds_write::DXGI_FORMAT_BC4_SNORM;
+				dds_format = dds::DXGI_FORMAT_BC4_SNORM;
 				break;
 			case wi::graphics::Format::BC5_UNORM:
-				dds_format = dds_write::DXGI_FORMAT_BC5_UNORM;
+				dds_format = dds::DXGI_FORMAT_BC5_UNORM;
 				break;
 			case wi::graphics::Format::BC5_SNORM:
-				dds_format = dds_write::DXGI_FORMAT_BC5_SNORM;
+				dds_format = dds::DXGI_FORMAT_BC5_SNORM;
 				break;
 			case wi::graphics::Format::BC6H_UF16:
-				dds_format = dds_write::DXGI_FORMAT_BC6H_UF16;
+				dds_format = dds::DXGI_FORMAT_BC6H_UF16;
 				break;
 			case wi::graphics::Format::BC6H_SF16:
-				dds_format = dds_write::DXGI_FORMAT_BC6H_SF16;
+				dds_format = dds::DXGI_FORMAT_BC6H_SF16;
 				break;
 			case wi::graphics::Format::BC7_UNORM:
-				dds_format = dds_write::DXGI_FORMAT_BC7_UNORM;
+				dds_format = dds::DXGI_FORMAT_BC7_UNORM;
 				break;
 			case wi::graphics::Format::BC7_UNORM_SRGB:
-				dds_format = dds_write::DXGI_FORMAT_BC7_UNORM_SRGB;
+				dds_format = dds::DXGI_FORMAT_BC7_UNORM_SRGB;
 				break;
 			default:
 				assert(0);
 				return false;
 			}
-			dds_write::write_header(
+			dds::write_header(
 				filedata.data(),
 				dds_format,
 				desc.width,
@@ -429,7 +408,7 @@ namespace wi::helper
 				has_flag(desc.misc_flags, ResourceMiscFlag::TEXTURECUBE),
 				desc.type == TextureDesc::Type::TEXTURE_3D ? desc.depth : 0
 			);
-			std::memcpy(filedata.data() + sizeof(dds_write::Header), texturedata.data(), texturedata.size());
+			std::memcpy(filedata.data() + sizeof(dds::Header), texturedata.data(), texturedata.size());
 			return true;
 		}
 
@@ -449,6 +428,26 @@ namespace wi::helper
 					dest[i] = r;
 				}
 				unsigned error = lodepng::encode(filedata, src_bigendian, desc.width, desc.height, LCT_GREY, 16);
+				return error == 0;
+			}
+			if (desc.format == Format::R16G16_UNORM || desc.format == Format::R16G16_UINT)
+			{
+				// Specialized handling for 16-bit PNG:
+				//	Two channel RG data is expanded to RGBA (2-channel PNG is not good because that is interpreted as red and alpha)
+				wi::vector<uint8_t> src_bigendian = texturedata;
+				const uint32_t* src_rg = (const uint32_t*)src_bigendian.data();
+				wi::vector<wi::Color16> dest_rgba(desc.width * desc.height);
+				for (uint32_t i = 0; i < desc.width * desc.height; ++i)
+				{
+					uint32_t rg = src_rg[i];
+					wi::Color16& rgba = dest_rgba[i];
+					uint16_t r = rg & 0xFFFF;
+					r = (r >> 8) | ((r & 0xFF) << 8); // little endian to big endian
+					uint16_t g = (rg >> 16u) & 0xFFFF;
+					g = (g >> 8) | ((g & 0xFF) << 8); // little endian to big endian
+					rgba = wi::Color16(r, g, 0xFFFF, 0xFFFF);
+				}
+				unsigned error = lodepng::encode(filedata, (const unsigned char*)dest_rgba.data(), desc.width, desc.height, LCT_RGBA, 16);
 				return error == 0;
 			}
 			if (desc.format == Format::R16G16B16A16_UNORM || desc.format == Format::R16G16B16A16_UINT)
@@ -970,16 +969,6 @@ namespace wi::helper
 			return;
 		}
 
-#ifdef PLATFORM_UWP
-
-		size_t found = path.rfind(rootdir);
-		if (found != std::string::npos)
-		{
-			path = path.substr(found + rootdir.length());
-		}
-
-#else
-
 		std::filesystem::path filepath = ToNativeString(path);
 		if (filepath.is_absolute())
 		{
@@ -990,8 +979,6 @@ namespace wi::helper
 				path = relative.generic_u8string();
 			}
 		}
-
-#endif // PLATFORM_UWP
 
 	}
 
@@ -1010,9 +997,8 @@ namespace wi::helper
 	}
 
 	template<template<typename T, typename A> typename vector_interface>
-	bool FileRead_Impl(const std::string& fileName, vector_interface<uint8_t, std::allocator<uint8_t>>& data)
+	bool FileRead_Impl(const std::string& fileName, vector_interface<uint8_t, std::allocator<uint8_t>>& data, size_t max_read, size_t offset)
 	{
-#ifndef PLATFORM_UWP
 #if defined(PLATFORM_LINUX) || defined(PLATFORM_PS5)
 		std::string filepath = fileName;
 		std::replace(filepath.begin(), filepath.end(), '\\', '/'); // Linux cannot handle backslash in file path, need to convert it to forward slash
@@ -1020,80 +1006,29 @@ namespace wi::helper
 #else
 		std::ifstream file(ToNativeString(fileName), std::ios::binary | std::ios::ate);
 #endif // PLATFORM_LINUX || PLATFORM_PS5
+
 		if (file.is_open())
 		{
-			size_t dataSize = (size_t)file.tellg();
-			file.seekg(0, file.beg);
+			size_t dataSize = (size_t)file.tellg() - offset;
+			dataSize = std::min(dataSize, max_read);
+			file.seekg((std::streampos)offset);
 			data.resize(dataSize);
 			file.read((char*)data.data(), dataSize);
 			file.close();
 			return true;
 		}
-#else
-		using namespace winrt::Windows::Storage;
-		using namespace winrt::Windows::Storage::Streams;
-		using namespace winrt::Windows::Foundation;
-		std::wstring wstr;
-		std::filesystem::path filepath = fileName;
-		filepath = std::filesystem::absolute(filepath);
-		StringConvert(filepath.string(), wstr);
-		bool success = false;
-
-		auto async_helper = [&]() -> IAsyncAction {
-			try
-			{
-				auto file = co_await StorageFile::GetFileFromPathAsync(wstr);
-				auto buffer = co_await FileIO::ReadBufferAsync(file);
-				auto reader = DataReader::FromBuffer(buffer);
-				auto size = buffer.Length();
-				data.resize((size_t)size);
-				for (auto& x : data)
-				{
-					x = reader.ReadByte();
-				}
-				success = true;
-			}
-			catch (winrt::hresult_error const& ex)
-			{
-				switch (ex.code())
-				{
-				case E_ACCESSDENIED:
-					wi::backlog::post("Opening file failed: " + fileName + " | Reason: Permission Denied!");
-					break;
-				default:
-					break;
-				}
-			}
-
-		};
-
-		if (winrt::impl::is_sta_thread())
-		{
-			std::thread([&] { async_helper().get(); }).join(); // can't block coroutine from ui thread
-		}
-		else
-		{
-			async_helper().get();
-		}
-
-		if (success)
-		{
-			return true;
-		}
-
-#endif // PLATFORM_UWP
 
 		wi::backlog::post("File not found: " + fileName, wi::backlog::LogLevel::Warning);
 		return false;
 	}
-	bool FileRead(const std::string& fileName, wi::vector<uint8_t>& data)
+	bool FileRead(const std::string& fileName, wi::vector<uint8_t>& data, size_t max_read, size_t offset)
 	{
-		return FileRead_Impl(fileName, data);
+		return FileRead_Impl(fileName, data, max_read, offset);
 	}
 #if WI_VECTOR_TYPE
-	bool FileRead(const std::string& fileName, std::vector<uint8_t>& data)
+	bool FileRead(const std::string& fileName, std::vector<uint8_t>& data, size_t max_read, size_t offset)
 	{
-		return FileRead_Impl(fileName, data);
+		return FileRead_Impl(fileName, data, max_read, offset);
 	}
 #endif // WI_VECTOR_TYPE
 
@@ -1104,7 +1039,6 @@ namespace wi::helper
 			return false;
 		}
 
-#ifndef PLATFORM_UWP
 		std::ofstream file(ToNativeString(fileName), std::ios::binary | std::ios::trunc);
 		if (file.is_open())
 		{
@@ -1112,162 +1046,26 @@ namespace wi::helper
 			file.close();
 			return true;
 		}
-#else
-
-		using namespace winrt::Windows::Storage;
-		using namespace winrt::Windows::Storage::Streams;
-		using namespace winrt::Windows::Foundation;
-		std::wstring wstr;
-		std::filesystem::path filepath = fileName;
-		filepath = std::filesystem::absolute(filepath);
-		StringConvert(filepath.string(), wstr);
-
-		CREATEFILE2_EXTENDED_PARAMETERS params = {};
-		params.dwSize = (DWORD)size;
-		params.dwFileAttributes = FILE_ATTRIBUTE_NORMAL;
-		HANDLE filehandle = CreateFile2FromAppW(wstr.c_str(), GENERIC_READ | GENERIC_WRITE, 0, CREATE_ALWAYS, &params);
-		assert(filehandle);
-		CloseHandle(filehandle);
-
-		bool success = false;
-		auto async_helper = [&]() -> IAsyncAction {
-			try
-			{
-				auto file = co_await StorageFile::GetFileFromPathAsync(wstr);
-				winrt::array_view<const uint8_t> dataarray(data, (winrt::array_view<const uint8_t>::size_type)size);
-				co_await FileIO::WriteBytesAsync(file, dataarray);
-				success = true;
-			}
-			catch (winrt::hresult_error const& ex)
-			{
-				switch (ex.code())
-				{
-				case E_ACCESSDENIED:
-					wi::backlog::post("Opening file failed: " + fileName + " | Reason: Permission Denied!");
-					break;
-				default:
-					break;
-				}
-			}
-
-		};
-
-		if (winrt::impl::is_sta_thread())
-		{
-			std::thread([&] { async_helper().get(); }).join(); // can't block coroutine from ui thread
-		}
-		else
-		{
-			async_helper().get();
-		}
-
-		if (success)
-		{
-			return true;
-		}
-#endif // PLATFORM_UWP
 
 		return false;
 	}
 
 	bool FileExists(const std::string& fileName)
 	{
-#ifndef PLATFORM_UWP
 		bool exists = std::filesystem::exists(ToNativeString(fileName));
 		return exists;
-#else
-		using namespace winrt::Windows::Storage;
-		using namespace winrt::Windows::Storage::Streams;
-		using namespace winrt::Windows::Foundation;
-		std::wstring wstr;
-		std::filesystem::path filepath = fileName;
-		filepath = std::filesystem::absolute(filepath);
-		StringConvert(filepath.string(), wstr);
-		bool success = false;
-
-		auto async_helper = [&]() -> IAsyncAction {
-			try
-			{
-				auto file = co_await StorageFile::GetFileFromPathAsync(wstr);
-				success = true;
-			}
-			catch (winrt::hresult_error const& ex)
-			{
-				switch (ex.code())
-				{
-				case E_ACCESSDENIED:
-					wi::backlog::post("Opening file failed: " + fileName + " | Reason: Permission Denied!");
-					break;
-				default:
-					break;
-				}
-			}
-
-		};
-
-		if (winrt::impl::is_sta_thread())
-		{
-			std::thread([&] { async_helper().get(); }).join(); // can't block coroutine from ui thread
-		}
-		else
-		{
-			async_helper().get();
-		}
-
-		return success;
-#endif // PLATFORM_UWP
 	}
 
 	bool DirectoryExists(const std::string& fileName)
 	{
-#ifndef PLATFORM_UWP
 		bool exists = std::filesystem::exists(ToNativeString(fileName));
 		return exists;
-#else
-		using namespace winrt::Windows::Storage;
-		using namespace winrt::Windows::Storage::Streams;
-		using namespace winrt::Windows::Foundation;
-		std::wstring wstr;
-		std::filesystem::path filepath = fileName;
-		filepath = std::filesystem::absolute(filepath);
-		StringConvert(filepath.string(), wstr);
-		bool success = false;
-
-		auto async_helper = [&]() -> IAsyncAction {
-			try
-			{
-				auto file = co_await StorageFolder::GetFolderFromPathAsync(wstr);
-				success = true;
-			}
-			catch (winrt::hresult_error const& ex)
-			{
-				switch (ex.code())
-				{
-				case E_ACCESSDENIED:
-					wi::backlog::post("Opening folder failed: " + fileName + " | Reason: Permission Denied!");
-					break;
-				default:
-					break;
-				}
-			}
-
-			};
-
-		if (winrt::impl::is_sta_thread())
-		{
-			std::thread([&] { async_helper().get(); }).join(); // can't block coroutine from ui thread
-		}
-		else
-		{
-			async_helper().get();
-		}
-
-		return success;
-#endif // PLATFORM_UWP
 	}
 
 	uint64_t FileTimestamp(const std::string& fileName)
 	{
+		if (!FileExists(fileName))
+			return 0;
 		auto tim = std::filesystem::last_write_time(ToNativeString(fileName));
 		return std::chrono::duration_cast<std::chrono::duration<uint64_t>>(tim.time_since_epoch()).count();
 	}
@@ -1387,81 +1185,6 @@ namespace wi::helper
 
 			}).detach();
 #endif // PLATFORM_WINDOWS_DESKTOP
-
-#ifdef PLATFORM_UWP
-		auto filedialoghelper = [](FileDialogParams params, std::function<void(std::string fileName)> onSuccess) -> winrt::fire_and_forget {
-
-			using namespace winrt::Windows::Storage;
-			using namespace winrt::Windows::Storage::Pickers;
-			using namespace winrt::Windows::Storage::AccessCache;
-
-			switch (params.type)
-			{
-			default:
-			case FileDialogParams::OPEN:
-			{
-				FileOpenPicker picker;
-				picker.ViewMode(PickerViewMode::List);
-				picker.SuggestedStartLocation(PickerLocationId::Objects3D);
-
-				for (auto& x : params.extensions)
-				{
-					std::wstring wstr;
-					StringConvert(x, wstr);
-					wstr = L"." + wstr;
-					picker.FileTypeFilter().Append(wstr);
-				}
-
-				auto file = co_await picker.PickSingleFileAsync();
-
-				if (file)
-				{
-					auto futureaccess = StorageApplicationPermissions::FutureAccessList();
-					futureaccess.Clear();
-					futureaccess.Add(file);
-					std::wstring wstr = file.Path().data();
-					std::string str;
-					StringConvert(wstr, str);
-
-					onSuccess(str);
-				}
-			}
-			break;
-			case FileDialogParams::SAVE:
-			{
-				FileSavePicker picker;
-				picker.SuggestedStartLocation(PickerLocationId::Objects3D);
-
-				std::wstring wdesc;
-				StringConvert(params.description, wdesc);
-				winrt::Windows::Foundation::Collections::IVector<winrt::hstring> extensions{ winrt::single_threaded_vector<winrt::hstring>() };
-				for (auto& x : params.extensions)
-				{
-					std::wstring wstr;
-					StringConvert(x, wstr);
-					wstr = L"." + wstr;
-					extensions.Append(wstr);
-				}
-				picker.FileTypeChoices().Insert(wdesc, extensions);
-
-				auto file = co_await picker.PickSaveFileAsync();
-				if (file)
-				{
-					auto futureaccess = StorageApplicationPermissions::FutureAccessList();
-					futureaccess.Clear();
-					futureaccess.Add(file);
-					std::wstring wstr = file.Path().data();
-					std::string str;
-					StringConvert(wstr, str);
-					onSuccess(str);
-				}
-			}
-			break;
-			}
-		};
-		filedialoghelper(params, onSuccess);
-
-#endif // PLATFORM_UWP
 
 #ifdef PLATFORM_LINUX
 		if (!pfd::settings::available()) {
@@ -1701,10 +1424,6 @@ namespace wi::helper
 
 	void OpenUrl(const std::string& url)
 	{
-#ifdef PLATFORM_UWP
-		winrt::Windows::System::Launcher::LaunchUriAsync(winrt::Windows::Foundation::Uri(winrt::to_hstring(url)));
-		return;
-#endif // PLATFORM_UWP
 
 #ifdef PLATFORM_WINDOWS_DESKTOP
 		std::string op = "start \"\" \"" + url + "\"";

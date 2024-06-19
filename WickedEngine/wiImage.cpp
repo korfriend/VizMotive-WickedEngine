@@ -85,7 +85,14 @@ namespace wi::image
 		image.texture_mask_index = device->GetDescriptorIndex(params.maskMap, SubresourceType::SRV, params.mask_subresource);
 		if (params.isBackgroundEnabled())
 		{
-			image.texture_background_index = device->GetDescriptorIndex(&backgroundTexture, SubresourceType::SRV);
+			if (params.backgroundMap != nullptr)
+			{
+				image.texture_background_index = device->GetDescriptorIndex(params.backgroundMap, SubresourceType::SRV, params.background_subresource);
+			}
+			else
+			{
+				image.texture_background_index = device->GetDescriptorIndex(&backgroundTexture, SubresourceType::SRV);
+			}
 		}
 		else
 		{
@@ -114,6 +121,18 @@ namespace wi::image
 		image.packed_color.x = uint(packed_color.v);
 		image.packed_color.y = uint(packed_color.v >> 32ull);
 
+		if (params.angular_softness_outer_angle > 0)
+		{
+			const float innerConeAngleCos = std::cos(params.angular_softness_inner_angle);
+			const float outerConeAngleCos = std::cos(params.angular_softness_outer_angle);
+			// https://github.com/KhronosGroup/glTF/tree/main/extensions/2.0/Khronos/KHR_lights_punctual#inner-and-outer-cone-angles
+			const float lightAngleScale = 1.0f / std::max(0.001f, innerConeAngleCos - outerConeAngleCos);
+			const float lightAngleOffset = -outerConeAngleCos * lightAngleScale;
+			image.angular_softness_direction = params.angular_softness_direction;
+			image.angular_softness_scale = lightAngleScale;
+			image.angular_softness_offset = lightAngleOffset;
+		}
+
 		image.flags = 0;
 		if (params.isExtractNormalMapEnabled())
 		{
@@ -131,6 +150,18 @@ namespace wi::image
 		if (params.isFullScreenEnabled())
 		{
 			image.flags |= IMAGE_FLAG_FULLSCREEN;
+		}
+		if (params.isAngularSoftnessDoubleSided())
+		{
+			image.flags |= IMAGE_FLAG_ANGULAR_DOUBLESIDED;
+		}
+		if (params.isAngularSoftnessInverse())
+		{
+			image.flags |= IMAGE_FLAG_ANGULAR_INVERSE;
+		}
+		if (params.isDistortionMaskEnabled())
+		{
+			image.flags |= IMAGE_FLAG_DISTORTION_MASK;
 		}
 
 		image.border_soften = params.border_soften;

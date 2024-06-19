@@ -51,15 +51,26 @@ namespace wi::math
 		return (std::abs(f1 - f2) <= std::numeric_limits<float>::epsilon() * std::max(std::abs(f1), std::abs(f2)));
 	}
 
-	constexpr float saturate(float x) { return std::min(std::max(x, 0.0f), 1.0f); }
+	constexpr float saturate(float x)
+	{
+		return ::saturate(x);
+	}
 
+	inline float LengthSquared(const XMFLOAT2& v)
+	{
+		return v.x * v.x + v.y * v.y;
+	}
+	inline float LengthSquared(const XMFLOAT3& v)
+	{
+		return v.x * v.x + v.y * v.y + v.z * v.z;
+	}
 	inline float Length(const XMFLOAT2& v)
 	{
-		return std::sqrt(v.x*v.x + v.y*v.y);
+		return std::sqrt(LengthSquared(v));
 	}
 	inline float Length(const XMFLOAT3& v)
 	{
-		return std::sqrt(v.x*v.x + v.y*v.y + v.z*v.z);
+		return std::sqrt(LengthSquared(v));
 	}
 	inline float Distance(XMVECTOR v1, XMVECTOR v2)
 	{
@@ -136,7 +147,7 @@ namespace wi::math
 	}
 	constexpr float InverseLerp(float value1, float value2, float pos)
 	{
-		return value2 == value1 ? 0 : ((pos - value1) / (value2 - value1));
+		return ::inverse_lerp(value1, value2, pos);
 	}
 	constexpr XMFLOAT2 InverseLerp(const XMFLOAT2& value1, const XMFLOAT2& value2, const XMFLOAT2& pos)
 	{
@@ -156,7 +167,7 @@ namespace wi::math
 	}
 	constexpr float Lerp(float value1, float value2, float amount)
 	{
-		return value1 + (value2 - value1) * amount;
+		return ::lerp(value1, value2, amount);
 	}
 	constexpr XMFLOAT2 Lerp(const XMFLOAT2& a, const XMFLOAT2& b, float i)
 	{
@@ -355,9 +366,9 @@ namespace wi::math
 	inline XMVECTOR GetQuadraticBezierPos(const XMVECTOR& a, const XMVECTOR& b, const XMVECTOR& c, float t)
 	{
 		// XMVECTOR optimized version
-		const float param0 = std::pow(1 - t, 2.0f);
+		const float param0 = sqr(1 - t);
 		const float param1 = 2 * (1 - t) * t;
-		const float param2 = std::pow(t, 2.0f);
+		const float param2 = sqr(t);
 		const XMVECTOR param = XMVectorSet(param0, param1, param2, 1);
 		const XMMATRIX M = XMMATRIX(a, b, c, XMVectorSet(0, 0, 0, 1));
 		return XMVector3TransformNormal(param, M);

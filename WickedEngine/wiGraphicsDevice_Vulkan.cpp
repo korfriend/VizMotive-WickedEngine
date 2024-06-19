@@ -661,6 +661,63 @@ namespace vulkan_internal
 		wi::vector<BufferSubresource> subresources_uav;
 		VkDeviceAddress address = 0;
 
+		void destroy_subresources()
+		{
+			uint64_t framecount = allocationhandler->framecount;
+			if (srv.IsValid())
+			{
+				if (srv.is_typed)
+				{
+					allocationhandler->destroyer_bufferviews.push_back(std::make_pair(srv.buffer_view, framecount));
+					allocationhandler->destroyer_bindlessUniformTexelBuffers.push_back(std::make_pair(srv.index, framecount));
+				}
+				else
+				{
+					allocationhandler->destroyer_bindlessStorageBuffers.push_back(std::make_pair(srv.index, framecount));
+				}
+				srv = {};
+			}
+			if (uav.IsValid())
+			{
+				if (uav.is_typed)
+				{
+					allocationhandler->destroyer_bufferviews.push_back(std::make_pair(uav.buffer_view, framecount));
+					allocationhandler->destroyer_bindlessStorageTexelBuffers.push_back(std::make_pair(uav.index, framecount));
+				}
+				else
+				{
+					allocationhandler->destroyer_bindlessStorageBuffers.push_back(std::make_pair(uav.index, framecount));
+				}
+				uav = {};
+			}
+			for (auto& x : subresources_srv)
+			{
+				if (x.is_typed)
+				{
+					allocationhandler->destroyer_bufferviews.push_back(std::make_pair(x.buffer_view, framecount));
+					allocationhandler->destroyer_bindlessUniformTexelBuffers.push_back(std::make_pair(x.index, framecount));
+				}
+				else
+				{
+					allocationhandler->destroyer_bindlessStorageBuffers.push_back(std::make_pair(x.index, framecount));
+				}
+			}
+			subresources_srv.clear();
+			for (auto& x : subresources_uav)
+			{
+				if (x.is_typed)
+				{
+					allocationhandler->destroyer_bufferviews.push_back(std::make_pair(x.buffer_view, framecount));
+					allocationhandler->destroyer_bindlessStorageTexelBuffers.push_back(std::make_pair(x.index, framecount));
+				}
+				else
+				{
+					allocationhandler->destroyer_bindlessStorageBuffers.push_back(std::make_pair(x.index, framecount));
+				}
+			}
+			subresources_uav.clear();
+		}
+
 		~Buffer_Vulkan()
 		{
 			if (allocationhandler == nullptr)
@@ -675,54 +732,7 @@ namespace vulkan_internal
 			{
 				allocationhandler->destroyer_allocations.push_back(std::make_pair(allocation, framecount));
 			}
-			if (srv.IsValid())
-			{
-				if (srv.is_typed)
-				{
-					allocationhandler->destroyer_bufferviews.push_back(std::make_pair(srv.buffer_view, framecount));
-					allocationhandler->destroyer_bindlessUniformTexelBuffers.push_back(std::make_pair(srv.index, framecount));
-				}
-				else
-				{
-					allocationhandler->destroyer_bindlessStorageBuffers.push_back(std::make_pair(srv.index, framecount));
-				}
-			}
-			if (uav.IsValid())
-			{
-				if (uav.is_typed)
-				{
-					allocationhandler->destroyer_bufferviews.push_back(std::make_pair(uav.buffer_view, framecount));
-					allocationhandler->destroyer_bindlessStorageTexelBuffers.push_back(std::make_pair(uav.index, framecount));
-				}
-				else
-				{
-					allocationhandler->destroyer_bindlessStorageBuffers.push_back(std::make_pair(uav.index, framecount));
-				}
-			}
-			for (auto& x : subresources_srv)
-			{
-				if (x.is_typed)
-				{
-					allocationhandler->destroyer_bufferviews.push_back(std::make_pair(x.buffer_view, framecount));
-					allocationhandler->destroyer_bindlessUniformTexelBuffers.push_back(std::make_pair(x.index, framecount));
-				}
-				else
-				{
-					allocationhandler->destroyer_bindlessStorageBuffers.push_back(std::make_pair(x.index, framecount));
-				}
-			}
-			for (auto& x : subresources_uav)
-			{
-				if (x.is_typed)
-				{
-					allocationhandler->destroyer_bufferviews.push_back(std::make_pair(x.buffer_view, framecount));
-					allocationhandler->destroyer_bindlessStorageTexelBuffers.push_back(std::make_pair(x.index, framecount));
-				}
-				else
-				{
-					allocationhandler->destroyer_bindlessStorageBuffers.push_back(std::make_pair(x.index, framecount));
-				}
-			}
+			destroy_subresources();
 			allocationhandler->destroylocker.unlock();
 		}
 	};
@@ -761,6 +771,55 @@ namespace vulkan_internal
 
 		VkImageView video_decode_view = VK_NULL_HANDLE;
 
+		void destroy_subresources()
+		{
+			uint64_t framecount = allocationhandler->framecount;
+			if (srv.IsValid())
+			{
+				allocationhandler->destroyer_imageviews.push_back(std::make_pair(srv.image_view, framecount));
+				allocationhandler->destroyer_bindlessSampledImages.push_back(std::make_pair(srv.index, framecount));
+				srv = {};
+			}
+			if (uav.IsValid())
+			{
+				allocationhandler->destroyer_imageviews.push_back(std::make_pair(uav.image_view, framecount));
+				allocationhandler->destroyer_bindlessStorageImages.push_back(std::make_pair(uav.index, framecount));
+				uav = {};
+			}
+			if (rtv.IsValid())
+			{
+				allocationhandler->destroyer_imageviews.push_back(std::make_pair(rtv.image_view, framecount));
+				rtv = {};
+			}
+			if (dsv.IsValid())
+			{
+				allocationhandler->destroyer_imageviews.push_back(std::make_pair(dsv.image_view, framecount));
+				dsv = {};
+			}
+			for (auto x : subresources_srv)
+			{
+				allocationhandler->destroyer_imageviews.push_back(std::make_pair(x.image_view, framecount));
+				allocationhandler->destroyer_bindlessSampledImages.push_back(std::make_pair(x.index, framecount));
+			}
+			subresources_srv.clear();
+			for (auto x : subresources_uav)
+			{
+				allocationhandler->destroyer_imageviews.push_back(std::make_pair(x.image_view, framecount));
+				allocationhandler->destroyer_bindlessStorageImages.push_back(std::make_pair(x.index, framecount));
+			}
+			subresources_uav.clear();
+			for (auto x : subresources_rtv)
+			{
+				allocationhandler->destroyer_imageviews.push_back(std::make_pair(x.image_view, framecount));
+			}
+			subresources_rtv.clear();
+			for (auto x : subresources_dsv)
+			{
+				allocationhandler->destroyer_imageviews.push_back(std::make_pair(x.image_view, framecount));
+			}
+			subresources_dsv.clear();
+		}
+
 		~Texture_Vulkan()
 		{
 			if (allocationhandler == nullptr)
@@ -779,46 +838,11 @@ namespace vulkan_internal
 			{
 				allocationhandler->destroyer_allocations.push_back(std::make_pair(allocation, framecount));
 			}
-			if (srv.IsValid())
-			{
-				allocationhandler->destroyer_imageviews.push_back(std::make_pair(srv.image_view, framecount));
-				allocationhandler->destroyer_bindlessSampledImages.push_back(std::make_pair(srv.index, framecount));
-			}
-			if (uav.IsValid())
-			{
-				allocationhandler->destroyer_imageviews.push_back(std::make_pair(uav.image_view, framecount));
-				allocationhandler->destroyer_bindlessStorageImages.push_back(std::make_pair(uav.index, framecount));
-			}
-			if (rtv.IsValid())
-			{
-				allocationhandler->destroyer_imageviews.push_back(std::make_pair(rtv.image_view, framecount));
-			}
-			if (dsv.IsValid())
-			{
-				allocationhandler->destroyer_imageviews.push_back(std::make_pair(dsv.image_view, framecount));
-			}
-			for (auto x : subresources_srv)
-			{
-				allocationhandler->destroyer_imageviews.push_back(std::make_pair(x.image_view, framecount));
-				allocationhandler->destroyer_bindlessSampledImages.push_back(std::make_pair(x.index, framecount));
-			}
-			for (auto x : subresources_uav)
-			{
-				allocationhandler->destroyer_imageviews.push_back(std::make_pair(x.image_view, framecount));
-				allocationhandler->destroyer_bindlessStorageImages.push_back(std::make_pair(x.index, framecount));
-			}
-			for (auto x : subresources_rtv)
-			{
-				allocationhandler->destroyer_imageviews.push_back(std::make_pair(x.image_view, framecount));
-			}
-			for (auto x : subresources_dsv)
-			{
-				allocationhandler->destroyer_imageviews.push_back(std::make_pair(x.image_view, framecount));
-			}
 			if (video_decode_view != VK_NULL_HANDLE)
 			{
 				allocationhandler->destroyer_imageviews.push_back(std::make_pair(video_decode_view, framecount));
 			}
+			destroy_subresources();
 			allocationhandler->destroylocker.unlock();
 		}
 	};
@@ -913,8 +937,6 @@ namespace vulkan_internal
 		VkPipelineInputAssemblyStateCreateInfo inputAssembly = {};
 		VkPipelineRasterizationStateCreateInfo rasterizer = {};
 		VkPipelineRasterizationDepthClipStateCreateInfoEXT depthclip = {};
-		VkViewport viewport = {};
-		VkRect2D scissor = {};
 		VkPipelineViewportStateCreateInfo viewportState = {};
 		VkPipelineDepthStencilStateCreateInfo depthstencil = {};
 		VkSampleMask samplemask = {};
@@ -1173,10 +1195,7 @@ namespace vulkan_internal
 				//	the color space change will not be applied
 				res = vkDeviceWaitIdle(device);
 				assert(res == VK_SUCCESS);
-				{
-					std::scoped_lock lock(allocationhandler->destroylocker);
-					allocationhandler->destroyer_swapchains.emplace_back(internal_state->swapChain, allocationhandler->framecount);
-				}
+				vkDestroySwapchainKHR(device, internal_state->swapChain, nullptr);
 				internal_state->swapChain = nullptr;
 			}
 		}
@@ -2580,6 +2599,13 @@ using namespace vulkan_internal;
 
 				enabled_deviceExtensions = required_deviceExtensions;
 
+				if (checkExtensionSupport(VK_EXT_IMAGE_VIEW_MIN_LOD_EXTENSION_NAME, available_deviceExtensions))
+				{
+					enabled_deviceExtensions.push_back(VK_EXT_IMAGE_VIEW_MIN_LOD_EXTENSION_NAME);
+					image_view_min_lod_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_VIEW_MIN_LOD_FEATURES_EXT;
+					*features_chain = &image_view_min_lod_features;
+					features_chain = &image_view_min_lod_features.pNext;
+				}
 				if (checkExtensionSupport(VK_EXT_DEPTH_CLIP_ENABLE_EXTENSION_NAME, available_deviceExtensions))
 				{
 					enabled_deviceExtensions.push_back(VK_EXT_DEPTH_CLIP_ENABLE_EXTENSION_NAME);
@@ -3287,8 +3313,8 @@ using namespace vulkan_internal;
 		TIMESTAMP_FREQUENCY = uint64_t(1.0 / double(properties2.properties.limits.timestampPeriod) * 1000 * 1000 * 1000);
 
 		// Dynamic PSO states:
-		pso_dynamicStates.push_back(VK_DYNAMIC_STATE_VIEWPORT);
-		pso_dynamicStates.push_back(VK_DYNAMIC_STATE_SCISSOR);
+		pso_dynamicStates.push_back(VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT);
+		pso_dynamicStates.push_back(VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT);
 		pso_dynamicStates.push_back(VK_DYNAMIC_STATE_STENCIL_REFERENCE);
 		pso_dynamicStates.push_back(VK_DYNAMIC_STATE_BLEND_CONSTANTS);
 		if (CheckCapability(GraphicsDeviceCapability::DEPTH_BOUNDS_TEST))
@@ -5005,6 +5031,7 @@ using namespace vulkan_internal;
 			createInfo.magFilter = VK_FILTER_LINEAR;
 			createInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
 			createInfo.anisotropyEnable = true;
+			createInfo.maxAnisotropy = std::min(16.0f, std::max(1.0f, static_cast<float>(desc->max_anisotropy)));
 			createInfo.compareEnable = false;
 			break;
 		case Filter::COMPARISON_MIN_MAG_MIP_POINT:
@@ -5068,6 +5095,7 @@ using namespace vulkan_internal;
 			createInfo.magFilter = VK_FILTER_LINEAR;
 			createInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
 			createInfo.anisotropyEnable = true;
+			createInfo.maxAnisotropy = std::min(16.0f, std::max(1.0f, static_cast<float>(desc->max_anisotropy)));
 			createInfo.compareEnable = true;
 			break;
 		default:
@@ -5117,7 +5145,6 @@ using namespace vulkan_internal;
 		createInfo.addressModeU = _ConvertTextureAddressMode(desc->address_u, features_1_2);
 		createInfo.addressModeV = _ConvertTextureAddressMode(desc->address_v, features_1_2);
 		createInfo.addressModeW = _ConvertTextureAddressMode(desc->address_w, features_1_2);
-		createInfo.maxAnisotropy = static_cast<float>(desc->max_anisotropy);
 		createInfo.compareOp = _ConvertComparisonFunc(desc->comparison_func);
 		createInfo.minLod = desc->min_lod;
 		createInfo.maxLod = desc->max_lod;
@@ -5558,26 +5585,12 @@ using namespace vulkan_internal;
 
 		pipelineInfo.pRasterizationState = &rasterizer;
 
-
-		// Viewport, Scissor:
-		VkViewport& viewport = internal_state->viewport;
-		viewport.x = 0;
-		viewport.y = 0;
-		viewport.width = 65535;
-		viewport.height = 65535;
-		viewport.minDepth = 0;
-		viewport.maxDepth = 1;
-
-		VkRect2D& scissor = internal_state->scissor;
-		scissor.extent.width = 65535;
-		scissor.extent.height = 65535;
-
 		VkPipelineViewportStateCreateInfo& viewportState = internal_state->viewportState;
 		viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-		viewportState.viewportCount = 1;
-		viewportState.pViewports = &viewport;
-		viewportState.scissorCount = 1;
-		viewportState.pScissors = &scissor;
+		viewportState.viewportCount = 0;
+		viewportState.pViewports = nullptr;
+		viewportState.scissorCount = 0;
+		viewportState.pScissors = nullptr;
 
 		pipelineInfo.pViewportState = &viewportState;
 
@@ -6422,7 +6435,7 @@ using namespace vulkan_internal;
 		return true;
 	}
 
-	int GraphicsDevice_Vulkan::CreateSubresource(Texture* texture, SubresourceType type, uint32_t firstSlice, uint32_t sliceCount, uint32_t firstMip, uint32_t mipCount, const Format* format_change, const ImageAspect* aspect, const Swizzle* swizzle) const
+	int GraphicsDevice_Vulkan::CreateSubresource(Texture* texture, SubresourceType type, uint32_t firstSlice, uint32_t sliceCount, uint32_t firstMip, uint32_t mipCount, const Format* format_change, const ImageAspect* aspect, const Swizzle* swizzle, float min_lod_clamp) const
 	{
 		auto internal_state = to_internal(texture);
 
@@ -6533,6 +6546,14 @@ using namespace vulkan_internal;
 			viewUsageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO;
 			viewUsageInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
 			view_desc.pNext = &viewUsageInfo;
+
+			VkImageViewMinLodCreateInfoEXT min_lod_info = {};
+			min_lod_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_MIN_LOD_CREATE_INFO_EXT;
+			min_lod_info.minLod = min_lod_clamp;
+			if (min_lod_clamp > 0 && image_view_min_lod_features.minLod == VK_TRUE)
+			{
+				viewUsageInfo.pNext = &min_lod_info;
+			}
 
 			VkResult res = vkCreateImageView(device, &view_desc, nullptr, &subresource.image_view);
 
@@ -6810,6 +6831,24 @@ using namespace vulkan_internal;
 		return -1;
 	}
 
+	void GraphicsDevice_Vulkan::DeleteSubresources(GPUResource* resource)
+	{
+		if (resource->IsTexture())
+		{
+			auto internal_state = to_internal((Texture*)resource);
+			internal_state->allocationhandler->destroylocker.lock();
+			internal_state->destroy_subresources();
+			internal_state->allocationhandler->destroylocker.unlock();
+		}
+		else if (resource->IsBuffer())
+		{
+			auto internal_state = to_internal((GPUBuffer*)resource);
+			internal_state->allocationhandler->destroylocker.lock();
+			internal_state->destroy_subresources();
+			internal_state->allocationhandler->destroylocker.unlock();
+		}
+	}
+
 	// DOJO adds for offscreen rendering option
 	void* GraphicsDevice_Vulkan::OpenSharedResource(const void* _device2, const void* _srv_desc_heap2, const int descriptor_index, Texture* texture)
 	{
@@ -7078,15 +7117,20 @@ using namespace vulkan_internal;
 
 		if (queue == QUEUE_GRAPHICS)
 		{
-			VkRect2D scissors[16];
-			for (int i = 0; i < arraysize(scissors); ++i)
-			{
-				scissors[i].offset.x = 0;
-				scissors[i].offset.y = 0;
-				scissors[i].extent.width = 65535;
-				scissors[i].extent.height = 65535;
-			}
-			vkCmdSetScissor(commandlist.GetCommandBuffer(), 0, arraysize(scissors), scissors);
+			vkCmdSetRasterizerDiscardEnable(commandlist.GetCommandBuffer(), VK_FALSE);
+
+			VkViewport vp = {};
+			vp.width = 1;
+			vp.height = 1;
+			vp.maxDepth = 1;
+			vkCmdSetViewportWithCount(commandlist.GetCommandBuffer(), 1, &vp);
+
+			VkRect2D scissor;
+			scissor.offset.x = 0;
+			scissor.offset.y = 0;
+			scissor.extent.width = 65535;
+			scissor.extent.height = 65535;
+			vkCmdSetScissorWithCount(commandlist.GetCommandBuffer(), 1, &scissor);
 
 			float blendConstants[] = { 1,1,1,1 };
 			vkCmdSetBlendConstants(commandlist.GetCommandBuffer(), blendConstants);
@@ -7098,7 +7142,6 @@ using namespace vulkan_internal;
 				vkCmdSetDepthBounds(commandlist.GetCommandBuffer(), 0.0f, 1.0f);
 			}
 
-			// Silence validation about uninitialized stride:
 			const VkDeviceSize zero = {};
 			vkCmdBindVertexBuffers2(commandlist.GetCommandBuffer(), 0, 1, &nullBuffer, &zero, &zero, &zero);
 		}
@@ -7911,8 +7954,8 @@ using namespace vulkan_internal;
 	{
 		assert(rects != nullptr);
 		VkRect2D scissors[16];
-		assert(numRects < arraysize(scissors));
-		assert(numRects < properties2.properties.limits.maxViewports);
+		assert(numRects <= arraysize(scissors));
+		assert(numRects <= properties2.properties.limits.maxViewports);
 		for(uint32_t i = 0; i < numRects; ++i)
 		{
 			scissors[i].extent.width = abs(rects[i].right - rects[i].left);
@@ -7921,7 +7964,7 @@ using namespace vulkan_internal;
 			scissors[i].offset.y = std::max(0, rects[i].top);
 		}
 		CommandList_Vulkan& commandlist = GetCommandList(cmd);
-		vkCmdSetScissor(commandlist.GetCommandBuffer(), 0, numRects, scissors);
+		vkCmdSetScissorWithCount(commandlist.GetCommandBuffer(), numRects, scissors);
 	}
 	void GraphicsDevice_Vulkan::BindViewports(uint32_t NumViewports, const Viewport* pViewports, CommandList cmd)
 	{
@@ -7933,13 +7976,13 @@ using namespace vulkan_internal;
 		{
 			vp[i].x = pViewports[i].top_left_x;
 			vp[i].y = pViewports[i].top_left_y + pViewports[i].height;
-			vp[i].width = pViewports[i].width;
+			vp[i].width = std::max(1.0f, pViewports[i].width); // must be > 0 according to validation layer
 			vp[i].height = -pViewports[i].height;
 			vp[i].minDepth = pViewports[i].min_depth;
 			vp[i].maxDepth = pViewports[i].max_depth;
 		}
 		CommandList_Vulkan& commandlist = GetCommandList(cmd);
-		vkCmdSetViewport(commandlist.GetCommandBuffer(), 0, NumViewports, vp);
+		vkCmdSetViewportWithCount(commandlist.GetCommandBuffer(), NumViewports, vp);
 	}
 	void GraphicsDevice_Vulkan::BindResource(const GPUResource* resource, uint32_t slot, CommandList cmd, int subresource)
 	{

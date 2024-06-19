@@ -36,7 +36,7 @@ namespace wi::scene
 		wi::ecs::ComponentManager<MeshComponent>& meshes = componentLibrary.Register<MeshComponent>("wi::scene::Scene::meshes", 2); // version = 2
 		wi::ecs::ComponentManager<ImpostorComponent>& impostors = componentLibrary.Register<ImpostorComponent>("wi::scene::Scene::impostors");
 		wi::ecs::ComponentManager<ObjectComponent>& objects = componentLibrary.Register<ObjectComponent>("wi::scene::Scene::objects", 3); // version = 3
-		wi::ecs::ComponentManager<RigidBodyPhysicsComponent>& rigidbodies = componentLibrary.Register<RigidBodyPhysicsComponent>("wi::scene::Scene::rigidbodies", 1); // version = 1
+		wi::ecs::ComponentManager<RigidBodyPhysicsComponent>& rigidbodies = componentLibrary.Register<RigidBodyPhysicsComponent>("wi::scene::Scene::rigidbodies", 2); // version = 2
 		wi::ecs::ComponentManager<SoftBodyPhysicsComponent>& softbodies = componentLibrary.Register<SoftBodyPhysicsComponent>("wi::scene::Scene::softbodies");
 		wi::ecs::ComponentManager<ArmatureComponent>& armatures = componentLibrary.Register<ArmatureComponent>("wi::scene::Scene::armatures");
 		wi::ecs::ComponentManager<LightComponent>& lights = componentLibrary.Register<LightComponent>("wi::scene::Scene::lights", 2); // version = 2
@@ -126,6 +126,9 @@ namespace wi::scene
 		ShaderMaterial* materialArrayMapped = nullptr;
 		size_t materialArraySize = 0;
 		wi::graphics::GPUBuffer materialBuffer;
+		wi::graphics::GPUBuffer textureStreamingFeedbackBuffer;
+		wi::graphics::GPUBuffer textureStreamingFeedbackBuffer_readback[wi::graphics::GraphicsDevice::GetBufferCount()];
+		const uint32_t* textureStreamingFeedbackMapped = nullptr;
 
 		// Meshlets:
 		wi::graphics::GPUBuffer meshletBuffer;
@@ -190,7 +193,6 @@ namespace wi::scene
 			float3 grid_max = float3(1, 1, 1);
 			float smooth_backface = 0.01f; // smoothness of backface test
 			wi::graphics::GPUBuffer ray_buffer;
-			wi::graphics::GPUBuffer offset_buffer;
 			wi::graphics::GPUBuffer variance_buffer;
 			wi::graphics::GPUBuffer raycount_buffer;
 			wi::graphics::GPUBuffer rayallocation_buffer;
@@ -198,6 +200,7 @@ namespace wi::scene
 			wi::graphics::Texture color_texture;
 			wi::graphics::Texture color_texture_rw; // alias of color_texture
 			wi::graphics::Texture depth_texture;
+			wi::graphics::Texture offset_texture;
 
 			void Serialize(wi::Archive& archive);
 		} ddgi;
@@ -296,6 +299,11 @@ namespace wi::scene
 		wi::jobsystem::context animation_dependency_scan_workload;
 		void ScanAnimationDependencies();
 
+		wi::vector<SpringComponent*> spring_queues; // these indicate which chains can be updated on separate threads
+		wi::jobsystem::context spring_dependency_scan_workload;
+		void ScanSpringDependencies();
+		void UpdateSpringsTopDownRecursive(SpringComponent* parent_spring, SpringComponent& spring);
+
 		// Update all components by a given timestep (in seconds):
 		//	This is an expensive function, prefer to call it only once per frame!
 		virtual void Update(float dt);
@@ -304,6 +312,11 @@ namespace wi::scene
 		// Merge an other scene into this.
 		//	The contents of the other scene will be lost (and moved to this)!
 		virtual void Merge(Scene& other);
+		// Create a copy of prefab and merge it into this.
+		//	prefab		: source scene to be copied from
+		//	attached	: if true, everything from prefab will be attached to a root entity
+		//	returns new root entity if attached is set to true, otherwise returns INVALID_ENTITY
+		virtual wi::ecs::Entity Instantiate(Scene& prefab, bool attached = false);
 		// Finds all entities in the scene that have any components attached
 		void FindAllEntities(wi::unordered_set<wi::ecs::Entity>& entities) const;
 
@@ -417,6 +430,7 @@ namespace wi::scene
 		// Detaches all children from an entity (if there are any):
 		void Component_DetachChildren(wi::ecs::Entity parent);
 
+		// Read/write whole scene into an archive
 		void Serialize(wi::Archive& archive);
 
 		void RunAnimationUpdateSystem(wi::jobsystem::context& ctx);
@@ -508,8 +522,13 @@ namespace wi::scene
 		wi::ecs::Entity RetargetAnimation(wi::ecs::Entity dst, wi::ecs::Entity src, bool bake_data, const Scene* src_scene = nullptr);
 
 		// If you don't know which armature the bone is contained int, this function can be used to find the first such armature and return the bone's rest matrix
-		//	If not found, return identity matrix
-		XMMATRIX FindBoneRestPose(wi::ecs::Entity bone) const;
+		//	If not found, and entity has a transform, it returns transform matrix
+		//	Otherwise, returns identity matrix
+		XMMATRIX GetRestPose(wi::ecs::Entity entity) const;
+		XMMATRIX FindBoneRestPose(wi::ecs::Entity bone) { return GetRestPose(bone); }; // back-compat of GetRestPose
+
+		// Returns 1 if humanoid's default facing direction is forward, -1 if it's backward
+		float GetHumanoidDefaultFacing(const HumanoidComponent& humanoid, wi::ecs::Entity humanoidEntity) const;
 
 		// All triangles of the object will be injected into the voxel grid
 		//	subtract: if false (default), voxels will be added, if true then voxels will be removed

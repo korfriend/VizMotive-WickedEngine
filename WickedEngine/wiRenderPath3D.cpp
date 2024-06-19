@@ -191,7 +191,12 @@ namespace wi
 				assert(subresource_index == i);
 			}
 
-			clearableTextures.push_back(&rtSceneCopy); // because this is used by SSR and SSGI before it gets a chance to be normally rendered, it MUST be cleared!
+			// because this is used by SSR and SSGI before it gets a chance to be normally rendered, it MUST be cleared!
+			CommandList cmd = device->BeginCommandList();
+			device->Barrier(GPUBarrier::Image(&rtSceneCopy, rtSceneCopy.desc.layout, ResourceState::UNORDERED_ACCESS), cmd);
+			device->ClearUAV(&rtSceneCopy, 0, cmd);
+			device->Barrier(GPUBarrier::Image(&rtSceneCopy, ResourceState::UNORDERED_ACCESS, rtSceneCopy.desc.layout), cmd);
+			device->SubmitCommandLists();
 		}
 		{
 			TextureDesc desc;
@@ -347,6 +352,8 @@ namespace wi
 
 		RenderPath2D::Update(dt);
 
+		float update_speed = 0;
+
 		const bool hw_raytrace = device->CheckCapability(GraphicsDeviceCapability::RAYTRACING);
 		if (getSceneUpdateEnabled())
 		{
@@ -360,10 +367,11 @@ namespace wi
 			{
 				scene->SetAccelerationStructureUpdateRequested(true);
 			}
-
 			scene->camera = *camera;
-			scene->Update(dt * wi::renderer::GetGameSpeed());
+			update_speed = dt * wi::renderer::GetGameSpeed();
 		}
+
+		scene->Update(update_speed);
 
 		// Frustum culling for main camera:
 		visibility_main.layerMask = getLayerMask();
@@ -698,6 +706,7 @@ namespace wi
 		camera->height = (float)internalResolution.y;
 		camera->scissor = GetScissorInternalResolution();
 		camera->sample_count = depthBuffer_Main.desc.sample_count;
+		camera->shadercamera_options = SHADERCAMERA_OPTION_NONE;
 		camera->texture_primitiveID_index = device->GetDescriptorIndex(&rtPrimitiveID, SubresourceType::SRV);
 		camera->texture_depth_index = device->GetDescriptorIndex(&depthBuffer_Copy, SubresourceType::SRV);
 		camera->texture_lineardepth_index = device->GetDescriptorIndex(&rtLinearDepth, SubresourceType::SRV);
@@ -712,7 +721,15 @@ namespace wi
 		camera->texture_ao_index = device->GetDescriptorIndex(&rtAO, SubresourceType::SRV);
 		camera->texture_ssr_index = device->GetDescriptorIndex(&rtSSR, SubresourceType::SRV);
 		camera->texture_ssgi_index = device->GetDescriptorIndex(&rtSSGI, SubresourceType::SRV);
-		camera->texture_rtshadow_index = device->GetDescriptorIndex(&rtShadow, SubresourceType::SRV);
+		if (rtShadow.IsValid())
+		{
+			camera->shadercamera_options |= SHADERCAMERA_OPTION_USE_SHADOW_MASK;
+			camera->texture_rtshadow_index = device->GetDescriptorIndex(&rtShadow, SubresourceType::SRV);
+		}
+		else
+		{
+			camera->texture_rtshadow_index = device->GetDescriptorIndex(wi::texturehelper::getWhite(), SubresourceType::SRV); // AMD descriptor branching fix
+		}
 		camera->texture_rtdiffuse_index = device->GetDescriptorIndex(&rtRaytracedDiffuse, SubresourceType::SRV);
 		camera->texture_surfelgi_index = device->GetDescriptorIndex(&surfelGIResources.result, SubresourceType::SRV);
 		camera->texture_vxgi_diffuse_index = device->GetDescriptorIndex(&vxgiResources.diffuse, SubresourceType::SRV);
@@ -733,6 +750,7 @@ namespace wi
 		camera_reflection.scissor.right = (int)depthBuffer_Reflection.desc.width;
 		camera_reflection.scissor.bottom = (int)depthBuffer_Reflection.desc.height;
 		camera_reflection.sample_count = depthBuffer_Reflection.desc.sample_count;
+		camera_reflection.shadercamera_options = SHADERCAMERA_OPTION_NONE;
 		camera_reflection.texture_primitiveID_index = -1;
 		camera_reflection.texture_depth_index = device->GetDescriptorIndex(&depthBuffer_Reflection, SubresourceType::SRV);
 		camera_reflection.texture_lineardepth_index = -1;
@@ -747,7 +765,7 @@ namespace wi
 		camera_reflection.texture_ao_index = -1;
 		camera_reflection.texture_ssr_index = -1;
 		camera_reflection.texture_ssgi_index = -1;
-		camera_reflection.texture_rtshadow_index = -1;
+		camera_reflection.texture_rtshadow_index = device->GetDescriptorIndex(wi::texturehelper::getWhite(), SubresourceType::SRV); // AMD descriptor branching fix
 		camera_reflection.texture_rtdiffuse_index = -1;
 		camera_reflection.texture_surfelgi_index = -1;
 		camera_reflection.texture_vxgi_diffuse_index = -1;
@@ -796,21 +814,6 @@ namespace wi
 		wi::renderer::ProcessDeferredTextureRequests(cmd); // Execute it first thing in the frame here, on main thread, to not allow other thread steal it and execute on different command list!
 		wi::jobsystem::Execute(ctx, [this, cmd](wi::jobsystem::JobArgs args) {
 			GraphicsDevice* device = wi::graphics::GetDevice();
-
-			// Initialization clears:
-			for (auto& x : clearableTextures)
-			{
-				device->Barrier(GPUBarrier::Image(x, x->desc.layout, ResourceState::UNORDERED_ACCESS), cmd);
-			}
-			for (auto& x : clearableTextures)
-			{
-				device->ClearUAV(x, 0, cmd);
-			}
-			for (auto& x : clearableTextures)
-			{
-				device->Barrier(GPUBarrier::Image(x, ResourceState::UNORDERED_ACCESS, x->desc.layout), cmd);
-			}
-			clearableTextures.clear();
 
 			wi::renderer::BindCameraCB(
 				*camera,
@@ -1614,7 +1617,8 @@ namespace wi
 				device->Barrier(barriers, arraysize(barriers), cmd);
 			}
 
-			});
+			wi::renderer::TextureStreamingReadbackCopy(*scene, cmd);
+		});
 
 		RenderPath2D::Render();
 
@@ -1624,11 +1628,6 @@ namespace wi
 	void RenderPath3D::Compose(CommandList cmd) const
 	{
 		GraphicsDevice* device = wi::graphics::GetDevice();
-
-		// Set scissor on Compose, because some post processes don't handle scissoring (eg. Bloom) and those should be cut off:
-		//	Note that on expensive render operations we also used scissor to avoid wasted processing
-		Rect scissor = GetScissorNativeResolution();
-		device->BindScissorRects(1, &scissor, cmd);
 
 		wi::image::Params fx;
 		fx.blendFlag = BLENDMODE_OPAQUE;
@@ -1649,13 +1648,6 @@ namespace wi
 			fx.blendFlag = BLENDMODE_PREMULTIPLIED;
 			wi::image::Draw(&debugUAV, fx, cmd);
 		}
-
-		// Restore full resolution scissor:
-		scissor.left = 0;
-		scissor.top = 0;
-		scissor.right = GetPhysicalWidth();
-		scissor.bottom = GetPhysicalHeight();
-		device->BindScissorRects(1, &scissor, cmd);
 
 		RenderPath2D::Compose(cmd);
 	}
@@ -1716,6 +1708,7 @@ namespace wi
 				wi::renderer::Postprocess_RTAO(
 					rtaoResources,
 					*scene,
+					rtLinearDepth,
 					rtAO,
 					cmd,
 					getAORange(),
@@ -2335,6 +2328,9 @@ namespace wi
 	{
 		ao = value;
 
+		if (!rtParticleDistortion.IsValid())
+			return; // ResizeBuffers hasn't been called yet
+
 		rtAO = {};
 		ssaoResources = {};
 		msaoResources = {};
@@ -2368,8 +2364,8 @@ namespace wi
 			wi::renderer::CreateMSAOResources(msaoResources, internalResolution);
 			break;
 		case RenderPath3D::AO_RTAO:
-			desc.width = internalResolution.x / 2;
-			desc.height = internalResolution.y / 2;
+			desc.width = internalResolution.x;
+			desc.height = internalResolution.y;
 			wi::renderer::CreateRTAOResources(rtaoResources, internalResolution);
 			break;
 		default:

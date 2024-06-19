@@ -19,6 +19,7 @@ set (SOURCE_FILES
 	MeshWindow.cpp
 	ModelImporter_GLTF.cpp
 	ModelImporter_OBJ.cpp
+	ModelImporter_FBX.cpp
 	NameWindow.cpp
 	ObjectWindow.cpp
 	PaintToolWindow.cpp
@@ -37,7 +38,6 @@ set (SOURCE_FILES
 	HierarchyWindow.cpp
 	ExpressionWindow.cpp
 	ArmatureWindow.cpp
-	OptionsWindow.cpp
 	ComponentsWindow.cpp
 	TerrainWindow.cpp
 	HumanoidWindow.cpp
@@ -83,7 +83,6 @@ add_custom_command(
 	TARGET WickedEngineEditor POST_BUILD
 	# Copy shader compiler library in the source folder
 	COMMAND ${CMAKE_COMMAND} -E copy_if_different ${WICKED_ROOT_DIR}/WickedEngine/${LIB_DXCOMPILER} ${CMAKE_CURRENT_BINARY_DIR}
-	COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/terrain ${CMAKE_CURRENT_BINARY_DIR}/terrain
 	COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/languages ${CMAKE_CURRENT_BINARY_DIR}/languages
 	COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/fonts ${CMAKE_CURRENT_BINARY_DIR}/fonts
 )
@@ -102,9 +101,7 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/wicked-engine.sh"
 install(TARGETS WickedEngineEditor RUNTIME DESTINATION ${EDITOR_INSTALL_FOLDER})
 
 # install editor assets
-# mandatory terrain folder
 install(DIRECTORY
-		"${CMAKE_CURRENT_SOURCE_DIR}/terrain"
 		"${CMAKE_CURRENT_SOURCE_DIR}/languages"
 		"${CMAKE_CURRENT_SOURCE_DIR}/fonts"
 		DESTINATION ${EDITOR_INSTALL_FOLDER})

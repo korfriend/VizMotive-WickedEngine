@@ -978,9 +978,6 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)wiNetwork.h">
       <Filter>ENGINE\Network</Filter>
     </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)Utility\tinyddsloader.h">
-      <Filter>UTILITY</Filter>
-    </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)Utility\vk_mem_alloc.h">
       <Filter>UTILITY</Filter>
     </ClInclude>
@@ -1125,7 +1122,7 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)Utility\dxva.h">
       <Filter>UTILITY</Filter>
     </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)Utility\dds_write.h">
+    <ClInclude Include="$(MSBuildThisFileDirectory)Utility\dds.h">
       <Filter>UTILITY</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)Utility\lodepng.h">
@@ -1172,6 +1169,12 @@
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)json.hpp">
       <Filter>UTILS</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)wiAsync_BindLua.h">
+      <Filter>ENGINE\Scripting\LuaBindings</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)Utility\WinAdapter.h">
+      <Filter>UTILITY</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -1853,9 +1856,6 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)wiNetwork_Windows.cpp">
       <Filter>ENGINE\Network</Filter>
     </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)wiNetwork_UWP.cpp">
-      <Filter>ENGINE\Network</Filter>
-    </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)wiInput.cpp">
       <Filter>ENGINE\Input</Filter>
     </ClCompile>
@@ -1957,6 +1957,9 @@
     </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)stdafx.cpp">
       <Filter>UTILS</Filter>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)wiAsync_BindLua.cpp">
+      <Filter>ENGINE\Scripting\LuaBindings</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

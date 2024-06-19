@@ -1,21 +1,15 @@
 #pragma once
 #include "Translator.h"
 #include "wiScene_BindLua.h"
-#include "OptionsWindow.h"
 #include "ComponentsWindow.h"
 #include "ProfilerWindow.h"
 #include "ContentBrowserWindow.h"
+#include "GraphicsWindow.h"
+#include "CameraWindow.h"
+#include "MaterialPickerWindow.h"
+#include "PaintToolWindow.h"
+#include "GeneralWindow.h"
 #include "IconDefinitions.h"
-
-class EditorLoadingScreen : public wi::LoadingScreen
-{
-private:
-	wi::Sprite sprite;
-	wi::SpriteFont font;
-public:
-	void Load() override;
-	void Update(float dt) override;
-};
 
 class Editor;
 class EditorComponent : public wi::RenderPath2D
@@ -24,6 +18,8 @@ public:
 	Editor* main = nullptr;
 
 	wi::gui::Button newSceneButton;
+
+	wi::gui::ComboBox newEntityCombo;
 
 	wi::gui::Button translateButton;
 	wi::gui::Button rotateButton;
@@ -58,10 +54,22 @@ public:
 	wi::gui::Window aboutWindow;
 	wi::gui::Label aboutLabel;
 
-	OptionsWindow optionsWnd;
 	ComponentsWindow componentsWnd;
 	ProfilerWindow profilerWnd;
 	ContentBrowserWindow contentBrowserWnd;
+	wi::gui::Window topmenuWnd;
+
+	wi::gui::Button generalButton;
+	wi::gui::Button graphicsButton;
+	wi::gui::Button cameraButton;
+	wi::gui::Button materialsButton;
+	wi::gui::Button paintToolButton;
+
+	GeneralWindow generalWnd;
+	GraphicsWindow graphicsWnd;
+	CameraWindow cameraWnd;
+	MaterialPickerWindow materialPickerWnd;
+	PaintToolWindow paintToolWnd;
 
 	wi::primitive::Ray pickRay;
 	wi::physics::PickDragOperation physicsDragOp;
@@ -80,6 +88,13 @@ public:
 	void Render() const override;
 	void Compose(wi::graphics::CommandList cmd) const override;
 
+	wi::graphics::Viewport viewport3D;
+	wi::primitive::Hitbox2D viewport3D_hitbox;
+	void ResizeViewport3D();
+
+	bool camControlStart = true;
+	XMFLOAT4 originalMouse = XMFLOAT4(0, 0, 0, 0);
+	XMFLOAT4 currentMouse = XMFLOAT4(0, 0, 0, 0);
 
 	enum EDITORSTENCILREF
 	{
@@ -99,7 +114,11 @@ public:
 	wi::Color backgroundEntityColor = wi::Color::Black();
 	wi::Color dummyColor = wi::Color::White();
 
+	const wi::Color springDebugColor = wi::Color(255, 70, 165, 255);
+	const wi::Color ikDebugColor = wi::Color(49, 190, 103, 255);
+
 	wi::graphics::Texture editor_depthbuffer;
+	wi::graphics::Texture editor_rendertarget;
 
 	Translator translator;
 	wi::scene::PickResult hovered;
@@ -116,7 +135,7 @@ public:
 	bool bone_picking = false;
 	void CheckBonePickingEnabled();
 
-	void UpdateTopMenuAnimation();
+	void UpdateDynamicWidgets();
 
 	wi::Archive clipboard;
 
@@ -141,12 +160,16 @@ public:
 
 	wi::vector<std::string> recentFilenames;
 	size_t maxRecentFilenames = 10;
+	wi::vector<std::string> recentFolders;
+	size_t maxRecentFolders = 8;
 	void RegisterRecentlyUsed(const std::string& filename);
 
-	void Open(const std::string& filename);
+	void Open(std::string filename);
 	void Save(const std::string& filename);
 	void SaveAs();
 	bool deleting = false;
+
+	wi::graphics::Texture CreateThumbnailScreenshot() const;
 
 	std::string save_text_message = "";
 	std::string save_text_filename = "";
@@ -193,18 +216,22 @@ public:
 		wi::vector<uint8_t> filedata;
 	};
 	wi::vector<FontData> font_datas;
+
+	wi::jobsystem::context loadmodel_workload;
+	wi::SpriteFont loadmodel_font;
 };
 
 class Editor : public wi::Application
 {
 public:
 	EditorComponent renderComponent;
-	EditorLoadingScreen loader;
 	wi::config::File config;
 
 	void Initialize() override;
 
-	~Editor()
+	void HotReload();
+
+	~Editor() override
 	{
 		config.Commit();
 	}
@@ -216,18 +243,16 @@ enum class EditorLocalization
 	// Top menu:
 	Save,
 	Open,
-	ContentBrowser,
 	Backlog,
 	Profiler,
-	Cinema,
+	__REMOVED_Cinema,
 	FullScreen,
 	Windowed,
 	BugReport,
 	About,
 	Exit,
-
-	// Other:
 	UntitledScene,
+	ContentBrowser,
 
 	Count
 };
@@ -235,7 +260,6 @@ static const char* EditorLocalizationStrings[] = {
 	// Top menu:
 	"Save",
 	"Open",
-	"Content",
 	"Backlog",
 	"Profiler",
 	"Cinema",
@@ -244,8 +268,7 @@ static const char* EditorLocalizationStrings[] = {
 	"Bug report",
 	"About",
 	"Exit",
-
-	// Other:
-	"Untitled scene"
+	"Untitled scene",
+	"Content",
 };
 static_assert(arraysize(EditorLocalizationStrings) == size_t(EditorLocalization::Count));

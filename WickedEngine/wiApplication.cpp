@@ -50,6 +50,8 @@ namespace wi
 		initialized = true;
 
 		wi::initializer::InitializeComponentsAsync();
+
+		alwaysactive = wi::arguments::HasArgument("alwaysactive");
 	}
 
 	void Application::ActivatePath(RenderPath* component, float fadeSeconds, wi::Color fadeColor)
@@ -132,7 +134,7 @@ namespace wi
 			}
 		}
 
-		if (!is_window_active && !wi::arguments::HasArgument("alwaysactive"))
+		if (!is_window_active && !alwaysactive)
 		{
 			// If the application is not active, disable Update loops:
 			deltaTimeAccumulator = 0;
@@ -256,10 +258,14 @@ namespace wi
 	{
 		auto range = wi::profiler::BeginRangeCPU("Update");
 
+		infoDisplay.rect = {};
+
 		wi::lua::SetDeltaTime(double(dt));
 		wi::lua::Update();
 
 		wi::backlog::Update(canvas, dt);
+
+		wi::resourcemanager::UpdateStreamingResources(dt);
 
 		if (GetActivePath() != nullptr)
 		{
@@ -317,6 +323,11 @@ namespace wi
 		// Draw the information display
 		if (infoDisplay.active)
 		{
+			if (infoDisplay.rect.right > 0)
+			{
+				graphicsDevice->BindScissorRects(1, &infoDisplay.rect, cmd);
+			}
+
 			infodisplay_str.clear();
 			if (infoDisplay.watermark)
 			{
@@ -331,10 +342,6 @@ namespace wi
 #elif defined(_WIN32)
 				infodisplay_str += "[32-bit]";
 #endif // _ARM
-
-#ifdef PLATFORM_UWP
-				infodisplay_str += "[UWP]";
-#endif // PLATFORM_UWP
 
 #ifdef WICKEDENGINE_BUILD_DX12
 				if (dynamic_cast<GraphicsDevice_DX12*>(graphicsDevice.get()))
@@ -445,8 +452,8 @@ namespace wi
 			}
 
 			wi::font::Params params = wi::font::Params(
-				4,
-				4,
+				4 + canvas.PhysicalToLogical((uint32_t)infoDisplay.rect.left),
+				4 + canvas.PhysicalToLogical((uint32_t)infoDisplay.rect.top),
 				infoDisplay.size,
 				wi::font::WIFALIGN_LEFT,
 				wi::font::WIFALIGN_TOP,
@@ -506,10 +513,26 @@ namespace wi
 				params.cursor = wi::font::Draw(std::to_string(wi::renderer::GetShaderErrorCount()) + " shader compilation errors! Check the backlog for more information!\n", params, cmd);
 			}
 
-
 			if (infoDisplay.colorgrading_helper)
 			{
-				wi::image::Draw(wi::texturehelper::getColorGradeDefault(), wi::image::Params(0, 0, 256.0f / canvas.GetDPIScaling(), 16.0f / canvas.GetDPIScaling()), cmd);
+				wi::image::Draw(
+					wi::texturehelper::getColorGradeDefault(),
+					wi::image::Params(
+						canvas.PhysicalToLogical((uint32_t)infoDisplay.rect.left),
+						canvas.PhysicalToLogical((uint32_t)infoDisplay.rect.top),
+						canvas.PhysicalToLogical(256),
+						canvas.PhysicalToLogical(16)
+					),
+					cmd
+				);
+			}
+
+			if (infoDisplay.rect.right > 0)
+			{
+				Rect rect;
+				rect.right = canvas.width;
+				rect.bottom = canvas.height;
+				graphicsDevice->BindScissorRects(1, &rect, cmd);
 			}
 		}
 

@@ -306,8 +306,10 @@ namespace wi::primitive
 		A -= N * b.radius;
 		B += N * b.radius;
 		XMVECTOR C = XMLoadFloat3(&center);
-		dist = wi::math::GetPointSegmentDistance(C, A, B);
-		XMStoreFloat3(&direction, (C - wi::math::ClosestPointOnLineSegment(A, B, C)) / dist);
+		XMVECTOR D = C - wi::math::ClosestPointOnLineSegment(A, B, C);
+		dist = XMVectorGetX(XMVector3Length(D));
+		D /= dist;
+		XMStoreFloat3(&direction, D);
 		dist = dist - radius - b.radius;
 		return dist < 0;
 	}
@@ -880,6 +882,18 @@ namespace wi::primitive
 
 
 
+	bool Hitbox2D::intersects(const XMFLOAT2& b) const
+	{
+		if (pos.x + siz.x < b.x)
+			return false;
+		else if (pos.x > b.x)
+			return false;
+		else if (pos.y + siz.y < b.y)
+			return false;
+		else if (pos.y > b.y)
+			return false;
+		return true;
+	}
 	bool Hitbox2D::intersects(const Hitbox2D& b) const
 	{
 		return wi::math::Collision2D(pos, siz, b.pos, b.siz);

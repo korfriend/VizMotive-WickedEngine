@@ -13,10 +13,10 @@ struct ShaderScene
 	int materialbuffer;
 	int meshletbuffer;
 
+	int texturestreamingbuffer;
 	int globalenvmap; // static sky, not guaranteed to be cubemap, mipmaps or format, just whatever is imported
 	int globalprobe; // rendered probe with guaranteed mipmaps, hdr, etc.
 	int impostorInstanceOffset;
-	int padding0;
 
 	int TLAS;
 	int BVH_counter;
@@ -55,7 +55,7 @@ struct ShaderScene
 		float max_distance;
 
 		float3 grid_extents_rcp;
-		int offset_buffer;
+		int offset_texture;
 
 		float3 cell_size_rcp;
 		float smooth_backface;
@@ -167,12 +167,14 @@ struct ShaderTextureSlot
 		in Texture2D tex,
 		in SamplerState sam,
 		in float2 uv,
-		in Texture2D<uint> residency_map,
+		in Texture2D<uint4> residency_map,
 		in uint2 virtual_tile_count,
 		in uint2 virtual_image_dim,
 		in float virtual_lod
 	)
 	{
+		virtual_lod = max(0, virtual_lod);
+
 #ifdef SVT_FEEDBACK
 		[branch]
 		if (sparse_feedbackmap_descriptor >= 0)
@@ -192,17 +194,17 @@ struct ShaderTextureSlot
 		bool packed_mips = uint(virtual_lod) > max_nonpacked_lod;
 
 		uint2 pixel = uv * virtual_tile_count;
-		uint residency = residency_map.Load(uint3(pixel >> uint(virtual_lod), min(max_nonpacked_lod, uint(virtual_lod))));
-		uint2 tile = packed_mips ? uint2((residency >> 16u) & 0xFF, (residency >> 24u) & 0xFF) : uint2(residency & 0xFF, (residency >> 8u) & 0xFF);
-		float clamped_lod = virtual_lod < max_nonpacked_lod ? max(virtual_lod, (residency >> 16u) & 0xFF) : virtual_lod;
+		uint4 residency = residency_map.Load(uint3(pixel >> uint(virtual_lod), min(max_nonpacked_lod, uint(virtual_lod))));
+		uint2 tile = packed_mips ? residency.zw : residency.xy;
+		const float clamped_lod = virtual_lod < max_nonpacked_lod ? max(virtual_lod, residency.z) : virtual_lod;
 
 		// Mip - more detailed:
 		float4 value0;
 		{
-			uint lod0 = floor(clamped_lod);
+			uint lod0 = uint(clamped_lod);
 			const uint packed_mip_idx = packed_mips ? uint(virtual_lod - max_nonpacked_lod - 1) : 0;
 			uint2 tile_pixel_upperleft = tile * SVT_TILE_SIZE_PADDED + SVT_TILE_BORDER + SVT_PACKED_MIP_OFFSETS[packed_mip_idx];
-			uint2 virtual_lod_dim = max(4u.xx, virtual_image_dim >> lod0);
+			uint2 virtual_lod_dim = max(4u, virtual_image_dim >> lod0);
 			float2 virtual_pixel = uv * virtual_lod_dim;
 			float2 virtual_tile_pixel = fmod(virtual_pixel, SVT_TILE_SIZE);
 			float2 atlas_tile_pixel = tile_pixel_upperleft + 0.5 + virtual_tile_pixel;
@@ -213,13 +215,13 @@ struct ShaderTextureSlot
 		// Mip - less detailed:
 		float4 value1;
 		{
-			uint lod1 = ceil(clamped_lod);
+			uint lod1 = uint(clamped_lod + 1);
 			packed_mips = uint(lod1) > max_nonpacked_lod;
 			const uint packed_mip_idx = packed_mips ? uint(lod1 - max_nonpacked_lod - 1) : 0;
 			residency = residency_map.Load(uint3(pixel >> lod1, min(max_nonpacked_lod, lod1)));
-			tile = packed_mips ? uint2((residency >> 16u) & 0xFF, (residency >> 24u) & 0xFF) : uint2(residency & 0xFF, (residency >> 8u) & 0xFF);
+			tile = packed_mips ? residency.zw : residency.xy;
 			uint2 tile_pixel_upperleft = tile * SVT_TILE_SIZE_PADDED + SVT_TILE_BORDER + SVT_PACKED_MIP_OFFSETS[packed_mip_idx];
-			uint2 virtual_lod_dim = max(4u.xx, virtual_image_dim >> lod1);
+			uint2 virtual_lod_dim = max(4u, virtual_image_dim >> lod1);
 			float2 virtual_pixel = uv * virtual_lod_dim;
 			float2 virtual_tile_pixel = fmod(virtual_pixel, SVT_TILE_SIZE);
 			float2 atlas_tile_pixel = tile_pixel_upperleft + 0.5 + virtual_tile_pixel;
@@ -227,7 +229,7 @@ struct ShaderTextureSlot
 			value1 = tex.SampleLevel(sam, atlas_uv, 0);
 		}
 
-		return lerp(value0, value1, frac(virtual_lod)); // custom trilinear filtering
+		return lerp(value0, value1, frac(clamped_lod)); // custom trilinear filtering
 	}
 	float4 Sample(in SamplerState sam, in float4 uvsets)
 	{
@@ -238,11 +240,11 @@ struct ShaderTextureSlot
 		[branch]
 		if (sparse_residencymap_descriptor >= 0)
 		{
-			Texture2D<uint> residency_map = bindless_textures_uint[UniformTextureSlot(sparse_residencymap_descriptor)];
+			Texture2D<uint4> residency_map = bindless_textures_uint4[UniformTextureSlot(sparse_residencymap_descriptor)];
 			float2 virtual_tile_count;
 			residency_map.GetDimensions(virtual_tile_count.x, virtual_tile_count.y);
 			float2 virtual_image_dim = virtual_tile_count * SVT_TILE_SIZE;
-			float virtual_lod = get_lod(virtual_image_dim, ddx(uv), ddy(uv));
+			float virtual_lod = get_lod(virtual_image_dim, ddx_coarse(uv), ddy_coarse(uv));
 			return SampleVirtual(tex, sam, uv, residency_map, virtual_tile_count, virtual_image_dim, virtual_lod);
 		}
 #endif // DISABLE_SVT
@@ -259,7 +261,7 @@ struct ShaderTextureSlot
 		[branch]
 		if (sparse_residencymap_descriptor >= 0)
 		{
-			Texture2D<uint> residency_map = bindless_textures_uint[UniformTextureSlot(sparse_residencymap_descriptor)];
+			Texture2D<uint4> residency_map = bindless_textures_uint4[UniformTextureSlot(sparse_residencymap_descriptor)];
 			float2 virtual_tile_count;
 			residency_map.GetDimensions(virtual_tile_count.x, virtual_tile_count.y);
 			float2 virtual_image_dim = virtual_tile_count * SVT_TILE_SIZE;
@@ -279,11 +281,12 @@ struct ShaderTextureSlot
 		[branch]
 		if (sparse_residencymap_descriptor >= 0)
 		{
-			Texture2D<uint> residency_map = bindless_textures_uint[UniformTextureSlot(sparse_residencymap_descriptor)];
+			Texture2D<uint4> residency_map = bindless_textures_uint4[UniformTextureSlot(sparse_residencymap_descriptor)];
 			float2 virtual_tile_count;
 			residency_map.GetDimensions(virtual_tile_count.x, virtual_tile_count.y);
 			float2 virtual_image_dim = virtual_tile_count * SVT_TILE_SIZE;
-			float virtual_lod = get_lod(virtual_image_dim, ddx(uv), ddy(uv));
+			float virtual_lod = get_lod(virtual_image_dim, ddx_coarse(uv), ddy_coarse(uv));
+			virtual_lod += bias;
 			return SampleVirtual(tex, sam, uv, residency_map, virtual_tile_count, virtual_image_dim, virtual_lod + bias);
 		}
 #endif // DISABLE_SVT
@@ -302,7 +305,7 @@ struct ShaderTextureSlot
 		[branch]
 		if (sparse_residencymap_descriptor >= 0)
 		{
-			Texture2D<uint> residency_map = bindless_textures_uint[UniformTextureSlot(sparse_residencymap_descriptor)];
+			Texture2D<uint4> residency_map = bindless_textures_uint4[UniformTextureSlot(sparse_residencymap_descriptor)];
 			float2 virtual_tile_count;
 			residency_map.GetDimensions(virtual_tile_count.x, virtual_tile_count.y);
 			float2 virtual_image_dim = virtual_tile_count * SVT_TILE_SIZE;
@@ -576,7 +579,7 @@ struct ShaderMeshInstance
 	float radius;
 
 	int vb_ao;
-	int padding0;
+	float alphaTest;
 	int padding1;
 	int padding2;
 
@@ -601,6 +604,7 @@ struct ShaderMeshInstance
 		center = float3(0, 0, 0);
 		radius = 0;
 		vb_ao = -1;
+		alphaTest = 0;
 		transform.init();
 		transformInverseTranspose.init();
 		transformPrev.init();
@@ -982,6 +986,12 @@ struct FrameCB
 	VXGI vxgi;
 };
 
+enum SHADERCAMERA_OPTIONS
+{
+	SHADERCAMERA_OPTION_NONE = 0,
+	SHADERCAMERA_OPTION_USE_SHADOW_MASK = 1 << 0,
+};
+
 struct ShaderCamera
 {
 	float4x4	view_projection;
@@ -1067,6 +1077,9 @@ struct ShaderCamera
 	int texture_depth_index_prev;
 	int texture_vxgi_diffuse_index;
 	int texture_vxgi_specular_index;
+
+	uint3 padding;
+	uint options;
 
 #ifdef __cplusplus
 	void init()
@@ -1370,7 +1383,13 @@ struct TerrainVirtualTexturePush
 
 	uint write_size;
 	float resolution_rcp;
+	int blendmap_buffer;
 	uint blendmap_buffer_offset;
+
+	int blendmap_texture;
+	uint blendmap_layers;
+	int output_texture;
+	int padding0;
 };
 struct VirtualTextureResidencyUpdateCB
 {

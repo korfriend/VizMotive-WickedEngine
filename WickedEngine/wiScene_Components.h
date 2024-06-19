@@ -129,6 +129,7 @@ namespace wi::scene
 			OUTLINE = 1 << 12,
 			PREFER_UNCOMPRESSED_TEXTURES = 1 << 13,
 			DISABLE_VERTEXAO = 1 << 14,
+			DISABLE_TEXTURE_STREAMING = 1 << 15,
 		};
 		uint32_t _flags = CAST_SHADOW;
 
@@ -279,6 +280,7 @@ namespace wi::scene
 		inline bool IsOutlineEnabled() const { return _flags & OUTLINE; }
 		inline bool IsPreferUncompressedTexturesEnabled() const { return _flags & PREFER_UNCOMPRESSED_TEXTURES; }
 		inline bool IsVertexAODisabled() const { return _flags & DISABLE_VERTEXAO; }
+		inline bool IsTextureStreamingDisabled() const { return _flags & DISABLE_TEXTURE_STREAMING; }
 
 		inline void SetBaseColor(const XMFLOAT4& value) { SetDirty(); baseColor = value; }
 		inline void SetSpecularColor(const XMFLOAT4& value) { SetDirty(); specularColor = value; }
@@ -319,6 +321,7 @@ namespace wi::scene
 		inline void SetOutlineEnabled(bool value = true) { if (value) { _flags |= OUTLINE; } else { _flags &= ~OUTLINE; } }
 		inline void SetPreferUncompressedTexturesEnabled(bool value = true) { if (value) { _flags |= PREFER_UNCOMPRESSED_TEXTURES; } else { _flags &= ~PREFER_UNCOMPRESSED_TEXTURES; } CreateRenderData(true); }
 		inline void SetVertexAODisabled(bool value = true) { if (value) { _flags |= DISABLE_VERTEXAO; } else { _flags &= ~DISABLE_VERTEXAO; } }
+		inline void SetTextureStreamingDisabled(bool value = true) { if (value) { _flags |= DISABLE_TEXTURE_STREAMING; } else { _flags &= ~DISABLE_TEXTURE_STREAMING; } }
 
 		// The MaterialComponent will be written to ShaderMaterial (a struct that is optimized for GPU use)
 		void WriteShaderMaterial(ShaderMaterial* dest) const;
@@ -526,9 +529,9 @@ namespace wi::scene
 			constexpr void FromFULL(const wi::primitive::AABB& aabb, XMFLOAT3 pos, uint8_t wind)
 			{
 				pos = wi::math::InverseLerp(aabb._min, aabb._max, pos); // UNORM remap
-				x = uint32_t(wi::math::saturate(pos.x) * 1023.0f);
-				y = uint32_t(wi::math::saturate(pos.y) * 1023.0f);
-				z = uint32_t(wi::math::saturate(pos.z) * 1023.0f);
+				x = uint32_t(saturate(pos.x) * 1023.0f);
+				y = uint32_t(saturate(pos.y) * 1023.0f);
+				z = uint32_t(saturate(pos.z) * 1023.0f);
 				w = uint32_t((float(wind) / 255.0f) * 3);
 			}
 			inline XMVECTOR LoadPOS(const wi::primitive::AABB& aabb) const
@@ -823,6 +826,7 @@ namespace wi::scene
 		wi::vector<uint8_t> lightmapTextureData;
 		uint32_t sort_priority = 0; // increase to draw earlier (currently 4 bits will be used)
 		wi::vector<uint8_t> vertex_ao;
+		float alphaRef = 1;
 
 		// Non-serialized attributes:
 		uint32_t filterMaskDynamic = 0;
@@ -908,6 +912,7 @@ namespace wi::scene
 			CAPSULE,
 			CONVEX_HULL,
 			TRIANGLE_MESH,
+			CYLINDER,
 			ENUM_FORCE_UINT32 = 0xFFFFFFFF
 		};
 		CollisionShape shape;
@@ -916,11 +921,12 @@ namespace wi::scene
 		float restitution = 0.0f;
 		float damping_linear = 0.0f;
 		float damping_angular = 0.0f;
+		XMFLOAT3 local_offset = XMFLOAT3(0, 0, 0);
 
 		struct BoxParams
 		{
 			XMFLOAT3 halfextents = XMFLOAT3(1, 1, 1);
-		} box;
+		} box; // also cylinder params
 		struct SphereParams
 		{
 			float radius = 1;
@@ -1152,6 +1158,7 @@ namespace wi::scene
 		int buffer_entitytiles_index = -1;
 		int texture_vxgi_diffuse_index = -1;
 		int texture_vxgi_specular_index = -1;
+		uint shadercamera_options = SHADERCAMERA_OPTION_NONE;
 
 		void CreatePerspective(float newWidth, float newHeight, float newNear, float newFar, float newFOV = XM_PI / 3.0f);
 		void UpdateCamera();
@@ -1623,7 +1630,7 @@ namespace wi::scene
 			EMPTY = 0,
 			RESET = 1 << 0,
 			DISABLED = 1 << 1,
-			STRETCH_ENABLED = 1 << 2,
+			_DEPRECATED_STRETCH_ENABLED = 1 << 2,
 			GRAVITY_ENABLED = 1 << 3,
 		};
 		uint32_t _flags = RESET | GRAVITY_ENABLED;
@@ -1640,14 +1647,18 @@ namespace wi::scene
 		XMFLOAT3 currentTail = {};
 		XMFLOAT3 boneAxis = {};
 
+		// These are maintained for top-down chained update by spring dependency system:
+		wi::vector<SpringComponent*> children;
+		wi::ecs::Entity entity;
+		TransformComponent* transform = nullptr;
+		TransformComponent* parent_transform = nullptr;
+
 		inline void Reset(bool value = true) { if (value) { _flags |= RESET; } else { _flags &= ~RESET; } }
 		inline void SetDisabled(bool value = true) { if (value) { _flags |= DISABLED; } else { _flags &= ~DISABLED; } }
-		inline void SetStretchEnabled(bool value) { if (value) { _flags |= STRETCH_ENABLED; } else { _flags &= ~STRETCH_ENABLED; } }
 		inline void SetGravityEnabled(bool value) { if (value) { _flags |= GRAVITY_ENABLED; } else { _flags &= ~GRAVITY_ENABLED; } }
 
 		inline bool IsResetting() const { return _flags & RESET; }
 		inline bool IsDisabled() const { return _flags & DISABLED; }
-		inline bool IsStretchEnabled() const { return _flags & STRETCH_ENABLED; }
 		inline bool IsGravityEnabled() const { return _flags & GRAVITY_ENABLED; }
 
 		void Serialize(wi::Archive& archive, wi::ecs::EntitySerializer& seri);
@@ -1705,6 +1716,7 @@ namespace wi::scene
 		// Non-serialized attributes:
 		wi::vector<uint8_t> script; // compiled script binary data
 		wi::Resource resource;
+		size_t script_hash = 0;
 
 		inline void Play() { _flags |= PLAYING; }
 		inline void SetPlayOnce(bool once = true) { if (once) { _flags |= PLAY_ONCE; } else { _flags &= ~PLAY_ONCE; } }
@@ -1931,7 +1943,6 @@ namespace wi::scene
 		constexpr void SetLookAtEnabled(bool value = true) { if (value) { _flags |= LOOKAT; } else { _flags &= ~LOOKAT; } }
 		constexpr void SetRagdollPhysicsEnabled(bool value = true) { if (value) { _flags |= RAGDOLL_PHYSICS; } else { _flags &= ~RAGDOLL_PHYSICS; } }
 
-		XMFLOAT3 default_look_direction = XMFLOAT3(0, 0, 1);
 		XMFLOAT2 head_rotation_max = XMFLOAT2(XM_PI / 3.0f, XM_PI / 6.0f);
 		float head_rotation_speed = 0.1f;
 		XMFLOAT2 eye_rotation_max = XMFLOAT2(XM_PI / 20.0f, XM_PI / 20.0f);

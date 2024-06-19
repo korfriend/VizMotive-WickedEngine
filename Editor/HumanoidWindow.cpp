@@ -22,7 +22,7 @@ void HumanoidWindow::Create(EditorComponent* _editor)
 
 		editor->RecordEntity(archive, entity);
 
-		editor->optionsWnd.RefreshEntityTree();
+		editor->componentsWnd.RefreshEntityTree();
 		});
 
 	float x = 60;
@@ -228,7 +228,7 @@ void HumanoidWindow::Create(EditorComponent* _editor)
 		// record NEW selection state...
 		editor->RecordSelection(archive);
 
-		editor->optionsWnd.RefreshEntityTree();
+		editor->componentsWnd.RefreshEntityTree();
 
 		});
 	AddWidget(&boneList);
@@ -505,32 +505,6 @@ void HumanoidWindow::RefreshBoneList()
 	}
 }
 
-void HumanoidWindow::Update(const wi::Canvas& canvas, float dt)
-{
-	wi::gui::Window::Update(canvas, dt);
-
-	if (lookatMouseCheckBox.GetCheck())
-	{
-		Scene& scene = editor->GetCurrentScene();
-		const CameraComponent& camera = editor->GetCurrentEditorScene().camera;
-		const wi::input::MouseState& mouse = wi::input::GetMouseState();
-		wi::primitive::Ray ray = wi::renderer::GetPickRay((long)mouse.position.x, (long)mouse.position.y, canvas, camera);
-
-		for (size_t i = 0; i < scene.humanoids.GetCount(); ++i)
-		{
-			HumanoidComponent& humanoid = scene.humanoids[i];
-
-			Entity bone = humanoid.bones[size_t(HumanoidComponent::HumanoidBone::Head)];
-			const TransformComponent* transform = scene.transforms.GetComponent(bone);
-			if (transform != nullptr)
-			{
-				float dist = wi::math::Distance(transform->GetPosition(), ray.origin);
-				dist = std::min(1.0f, dist);
-				XMStoreFloat3(&humanoid.lookAt, camera.GetEye() + XMLoadFloat3(&ray.direction) * dist); // look at near plane position
-			}
-		}
-	}
-}
 void HumanoidWindow::ResizeLayout()
 {
 	wi::gui::Window::ResizeLayout();
@@ -586,4 +560,29 @@ void HumanoidWindow::ResizeLayout()
 
 	add_fullwidth(boneList);
 
+}
+
+void HumanoidWindow::UpdateHumanoids()
+{
+	// Update humanoids to look at mouse:
+	if (lookatMouseCheckBox.GetCheck())
+	{
+		Scene& scene = editor->GetCurrentScene();
+		const CameraComponent& camera = editor->GetCurrentEditorScene().camera;
+		wi::primitive::Ray ray = editor->pickRay;
+
+		for (size_t i = 0; i < scene.humanoids.GetCount(); ++i)
+		{
+			HumanoidComponent& humanoid = scene.humanoids[i];
+
+			Entity bone = humanoid.bones[size_t(HumanoidComponent::HumanoidBone::Head)];
+			const TransformComponent* transform = scene.transforms.GetComponent(bone);
+			if (transform != nullptr)
+			{
+				float dist = wi::math::Distance(transform->GetPosition(), ray.origin);
+				dist = std::min(1.0f, dist);
+				XMStoreFloat3(&humanoid.lookAt, camera.GetEye() + XMLoadFloat3(&ray.direction) * dist); // look at near plane position
+			}
+		}
+	}
 }

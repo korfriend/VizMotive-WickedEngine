@@ -59,14 +59,17 @@
 		"UAV(u0, space = 31, offset = 0, numDescriptors = unbounded, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE)," \
 		"UAV(u0, space = 32, offset = 0, numDescriptors = unbounded, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE)," \
 		"UAV(u0, space = 33, offset = 0, numDescriptors = unbounded, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE)," \
-		"SRV(t0, space = 34, offset = 0, numDescriptors = unbounded, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE)," \
-		"SRV(t0, space = 35, offset = 0, numDescriptors = unbounded, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE)," \
-		"SRV(t0, space = 36, offset = 0, numDescriptors = unbounded, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE)," \
+		"UAV(u0, space = 34, offset = 0, numDescriptors = unbounded, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE)," \
+		"UAV(u0, space = 35, offset = 0, numDescriptors = unbounded, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE)," \
+		"UAV(u0, space = 36, offset = 0, numDescriptors = unbounded, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE)," \
 		"SRV(t0, space = 37, offset = 0, numDescriptors = unbounded, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE)," \
 		"SRV(t0, space = 38, offset = 0, numDescriptors = unbounded, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE)," \
 		"SRV(t0, space = 39, offset = 0, numDescriptors = unbounded, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE)," \
 		"SRV(t0, space = 40, offset = 0, numDescriptors = unbounded, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE)," \
-		"SRV(t0, space = 41, offset = 0, numDescriptors = unbounded, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE)" \
+		"SRV(t0, space = 41, offset = 0, numDescriptors = unbounded, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE)," \
+		"SRV(t0, space = 42, offset = 0, numDescriptors = unbounded, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE)," \
+		"SRV(t0, space = 43, offset = 0, numDescriptors = unbounded, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE)," \
+		"SRV(t0, space = 44, offset = 0, numDescriptors = unbounded, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE)" \
 	"), " \
 	"StaticSampler(s100, addressU = TEXTURE_ADDRESS_CLAMP, addressV = TEXTURE_ADDRESS_CLAMP, addressW = TEXTURE_ADDRESS_CLAMP, filter = FILTER_MIN_MAG_MIP_LINEAR)," \
 	"StaticSampler(s101, addressU = TEXTURE_ADDRESS_WRAP, addressV = TEXTURE_ADDRESS_WRAP, addressW = TEXTURE_ADDRESS_WRAP, filter = FILTER_MIN_MAG_MIP_LINEAR)," \
@@ -128,6 +131,9 @@ static const BindlessResource<RWBuffer<float4>> bindless_rwbuffers_float4;
 static const BindlessResource<RWTexture2DArray<float4>> bindless_rwtextures2DArray;
 static const BindlessResource<RWTexture3D<float4>> bindless_rwtextures3D;
 static const BindlessResource<RWTexture2D<uint>> bindless_rwtextures_uint;
+static const BindlessResource<RWTexture2D<uint2>> bindless_rwtextures_uint2;
+static const BindlessResource<RWTexture2D<uint3>> bindless_rwtextures_uint3;
+static const BindlessResource<RWTexture2D<uint4>> bindless_rwtextures_uint4;
 
 #elif defined(__spirv__)
 // In Vulkan, we can manually overlap descriptor sets to reduce bindings:
@@ -175,6 +181,9 @@ static const uint DESCRIPTOR_SET_BINDLESS_ACCELERATION_STRUCTURE = 7;
 [[vk::binding(0, DESCRIPTOR_SET_BINDLESS_STORAGE_IMAGE)]] RWTexture2DArray<float4> bindless_rwtextures2DArray[];
 [[vk::binding(0, DESCRIPTOR_SET_BINDLESS_STORAGE_IMAGE)]] RWTexture3D<float4> bindless_rwtextures3D[];
 [[vk::binding(0, DESCRIPTOR_SET_BINDLESS_STORAGE_IMAGE)]] RWTexture2D<uint> bindless_rwtextures_uint[];
+[[vk::binding(0, DESCRIPTOR_SET_BINDLESS_STORAGE_IMAGE)]] RWTexture2D<uint2> bindless_rwtextures_uint2[];
+[[vk::binding(0, DESCRIPTOR_SET_BINDLESS_STORAGE_IMAGE)]] RWTexture2D<uint3> bindless_rwtextures_uint3[];
+[[vk::binding(0, DESCRIPTOR_SET_BINDLESS_STORAGE_IMAGE)]] RWTexture2D<uint4> bindless_rwtextures_uint4[];
 #ifdef RTAPI
 [[vk::binding(0, DESCRIPTOR_SET_BINDLESS_ACCELERATION_STRUCTURE)]] RaytracingAccelerationStructure bindless_accelerationstructures[];
 #endif // RTAPI
@@ -216,6 +225,9 @@ RWBuffer<float4> bindless_rwbuffers_float4[] : register(space30);
 RWTexture2DArray<float4> bindless_rwtextures2DArray[] : register(space31);
 RWTexture3D<float4> bindless_rwtextures3D[] : register(space32);
 RWTexture2D<uint> bindless_rwtextures_uint[] : register(space33);
+RWTexture2D<uint2> bindless_rwtextures_uint2[] : register(space34);
+RWTexture2D<uint3> bindless_rwtextures_uint3[] : register(space35);
+RWTexture2D<uint4> bindless_rwtextures_uint4[] : register(space36);
 
 #endif // __spirv__
 
@@ -240,14 +252,14 @@ static const BindlessResource<StructuredBuffer<ShaderTerrainChunk>> bindless_str
 [[vk::binding(0, DESCRIPTOR_SET_BINDLESS_STORAGE_BUFFER)]] StructuredBuffer<uint> bindless_structured_uint[];
 [[vk::binding(0, DESCRIPTOR_SET_BINDLESS_STORAGE_BUFFER)]] StructuredBuffer<ShaderTerrainChunk> bindless_structured_terrain_chunks[];
 #else
-StructuredBuffer<ShaderMeshInstance> bindless_structured_meshinstance[] : register(space34);
-StructuredBuffer<ShaderGeometry> bindless_structured_geometry[] : register(space35);
-StructuredBuffer<ShaderMeshlet> bindless_structured_meshlet[] : register(space36);
-StructuredBuffer<ShaderMaterial> bindless_structured_material[] : register(space37);
-StructuredBuffer<ShaderEntity> bindless_structured_entity[] : register(space38);
-StructuredBuffer<float4x4> bindless_structured_matrix[] : register(space39);
-StructuredBuffer<uint> bindless_structured_uint[] : register(space40);
-StructuredBuffer<ShaderTerrainChunk> bindless_structured_terrain_chunks[] : register(space41);
+StructuredBuffer<ShaderMeshInstance> bindless_structured_meshinstance[] : register(space37);
+StructuredBuffer<ShaderGeometry> bindless_structured_geometry[] : register(space38);
+StructuredBuffer<ShaderMeshlet> bindless_structured_meshlet[] : register(space39);
+StructuredBuffer<ShaderMaterial> bindless_structured_material[] : register(space40);
+StructuredBuffer<ShaderEntity> bindless_structured_entity[] : register(space41);
+StructuredBuffer<float4x4> bindless_structured_matrix[] : register(space42);
+StructuredBuffer<uint> bindless_structured_uint[] : register(space43);
+StructuredBuffer<ShaderTerrainChunk> bindless_structured_terrain_chunks[] : register(space44);
 #endif // __spirv__
 
 inline FrameCB GetFrame()
@@ -297,6 +309,32 @@ inline ShaderEntity load_entity(uint entityIndex)
 inline float4x4 load_entitymatrix(uint matrixIndex)
 {
 	return bindless_structured_matrix[GetFrame().buffer_entity_index][SHADER_ENTITY_COUNT + matrixIndex];
+}
+inline void write_mipmap_feedback(uint materialIndex, float4 uvsets_dx, float4 uvsets_dy)
+{
+	[branch]
+	if(GetScene().texturestreamingbuffer >= 0)
+	{
+		const float lod_uvset0 = get_lod(65536u, uvsets_dx.xy, uvsets_dy.xy);
+		const float lod_uvset1 = get_lod(65536u, uvsets_dx.zw, uvsets_dy.zw);
+		const uint resolution0 = 65536u >> uint(max(0, lod_uvset0));
+		const uint resolution1 = 65536u >> uint(max(0, lod_uvset1));
+		const uint mask = resolution0 | (resolution1 << 16u);
+		const uint wave_mask = WaveActiveBitOr(mask);
+		if(WaveIsFirstLane())
+		{
+			InterlockedOr(bindless_rwbuffers_uint[GetScene().texturestreamingbuffer][materialIndex], wave_mask);
+		}
+	}
+}
+inline void write_mipmap_feedback(uint materialIndex, uint resolution0, uint resolution1)
+{
+	[branch]
+	if(WaveIsFirstLane() && GetScene().texturestreamingbuffer >= 0)
+	{
+		const uint mask = resolution0 | (resolution1 << 16u);
+		InterlockedOr(bindless_rwbuffers_uint[GetScene().texturestreamingbuffer][materialIndex], mask);
+	}
 }
 
 struct PrimitiveID
@@ -1469,16 +1507,19 @@ float twice_uv_area(float2 t0, float2 t1, float2 t2)
 	return abs((t1.x - t0.x) * (t2.y - t0.y) - (t2.x - t0.x) * (t1.y - t0.y));
 }
 // https://media.contentapi.ea.com/content/dam/ea/seed/presentations/2019-ray-tracing-gems-chapter-20-akenine-moller-et-al.pdf
+float compute_texture_lod(uint width, uint height, float triangle_constant, float3 ray_direction, float3 surf_normal, float cone_width)
+{
+	float lambda = triangle_constant;
+	lambda += log2(abs(cone_width));
+	lambda += 0.5 * log2(float(width) * float(height));
+	lambda -= log2(abs(dot(normalize(ray_direction), surf_normal)));
+	return lambda;
+}
 float compute_texture_lod(Texture2D tex, float triangle_constant, float3 ray_direction, float3 surf_normal, float cone_width)
 {
 	uint w, h;
 	tex.GetDimensions(w, h);
-
-	float lambda = triangle_constant;
-	lambda += log2(abs(cone_width));
-	lambda += 0.5 * log2(float(w) * float(h));
-	lambda -= log2(abs(dot(normalize(ray_direction), surf_normal)));
-	return lambda;
+	return compute_texture_lod(w, h, triangle_constant, ray_direction, surf_normal, cone_width);
 }
 float pixel_cone_spread_angle_from_image_height(float image_height)
 {

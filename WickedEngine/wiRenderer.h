@@ -194,6 +194,12 @@ namespace wi::renderer
 		wi::graphics::CommandList cmd
 	);
 
+	// Copies the texture streaming requests from GPU to CPU
+	void TextureStreamingReadbackCopy(
+		const wi::scene::Scene& scene,
+		wi::graphics::CommandList cmd
+	);
+
 	void UpdateRaytracingAccelerationStructures(const wi::scene::Scene& scene, wi::graphics::CommandList cmd);
 
 	// Binds all common constant buffers and samplers that may be used in all shaders
@@ -521,6 +527,7 @@ namespace wi::renderer
 	struct RTAOResources
 	{
 		wi::graphics::Texture normals;
+		wi::graphics::Texture denoised;
 
 		mutable int frame = 0;
 		wi::graphics::GPUBuffer tiles;
@@ -532,6 +539,7 @@ namespace wi::renderer
 	void Postprocess_RTAO(
 		const RTAOResources& res,
 		const wi::scene::Scene& scene,
+		const wi::graphics::Texture& lineardepth,
 		const wi::graphics::Texture& output,
 		wi::graphics::CommandList cmd,
 		float range = 1.0f,
@@ -645,7 +653,7 @@ namespace wi::renderer
 	);
 	struct ScreenSpaceShadowResources
 	{
-		int placeholder = 0;
+		wi::graphics::Texture lowres;
 	};
 	void CreateScreenSpaceShadowResources(ScreenSpaceShadowResources& res, XMUINT2 resolution);
 	void Postprocess_ScreenSpaceShadow(
@@ -1023,6 +1031,8 @@ namespace wi::renderer
 	bool GetToDrawDebugCameras();
 	void SetToDrawDebugColliders(bool param);
 	bool GetToDrawDebugColliders();
+	void SetToDrawDebugSprings(bool param);
+	bool GetToDrawDebugSprings();
 	bool GetToDrawGridHelper();
 	void SetToDrawGridHelper(bool value);
 	bool GetToDrawVoxelHelper();
@@ -1084,11 +1094,11 @@ namespace wi::renderer
 
 
 	// Add box to render in next frame. It will be rendered in DrawDebugWorld()
-	void DrawBox(const XMFLOAT4X4& boxMatrix, const XMFLOAT4& color = XMFLOAT4(1,1,1,1));
+	void DrawBox(const XMFLOAT4X4& boxMatrix, const XMFLOAT4& color = XMFLOAT4(1,1,1,1), bool depth = true);
 	// Add sphere to render in next frame. It will be rendered in DrawDebugWorld()
-	void DrawSphere(const wi::primitive::Sphere& sphere, const XMFLOAT4& color = XMFLOAT4(1, 1, 1, 1));
+	void DrawSphere(const wi::primitive::Sphere& sphere, const XMFLOAT4& color = XMFLOAT4(1, 1, 1, 1), bool depth = true);
 	// Add capsule to render in next frame. It will be rendered in DrawDebugWorld()
-	void DrawCapsule(const wi::primitive::Capsule& capsule, const XMFLOAT4& color = XMFLOAT4(1, 1, 1, 1));
+	void DrawCapsule(const wi::primitive::Capsule& capsule, const XMFLOAT4& color = XMFLOAT4(1, 1, 1, 1), bool depth = true);
 
 	struct RenderableLine
 	{
@@ -1098,7 +1108,7 @@ namespace wi::renderer
 		XMFLOAT4 color_end = XMFLOAT4(1, 1, 1, 1);
 	};
 	// Add line to render in the next frame. It will be rendered in DrawDebugWorld()
-	void DrawLine(const RenderableLine& line);
+	void DrawLine(const RenderableLine& line, bool depth = false);
 
 	struct RenderableLine2D
 	{
@@ -1117,7 +1127,7 @@ namespace wi::renderer
 		XMFLOAT4 color = XMFLOAT4(1, 1, 1, 1);
 	};
 	// Add point to render in the next frame. It will be rendered in DrawDebugWorld() as an X
-	void DrawPoint(const RenderablePoint& point);
+	void DrawPoint(const RenderablePoint& point, bool depth = false);
 
 	struct RenderableTriangle
 	{
@@ -1129,7 +1139,7 @@ namespace wi::renderer
 		XMFLOAT4 colorC = XMFLOAT4(1, 1, 1, 1);
 	};
 	// Add triangle to render in the next frame. It will be rendered in DrawDebugWorld()
-	void DrawTriangle(const RenderableTriangle& triangle, bool wireframe = false);
+	void DrawTriangle(const RenderableTriangle& triangle, bool wireframe = false, bool depth = true);
 
 	struct DebugTextParams
 	{

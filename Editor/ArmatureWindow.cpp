@@ -22,7 +22,7 @@ void ArmatureWindow::Create(EditorComponent* _editor)
 
 		editor->RecordEntity(archive, entity);
 
-		editor->optionsWnd.RefreshEntityTree();
+		editor->componentsWnd.RefreshEntityTree();
 		});
 
 	float x = 60;
@@ -143,7 +143,6 @@ void ArmatureWindow::Create(EditorComponent* _editor)
 
 		HumanoidComponent humanoid;
 		bool found_anything = false;
-		humanoid.default_look_direction = XMFLOAT3(0, 0, -1);
 
 		for (size_t i = 0; i < armature->boneCollection.size(); ++i)
 		{
@@ -218,7 +217,7 @@ void ArmatureWindow::Create(EditorComponent* _editor)
 		// record NEW selection state...
 		editor->RecordSelection(archive);
 
-		editor->optionsWnd.RefreshEntityTree();
+		editor->componentsWnd.RefreshEntityTree();
 
 		});
 	AddWidget(&boneList);
