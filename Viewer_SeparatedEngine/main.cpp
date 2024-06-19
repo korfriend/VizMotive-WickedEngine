@@ -571,7 +571,7 @@ int main(int, char**)
 				ImGui::SetWindowSize(ImVec2(0, 0));
 				curWindowSize3 = ImGui::GetWindowSize();
 			}
-			VID canvasVis = vzm::DisplayInfo(curWindowSize3.x, curWindowSize3.y);
+			VID canvasVis = vzm::DisplayEngineProfiling(curWindowSize3.x, curWindowSize3.y);
 			// Note that we pass the GPU SRV handle here, *not* the CPU handle. We're passing the internal pointer value, cast to an ImTextureID
 			uint32_t w, h;
 			ImTextureID texId = vzm::GetGraphicsSharedRenderTarget(canvasVis, g_pd3dDevice, g_pd3dSrvDescHeap, 3, &w, &h);

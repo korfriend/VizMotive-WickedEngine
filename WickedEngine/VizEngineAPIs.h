@@ -60,7 +60,7 @@ namespace vzm
 
 	// Display Engine's states and profiling information
 	//  - return canvas VID (use this as a camVid)
-	__dojostatic VID DisplayInfo(const int w, const int h, const bool displayProfile = true, const bool displayEngineStates = true);
+	__dojostatic VID DisplayEngineProfiling(const int w, const int h, const bool displayProfile = true, const bool displayEngineStates = true);
 
 	__dojostatic VZRESULT DeinitEngineLib();
 }

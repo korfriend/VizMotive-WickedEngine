@@ -626,7 +626,7 @@ namespace vzm
 
 			if (DisplayProfile)
 			{
-				wi::profiler::DrawData(*this, 4, 10, cmd, colorspace);
+				wi::profiler::DrawData(*this, 4, 60, cmd, colorspace);
 			}
 		}
 
@@ -2987,7 +2987,7 @@ namespace vzm
 		wi::renderer::ReloadShaders();
 	}
 
-	VID DisplayInfo(const int w, const int h, const bool displayProfile, const bool displayEngineStates)
+	VID DisplayEngineProfiling(const int w, const int h, const bool displayProfile, const bool displayEngineStates)
 	{
 		static bool isFirstCall = true;
 		static VID sceneVid = sceneManager.CreateSceneEntity("__VZM_ENGINE_INTERNAL__");
@@ -3001,9 +3001,9 @@ namespace vzm
 
 			sysInfoRenderer->infoDisplay.active = true;
 			sysInfoRenderer->infoDisplay.watermark = true;
-			sysInfoRenderer->infoDisplay.fpsinfo = true;
-			sysInfoRenderer->infoDisplay.resolution = true;
-			sysInfoRenderer->infoDisplay.colorspace = true;
+			//sysInfoRenderer->infoDisplay.fpsinfo = true;
+			//sysInfoRenderer->infoDisplay.resolution = true;
+			//sysInfoRenderer->infoDisplay.colorspace = true;
 			sysInfoRenderer->infoDisplay.device_name = true;
 			sysInfoRenderer->infoDisplay.vram_usage = true;
 			sysInfoRenderer->infoDisplay.heap_allocation_counter = true;

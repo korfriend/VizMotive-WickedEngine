@@ -10,9 +10,6 @@
 #define VZ_JOB_WAIT 2
 #define VZ_WARNNING 3
 
-#define SAFE_GET_COPY(DST_PTR, SRC_PTR, TYPE, ELEMENTS) { if(DST_PTR) memcpy(DST_PTR, SRC_PTR, sizeof(TYPE)*ELEMENTS); }
-#define GET_COPY(DST_PTR, SRC_PTR, TYPE, ELEMENTS) { memcpy(DST_PTR, SRC_PTR, sizeof(TYPE)*ELEMENTS); }
-
 // std
 #include <string>
 #include <map>
