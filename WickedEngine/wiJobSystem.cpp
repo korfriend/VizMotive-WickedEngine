@@ -106,12 +106,12 @@ namespace wi::jobsystem
 	//	Once this is destroyed, worker threads will be woken up and end their loops.
 	struct InternalState
 	{
-		alreadyShutDown = true;
 		uint32_t numCores = 0;
 		PriorityResources resources[int(Priority::Count)];
 		std::atomic_bool alive{ true };
 		void ShutDown()
 		{
+			alreadyShutDown = true;
 			alive.store(false); // indicate that new jobs cannot be started from this point
 			bool wake_loop = true;
 			std::thread waker([&] {

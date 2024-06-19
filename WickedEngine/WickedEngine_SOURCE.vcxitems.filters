@@ -1176,6 +1176,7 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)Utility\WinAdapter.h">
       <Filter>UTILITY</Filter>
     </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)Utility\dds_write.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(MSBuildThisFileDirectory)LUA\lapi.c">
