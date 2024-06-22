@@ -1,4 +1,4 @@
-# Scientific Vizualization Framework Engine
+# High-level Engine APIs with a combination of Wicked Engine and Customized Rendering Frameworks
 - This project starts with the compact version of Wicked Engine (first milestone)
 - And adding my previous rendering engine features to this project while refactoring/compacting the underlying datastructures
 - High-level (COM-based) APIs (not exposing the core datastructures)
