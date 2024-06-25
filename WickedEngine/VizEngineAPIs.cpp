@@ -1111,23 +1111,10 @@ namespace vzm
 
 			return comp;
 		}
-		inline TransformComponent* GetEngineTransformComponent(const VID vid)
-		{
-			for (auto it = scenes.begin(); it != scenes.end(); it++)
-			{
-				VzmScene* scene = &it->second;
-				TransformComponent* tc = scene->transforms.GetComponent(vid);
-				if (tc)
-				{
-					return tc;
-				}
-			}
-			return nullptr;
-		}
 
-		inline void RemoveEntity(Entity entity)
+		inline void RemoveEntity(const VID vid)
 		{
-			VzmScene* scene = GetScene(entity);
+			VzmScene* scene = GetScene(vid);
 			if (scene)
 			{
 				wi::unordered_set<Entity> entities;
@@ -1138,7 +1125,7 @@ namespace vzm
 					renderers.erase(*it);
 					vmComponents.erase(*it);
 				}
-				scenes.erase(entity);
+				scenes.erase(vid);
 			}
 			else
 			{
@@ -1146,10 +1133,10 @@ namespace vzm
 				for (auto it = scenes.begin(); it != scenes.end(); it++)
 				{
 					VzmScene* scene = &it->second;
-					scene->Entity_Remove(entity);
+					scene->Entity_Remove(vid);
 				}
-				renderers.erase(entity);
-				vmComponents.erase(entity);
+				renderers.erase(vid);
+				vmComponents.erase(vid);
 			}
 		}
 	};
