@@ -87,6 +87,7 @@ int main(int, char**)
 	HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"Dear ImGui DirectX12 Example", WS_OVERLAPPEDWINDOW, 30, 30, 1280, 800, nullptr, nullptr, wc.hInstance, nullptr);
 
 	vzm::InitEngineLib();
+//	vzm::NewScene("my scene");
 
 	// Initialize Direct3D
 	if (!CreateDeviceD3D(hwnd))

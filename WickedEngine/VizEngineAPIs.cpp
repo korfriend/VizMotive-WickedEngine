@@ -944,7 +944,7 @@ namespace vzm
 			return nullptr;
 		}
 
-		inline uint32_t GetVidsByName(const std::string& name, std::vector<VID>& vids)
+		inline size_t GetVidsByName(const std::string& name, std::vector<VID>& vids)
 		{
 			for (auto it = scenes.begin(); it != scenes.end(); it++)
 			{
@@ -2473,7 +2473,7 @@ namespace vzm
 		return sceneManager.GetFirstVidByName(name);
 	}
 
-	uint32_t GetVidsByName(const std::string& name, std::vector<VID>& vids)
+	size_t GetVidsByName(const std::string& name, std::vector<VID>& vids)
 	{
 		return sceneManager.GetVidsByName(name, vids);
 	}

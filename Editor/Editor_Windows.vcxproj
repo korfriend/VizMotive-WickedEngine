@@ -111,6 +111,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <AdditionalLibraryDirectories>$(SolutionDir)BUILD\$(Platform)\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
+      <AdditionalDependencies>$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <FxCompile>
       <ShaderModel>5.0</ShaderModel>
@@ -138,15 +139,15 @@
     </CopyFileToFolders>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\WickedEngine\WickedEngine_Windows.vcxproj">
-      <Project>{06163dcb-b183-4ed9-9c62-13ef1658e049}</Project>
-    </ProjectReference>
-  </ItemGroup>
-  <ItemGroup>
     <ClCompile Include="main_Windows.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="wicked.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\WickedEngine\WickedEngineLib_Windows.vcxproj">
+      <Project>{73bcd5ab-8b88-4b4a-a507-d6a4c9b12e6b}</Project>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

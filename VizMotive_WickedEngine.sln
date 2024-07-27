@@ -52,6 +52,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Build Project", "Build Proj
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "VizEngineAPIs", "VizEngineAPIs\VizEngineAPIs.vcxitems", "{393B4C7A-AAE6-4A03-A5AD-EF3EB6F24812}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "WickedEngineLib_Windows", "WickedEngine\WickedEngineLib_Windows.vcxproj", "{73BCD5AB-8B88-4B4A-A507-D6A4C9B12E6B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -124,6 +126,14 @@ Global
 		{E6996B15-A296-4C69-90EA-7F1787FF69DC}.Release|x64.Build.0 = Release|x64
 		{E6996B15-A296-4C69-90EA-7F1787FF69DC}.Release|x86.ActiveCfg = Release|Win32
 		{E6996B15-A296-4C69-90EA-7F1787FF69DC}.Release|x86.Build.0 = Release|Win32
+		{73BCD5AB-8B88-4B4A-A507-D6A4C9B12E6B}.Debug|x64.ActiveCfg = Debug|x64
+		{73BCD5AB-8B88-4B4A-A507-D6A4C9B12E6B}.Debug|x64.Build.0 = Debug|x64
+		{73BCD5AB-8B88-4B4A-A507-D6A4C9B12E6B}.Debug|x86.ActiveCfg = Debug|x64
+		{73BCD5AB-8B88-4B4A-A507-D6A4C9B12E6B}.Debug|x86.Build.0 = Debug|x64
+		{73BCD5AB-8B88-4B4A-A507-D6A4C9B12E6B}.Release|x64.ActiveCfg = Release|x64
+		{73BCD5AB-8B88-4B4A-A507-D6A4C9B12E6B}.Release|x64.Build.0 = Release|x64
+		{73BCD5AB-8B88-4B4A-A507-D6A4C9B12E6B}.Release|x86.ActiveCfg = Release|x64
+		{73BCD5AB-8B88-4B4A-A507-D6A4C9B12E6B}.Release|x86.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -141,6 +151,7 @@ Global
 		{5646F9FB-C9E3-4DA4-8AAA-EB7A46DD777E} = {F1ADB727-BCFC-4967-A8ED-BF943AAA5BF7}
 		{E6996B15-A296-4C69-90EA-7F1787FF69DC} = {F1ADB727-BCFC-4967-A8ED-BF943AAA5BF7}
 		{393B4C7A-AAE6-4A03-A5AD-EF3EB6F24812} = {44178708-8CD6-4FDC-83CF-120DE4CCAE7E}
+		{73BCD5AB-8B88-4B4A-A507-D6A4C9B12E6B} = {23C37BC9-EE52-4481-A1DE-6B9752C7A7EB}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {E3FF044A-B72E-4ED5-BE05-AB641BA048CD}
@@ -150,6 +161,7 @@ Global
 		VizEngineAPIs\VizEngineAPIs.vcxitems*{393b4c7a-aae6-4a03-a5ad-ef3eb6f24812}*SharedItemsImports = 9
 		WickedEngine\WickedEngine_SOURCE.vcxitems*{45d41acc-2c3c-43d2-bc10-02aa73ffc7c7}*SharedItemsImports = 9
 		Editor\Editor_SOURCE.vcxitems*{5fe97b9b-a445-4eea-a42d-9de60b891d48}*SharedItemsImports = 4
+		WickedEngine\WickedEngine_SOURCE.vcxitems*{73bcd5ab-8b88-4b4a-a507-d6a4c9b12e6b}*SharedItemsImports = 4
 		Editor\Editor_SOURCE.vcxitems*{867febca-09c4-4fe7-8a4c-4d9b1c27e7d0}*SharedItemsImports = 9
 		WickedEngine\shaders\Shaders_SOURCE.vcxitems*{92e86448-0724-4387-abac-96e63edf4190}*SharedItemsImports = 9
 		Content\Content.vcxitems*{c48f6bff-f91b-4db5-98b5-15287dfb7c95}*SharedItemsImports = 9

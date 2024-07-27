@@ -13,7 +13,7 @@ namespace vzm
 	__dojostatic VID GetFirstVidByName(const std::string& name);
 	// Get Entity IDs whose name is the input name (VID is allowed for redundant name)
 	//  - return # of entities
-	__dojostatic uint32_t GetVidsByName(const std::string& name, std::vector<VID>& vids);
+	__dojostatic size_t GetVidsByName(const std::string& name, std::vector<VID>& vids);
 	// Get Entity's name if possible
 	//  - return name string if entity's name exists, if not, return "" 
 	__dojostatic bool GetNameByVid(const VID vid, std::string& name);
