@@ -3,6 +3,7 @@
 - And adding my previous rendering engine features to this project while refactoring/compacting the underlying datastructures
 - High-level (COM-based) APIs (not exposing the core datastructures)
 - Refer to ["Viewer_SeparatedEngine" project](https://github.com/korfriend/VizMotive/tree/master/Viewer_SeparatedEngine) for the usage of my high-level APIs
+- Last update : 2024.08.24
 
 ## Our Engine (based on Wicked Engine)
 

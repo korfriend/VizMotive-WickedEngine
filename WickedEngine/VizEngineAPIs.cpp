@@ -256,7 +256,7 @@ namespace vzm
 		// wi::renderer options
 		int ShadowProps2D = 1024; // (int max_resolution);
 		int ShadowPropsCube = 256; // (int max_resolution);
-		float TransparentShadowsEnabled = true; 
+		float ShadowsEnabled = true; 
 		bool WireRender = false; 
 		bool DrawDebugBoneLines = false; // (bool param);
 		bool DrawDebugPartitionTree = false; // (bool param);
@@ -342,7 +342,7 @@ namespace vzm
 		{
 			wi::renderer::SetShadowProps2D(ShadowProps2D);
 			wi::renderer::SetShadowPropsCube(ShadowPropsCube);
-			wi::renderer::SetTransparentShadowsEnabled(TransparentShadowsEnabled);
+			wi::renderer::SetShadowsEnabled(ShadowsEnabled);
 			wi::renderer::SetWireRender(WireRender);
 			wi::renderer::SetToDrawDebugBoneLines(DrawDebugBoneLines);
 			wi::renderer::SetToDrawDebugPartitionTree(DrawDebugPartitionTree);
@@ -1257,15 +1257,15 @@ namespace vzm
 		RENDERER_GET;
 		vrenderer->ShadowPropsCube = max_resolution;
 	}
-	void VmRenderer::SetTransparentShadowsEnabled(bool value)
+	void VmRenderer::SetShadowsEnabled(bool value)
 	{
 		RENDERER_GET;
-		vrenderer->TransparentShadowsEnabled = value;
+		vrenderer->ShadowsEnabled = value;
 	}
-	float VmRenderer::GetTransparentShadowsEnabled()
+	bool VmRenderer::GetShadowsEnabled()
 	{
 		RENDERER_GET;
-		return vrenderer->TransparentShadowsEnabled;
+		return vrenderer->ShadowsEnabled;
 	}
 	void VmRenderer::SetWireRender(bool value)
 	{

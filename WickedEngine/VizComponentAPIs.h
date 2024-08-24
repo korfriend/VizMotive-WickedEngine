@@ -1,7 +1,5 @@
 #pragma once
-#define __dojostatic extern "C" __declspec(dllexport)
-#define __dojoclass class __declspec(dllexport)
-#define __dojostruct struct __declspec(dllexport)
+#define API_EXPORT __declspec(dllexport)
 
 #define __FP (float*)&
 #define VZRESULT int
@@ -42,9 +40,9 @@ using uint = uint32_t;
 
 namespace vzm
 {
-	__dojostatic inline void TransformPoint(const float posSrc[3], const float mat[16], const bool rowMajor, float posDst[3]);
-	__dojostatic inline void TransformVector(const float vecSrc[3], const float mat[16], const bool rowMajor, float vecDst[3]);
-	__dojostatic inline void ComputeBoxTransformMatrix(const float cubeScale[3], const float posCenter[3],
+	extern "C" API_EXPORT inline void TransformPoint(const float posSrc[3], const float mat[16], const bool rowMajor, float posDst[3]);
+	extern "C" API_EXPORT inline void TransformVector(const float vecSrc[3], const float mat[16], const bool rowMajor, float vecDst[3]);
+	extern "C" API_EXPORT inline void ComputeBoxTransformMatrix(const float cubeScale[3], const float posCenter[3],
 		const float yAxis[3], const float zAxis[3], const bool rowMajor, float mat[16], float matInv[16]);
 
 	template <typename ID> struct ParamMap {
@@ -134,7 +132,7 @@ namespace vzm
 		COLLIDER
 	};
 
-	__dojostruct VmBaseComponent
+	struct API_EXPORT VmBaseComponent
 	{
 		VID componentVID = INVALID_VID;
 		COMPONENT_TYPE compType = COMPONENT_TYPE::UNDEFINED;
@@ -158,7 +156,7 @@ namespace vzm
 
 		VID GetParentVid();
 	};
-	__dojostruct VmRenderer
+	struct API_EXPORT VmRenderer
 	{
 		void* renderer;
 		bool IsActivated = false;
@@ -385,7 +383,7 @@ namespace vzm
 		void SetGIBoost(float value);
 		float GetGIBoost();
 	};
-	__dojostruct VmCamera : VmBaseComponent, VmRenderer
+	struct API_EXPORT VmCamera : VmBaseComponent, VmRenderer
 	{
 		// Pose parameters are defined in WS (not local space)
 		void SetPose(const float pos[3], const float view[3], const float up[3]);
@@ -395,18 +393,18 @@ namespace vzm
 		void GetPerspectiveProjection(float* zNearP, float* zFarP, float* fovY, float* aspectRatio);
 		void GetCanvasSize(float* w, float* h, float* dpi);
 	};
-	__dojostruct VmActor : VmBaseComponent
+	struct API_EXPORT VmActor : VmBaseComponent
 	{
 		// 
 	};
-	__dojostruct VmMesh : VmBaseComponent
+	struct API_EXPORT VmMesh : VmBaseComponent
 	{
 		//  
 	};
-	__dojostruct VmMaterial : VmBaseComponent
+	struct API_EXPORT VmMaterial : VmBaseComponent
 	{
 	};
-	__dojostruct VmEmitter : VmBaseComponent
+	struct API_EXPORT VmEmitter : VmBaseComponent
 	{
 		struct ParticleCounters
 		{
@@ -507,7 +505,7 @@ namespace vzm
 		void SetCollidersDisabled(const bool value);
 		void SetTakeColorFromMesh(const bool value);
 	};
-	__dojostruct VmLight : VmBaseComponent
+	struct API_EXPORT VmLight : VmBaseComponent
 	{
 		void SetColor(const float value[3]);
 		void SetIntensity(const float value);
@@ -542,7 +540,7 @@ namespace vzm
 		void SetType(const LightType val);
 		LightType GetType();
 	};
-	__dojostruct VmWeather : VmBaseComponent
+	struct API_EXPORT VmWeather : VmBaseComponent
 	{
 		void SetWeatherPreset(const uint32_t index);
 
@@ -592,7 +590,7 @@ namespace vzm
 		void SetRainSplashScale(const float value);
 		void SetRainColor(const float value[4]);
 	};
-	__dojostruct VmAnimation : VmBaseComponent
+	struct API_EXPORT VmAnimation : VmBaseComponent
 	{
 		bool IsPlaying();
 		bool IsLooped();
@@ -605,7 +603,7 @@ namespace vzm
 		void SetLooped(const bool value);
 		void SetRootMotion(const bool value);
 	};
-	__dojostruct VmCollider : VmBaseComponent
+	struct API_EXPORT VmCollider : VmBaseComponent
 	{
 		enum class Shape
 		{
