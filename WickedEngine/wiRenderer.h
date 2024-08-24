@@ -99,6 +99,8 @@ namespace wi::renderer
 		const wi::vector<std::string>& permutation_defines = {}
 	);
 
+	// Whether background pipeline compilations are active
+	bool IsPipelineCreationActive();
 
 	struct Visibility
 	{
@@ -197,6 +199,17 @@ namespace wi::renderer
 	// Copies the texture streaming requests from GPU to CPU
 	void TextureStreamingReadbackCopy(
 		const wi::scene::Scene& scene,
+		wi::graphics::CommandList cmd
+	);
+
+	// Updates the ocean, can be on async compute
+	void UpdateOcean(
+		const Visibility& vis,
+		wi::graphics::CommandList cmd
+	);
+	// Readback the ocean, can be on async compute or async copy
+	void ReadbackOcean(
+		const Visibility& vis,
 		wi::graphics::CommandList cmd
 	);
 
@@ -303,8 +316,10 @@ namespace wi::renderer
 	void RefreshEnvProbes(const Visibility& vis, wi::graphics::CommandList cmd);
 	// Call once per frame to re-render out of date impostors
 	void RefreshImpostors(const wi::scene::Scene& scene, wi::graphics::CommandList cmd);
-	// Call once per frame to repack out of date lightmaps in the atlas
+	// Call once per frame to render lightmaps
 	void RefreshLightmaps(const wi::scene::Scene& scene, wi::graphics::CommandList cmd);
+	// Call once per frame to render wetmaps
+	void RefreshWetmaps(const Visibility& vis, wi::graphics::CommandList cmd);
 	// Run a compute shader that will resolve a MSAA depth buffer to a single-sample texture
 	void ResolveMSAADepthBuffer(const wi::graphics::Texture& dst, const wi::graphics::Texture& src, wi::graphics::CommandList cmd);
 	void DownsampleDepthBuffer(const wi::graphics::Texture& src, wi::graphics::CommandList cmd);
@@ -810,7 +825,8 @@ namespace wi::renderer
 		const wi::graphics::GPUBuffer* buffer_luminance = nullptr,
 		const wi::graphics::Texture* texture_bloom = nullptr,
 		wi::graphics::ColorSpace display_colorspace = wi::graphics::ColorSpace::SRGB,
-		Tonemap tonemap = Tonemap::Reinhard 
+		Tonemap tonemap = Tonemap::Reinhard,
+		const wi::graphics::Texture* texture_distortion_overlay = nullptr
 	);
 	void Postprocess_FSR(
 		const wi::graphics::Texture& input,
@@ -966,6 +982,13 @@ namespace wi::renderer
 	void OcclusionCulling_Render(const wi::scene::CameraComponent& camera, const Visibility& vis, wi::graphics::CommandList cmd);
 	void OcclusionCulling_Resolve(const Visibility& vis, wi::graphics::CommandList cmd);
 
+	void ComputeReprojectedDepthPyramid(
+		const wi::graphics::Texture& input_depth,
+		const wi::graphics::Texture& input_velocity,
+		const wi::graphics::Texture& output_depth_pyramid,
+		wi::graphics::CommandList cmd
+	);
+
 	enum MIPGENFILTER
 	{
 		MIPGENFILTER_POINT,
@@ -1012,9 +1035,6 @@ namespace wi::renderer
 	void SetShadowPropsCube(int max_resolution);
 
 
-
-	void SetTransparentShadowsEnabled(bool value);
-	float GetTransparentShadowsEnabled();
 	void SetWireRender(bool value);
 	bool IsWireRender();
 	void SetToDrawDebugBoneLines(bool param);
@@ -1059,6 +1079,8 @@ namespace wi::renderer
 	bool GetVXGIReflectionsEnabled();
 	void SetGameSpeed(float value);
 	float GetGameSpeed();
+	void SetShadowsEnabled(bool value);
+	bool IsShadowsEnabled();
 	void SetRaytraceBounceCount(uint32_t bounces);
 	uint32_t GetRaytraceBounceCount();
 	void SetRaytraceDebugBVHVisualizerEnabled(bool value);
@@ -1087,6 +1109,10 @@ namespace wi::renderer
 	float GetDDGIBlendSpeed();
 	void SetGIBoost(float value);
 	float GetGIBoost();
+	void SetMeshShaderAllowed(bool value);
+	bool IsMeshShaderAllowed();
+	void SetMeshletOcclusionCullingEnabled(bool value);
+	bool IsMeshletOcclusionCullingEnabled();
 	void Workaround( const int bug, wi::graphics::CommandList cmd);
 
 	// Gets pick ray according to the current screen resolution and pointer coordinates. Can be used as input into RayIntersectWorld()
@@ -1119,6 +1145,8 @@ namespace wi::renderer
 	};
 	// Add 2D line to render in the next frame. It will be rendered in DrawDebugWorld() in screen space
 	void DrawLine(const RenderableLine2D& line);
+
+	void DrawAxis(const XMMATRIX& matrix, float size, bool depth = false);
 
 	struct RenderablePoint
 	{
@@ -1209,6 +1237,10 @@ namespace wi::renderer
 	//	Returns the ID of the custom shader that can be used with MaterialComponent::SetCustomShaderID()
 	int RegisterCustomShader(const CustomShader& customShader);
 	const wi::vector<CustomShader>& GetCustomShaders();
+
+	// Thread-local barrier batching helpers:
+	void PushBarrier(const wi::graphics::GPUBarrier& barrier);
+	void FlushBarriers(wi::graphics::CommandList cmd);
 
 };
 

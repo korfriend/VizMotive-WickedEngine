@@ -49,6 +49,7 @@ namespace wi
 
 		void WriteData(wi::vector<uint8_t>& dest) const { dest.resize(pos); std::memcpy(dest.data(), data_ptr, pos); }
 		const uint8_t* GetData() const { return data_ptr; }
+		const size_t GetSize() const { return data_ptr_size; }
 		size_t GetPos() const { return pos; }
 		constexpr uint64_t GetVersion() const { return version; }
 		constexpr bool IsReadMode() const { return readMode; }
@@ -257,8 +258,9 @@ namespace wi
 		inline Archive& operator<<(const wi::Archive& other)
 		{
 			// Here we will use the << operator so that non-specified types will have compile error!
-			//	Note: version is skipped, only data is appended
-			for (size_t i = sizeof(version); i < other.pos; ++i)
+			//	Note: version and thumbnail data is skipped, only data is appended
+			const size_t start = sizeof(uint64_t) * 2; // version and thumbnail size
+			for (size_t i = start; i < other.pos; ++i)
 			{
 				(*this) << other.data_ptr[i];
 			}

@@ -89,6 +89,18 @@ namespace wi::math
 		XMStoreFloat(&Distance, length);
 		return Distance;
 	}
+	inline float Dot(const XMFLOAT2& v1, const XMFLOAT2& v2)
+	{
+		XMVECTOR vector1 = XMLoadFloat2(&v1);
+		XMVECTOR vector2 = XMLoadFloat2(&v2);
+		return XMVectorGetX(XMVector2Dot(vector1, vector2));
+	}
+	inline float Dot(const XMFLOAT3& v1, const XMFLOAT3& v2)
+	{
+		XMVECTOR vector1 = XMLoadFloat3(&v1);
+		XMVECTOR vector2 = XMLoadFloat3(&v2);
+		return XMVectorGetX(XMVector3Dot(vector1, vector2));
+	}
 	inline float Distance(const XMFLOAT2& v1, const XMFLOAT2& v2)
 	{
 		XMVECTOR vector1 = XMLoadFloat2(&v1);
@@ -495,6 +507,37 @@ namespace wi::math
 		XMFLOAT3SE se;
 		XMStoreFloat3SE(&se, XMLoadFloat3(&value));
 		return se;
+	}
+
+	inline uint32_t pack_half2(float x, float y)
+	{
+		return (uint32_t)XMConvertFloatToHalf(x) | ((uint32_t)XMConvertFloatToHalf(y) << 16u);
+	}
+	inline uint32_t pack_half2(const XMFLOAT2& value)
+	{
+		return pack_half2(value.x, value.y);
+	}
+	inline XMUINT2 pack_half3(float x, float y, float z)
+	{
+		return XMUINT2(
+			(uint32_t)XMConvertFloatToHalf(x) | ((uint32_t)XMConvertFloatToHalf(y) << 16u),
+			(uint32_t)XMConvertFloatToHalf(z)
+		);
+	}
+	inline XMUINT2 pack_half3(const XMFLOAT3& value)
+	{
+		return pack_half3(value.x, value.y, value.z);
+	}
+	inline XMUINT2 pack_half4(float x, float y, float z, float w)
+	{
+		return XMUINT2(
+			(uint32_t)XMConvertFloatToHalf(x) | ((uint32_t)XMConvertFloatToHalf(y) << 16u),
+			(uint32_t)XMConvertFloatToHalf(z) | ((uint32_t)XMConvertFloatToHalf(w) << 16u)
+		);
+	}
+	inline XMUINT2 pack_half4(const XMFLOAT4& value)
+	{
+		return pack_half4(value.x, value.y, value.z, value.w);
 	}
 
 

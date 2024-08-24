@@ -74,10 +74,11 @@ namespace wi::gui
 		uint32_t priority = 0;
 
 		focus = false;
+		bool force_disable = false;
 		for (size_t i = 0; i < widgets.size(); ++i)
 		{
 			Widget* widget = widgets[i]; // re index in loop, because widgets can be realloced while updating!
-			widget->force_disable = focus;
+			widget->force_disable = force_disable;
 			widget->Update(canvas, dt);
 			widget->force_disable = false;
 
@@ -99,15 +100,19 @@ namespace wi::gui
 			{
 				focus = true;
 			}
+			if (widget->GetState() > FOCUS)
+			{
+				force_disable = true;
+			}
 		}
 
-		//Sort only if there are priority changes
 		if (priority > 0)
 		{
-			//Use std::stable_sort instead of std::sort to preserve UI element order with equal priorities
+			// Sort only if there are priority changes
+			//	Use std::stable_sort instead of std::sort to preserve UI element order with equal priorities
 			std::stable_sort(widgets.begin(), widgets.end(), [](const Widget* a, const Widget* b) {
 				return a->priority < b->priority;
-				});
+			});
 		}
 
 		wi::profiler::EndRange(range);
@@ -781,7 +786,7 @@ namespace wi::gui
 		OnDragStart([](EventArgs args) {});
 		OnDrag([](EventArgs args) {});
 		OnDragEnd([](EventArgs args) {});
-		SetSize(XMFLOAT2(100, 30));
+		SetSize(XMFLOAT2(100, 20));
 
 		font.params.h_align = wi::font::WIFALIGN_CENTER;
 		font.params.v_align = wi::font::WIFALIGN_CENTER;
@@ -1209,6 +1214,27 @@ namespace wi::gui
 			}
 		}
 	}
+	void ScrollBar::SetOffset(float value)
+	{
+		float scrollbar_begin;
+		float scrollbar_end;
+		float scrollbar_size;
+
+		if (vertical)
+		{
+			scrollbar_begin = translation.y;
+			scrollbar_end = scrollbar_begin + scale.y;
+			scrollbar_size = scrollbar_end - scrollbar_begin;
+		}
+		else
+		{
+			scrollbar_begin = translation.x;
+			scrollbar_end = scrollbar_begin + scale.x;
+			scrollbar_size = scrollbar_end - scrollbar_begin;
+		}
+
+		scrollbar_delta = lerp(0.0f, scrollbar_size - scrollbar_length, value / list_length);
+	}
 
 
 
@@ -1380,7 +1406,7 @@ namespace wi::gui
 		SetName(name);
 		SetText(name);
 		OnInputAccepted([](EventArgs args) {});
-		SetSize(XMFLOAT2(100, 30));
+		SetSize(XMFLOAT2(100, 20));
 
 		font.params.v_align = wi::font::WIFALIGN_CENTER;
 
@@ -1473,10 +1499,9 @@ namespace wi::gui
 						args.iValue = atoi(args.sValue.c_str());
 						args.fValue = (float)atof(args.sValue.c_str());
 						onInputAccepted(args);
-						typing_active = false;
 					}
-
 					Deactivate();
+					typing_active = false;
 				}
 				//else if (wi::input::Press(wi::input::KEYBOARD_BUTTON_BACKSPACE))
 				//{
@@ -2765,11 +2790,17 @@ namespace wi::gui
 	}
 	void ComboBox::SetItemText(int index, const std::string& text)
 	{
-		items[index].name = text;
+		if (index >= 0 && index < items.size())
+		{
+			items[index].name = text;
+		}
 	}
 	void ComboBox::SetItemUserdata(int index, uint64_t userdata)
 	{
-		items[index].userdata = userdata;
+		if (index >= 0 && index < items.size())
+		{
+			items[index].userdata = userdata;
+		}
 	}
 	void ComboBox::SetInvalidSelectionText(const std::string& text)
 	{
@@ -2777,7 +2808,7 @@ namespace wi::gui
 	}
 	std::string ComboBox::GetItemText(int index) const
 	{
-		if (index >= 0)
+		if (index >= 0 && index < items.size())
 		{
 			return items[index].name;
 		}
@@ -2785,7 +2816,7 @@ namespace wi::gui
 	}
 	uint64_t ComboBox::GetItemUserData(int index) const
 	{
-		if (index >= 0)
+		if (index >= 0 && index < items.size())
 		{
 			return items[index].userdata;
 		}
@@ -3009,8 +3040,6 @@ namespace wi::gui
 			return;
 		}
 
-		bool focus = false;
-
 		Hitbox2D pointerHitbox = GetPointerHitbox();
 
 		// Resizer updates:
@@ -3067,49 +3096,41 @@ namespace wi::gui
 				{
 					resize_state = RESIZE_STATE_TOPLEFT;
 					Activate();
-					focus = true;
 				}
 				else if (pointerHitbox.intersects(toprighthitbox))
 				{
 					resize_state = RESIZE_STATE_TOPRIGHT;
 					Activate();
-					focus = true;
 				}
 				else if (pointerHitbox.intersects(bottomrighthitbox))
 				{
 					resize_state = RESIZE_STATE_BOTTOMRIGHT;
 					Activate();
-					focus = true;
 				}
 				else if (pointerHitbox.intersects(bottomlefthitbox))
 				{
 					resize_state = RESIZE_STATE_BOTTOMLEFT;
 					Activate();
-					focus = true;
 				}
 				else if (pointerHitbox.intersects(lefthitbox))
 				{
 					resize_state = RESIZE_STATE_LEFT;
 					Activate();
-					focus = true;
 				}
 				else if (pointerHitbox.intersects(righthitbox))
 				{
 					resize_state = RESIZE_STATE_RIGHT;
 					Activate();
-					focus = true;
 				}
 				else if (pointerHitbox.intersects(tophitbox))
 				{
 					resize_state = RESIZE_STATE_TOP;
 					Activate();
-					focus = true;
 				}
 				else if (pointerHitbox.intersects(bottomhitbox))
 				{
 					resize_state = RESIZE_STATE_BOTTOM;
 					Activate();
-					focus = true;
 				}
 				resize_begin = pointerHitbox.pos;
 			}
@@ -3356,9 +3377,13 @@ namespace wi::gui
 		for (size_t i = 0; i < widgets.size(); ++i)
 		{
 			Widget* widget = widgets[i]; // re index in loop, because widgets can be realloced while updating!
-			widget->force_disable = force_disable || focus;
+			widget->force_disable = force_disable;
 			widget->Update(canvas, dt);
 			widget->force_disable = false;
+			if (widget->GetState() > FOCUS)
+			{
+				force_disable = true;
+			}
 
 			if (widget->priority_change)
 			{
@@ -3369,18 +3394,17 @@ namespace wi::gui
 			{
 				widget->priority = ~0u;
 			}
-
-			if (widget->GetState() > IDLE)
-			{
-				focus = true;
-			}
 		}
+		force_disable = false;
 
-		if (priority > 0) //Sort only if there are priority changes
-			//Use std::stable_sort instead of std::sort to preserve UI element order with equal priorities
+		if (priority > 0)
+		{
+			// Sort only if there are priority changes
+			//	Use std::stable_sort instead of std::sort to preserve UI element order with equal priorities
 			std::stable_sort(widgets.begin(), widgets.end(), [](const Widget* a, const Widget* b) {
-			return a->priority < b->priority;
-				});
+				return a->priority < b->priority;
+			});
+		}
 
 		if (!IsMinimized() && IsVisible())
 		{
@@ -4855,7 +4879,7 @@ namespace wi::gui
 
 			float vscale = scale.y;
 			Hitbox2D bottomhitbox = Hitbox2D(XMFLOAT2(translation.x, translation.y + vscale), XMFLOAT2(scale.x, resizehitboxwidth));
-			
+
 			if (resize_state == RESIZE_STATE_NONE && wi::input::Press(wi::input::MOUSE_BUTTON_LEFT))
 			{
 				if (pointerHitbox.intersects(bottomhitbox))
@@ -4914,23 +4938,7 @@ namespace wi::gui
 
 		Hitbox2D pointerHitbox = GetPointerHitbox();
 
-		// compute control-list height
-		float scroll_length = 0;
-		{
-			int parent_level = 0;
-			bool parent_open = true;
-			for (const Item& item : items)
-			{
-				if (!parent_open && item.level > parent_level)
-				{
-					continue;
-				}
-				parent_open = item.open;
-				parent_level = item.level;
-				scroll_length += item_height();
-			}
-		}
-		scrollbar.SetListLength(scroll_length);
+		ComputeScrollbarLength();
 
 		const float scrollbar_width = 12;
 		scrollbar.SetSize(XMFLOAT2(scrollbar_width - 1, scale.y - 1 - item_height()));
@@ -4969,7 +4977,7 @@ namespace wi::gui
 				clicked = true;
 			}
 
-			if (onDelete && state == FOCUS && wi::input::Press(wi::input::KEYBOARD_BUTTON_DELETE))
+			if (onDelete && state == FOCUS && wi::input::Press(wi::input::KEYBOARD_BUTTON_DELETE) && !typing_active)
 			{
 				int index = 0;
 				for (auto& item : items)
@@ -5123,7 +5131,7 @@ namespace wi::gui
 			// hitboxes are recomputed because window transform might have changed since update!!
 			float vscale = scale.y;
 			Hitbox2D bottomhitbox = Hitbox2D(XMFLOAT2(translation.x, translation.y + vscale), XMFLOAT2(scale.x, resizehitboxwidth));
-			
+
 			const Hitbox2D pointerHitbox = GetPointerHitbox(false);
 
 			wi::image::Params fx = sprites[state].params;
@@ -5331,6 +5339,78 @@ namespace wi::gui
 		args.sValue = items[index].name;
 		args.userdata = items[index].userdata;
 		onSelect(args);
+	}
+	void TreeList::ComputeScrollbarLength()
+	{
+		float scroll_length = 0;
+		{
+			int parent_level = 0;
+			bool parent_open = true;
+			for (const Item& item : items)
+			{
+				if (!parent_open && item.level > parent_level)
+				{
+					continue;
+				}
+				parent_open = item.open;
+				parent_level = item.level;
+				scroll_length += item_height();
+			}
+		}
+		scrollbar.SetListLength(scroll_length);
+		scrollbar.Update({}, 0);
+	}
+	void TreeList::FocusOnItem(int index)
+	{
+		if (index < 0 || index >= items.size())
+			return;
+
+		// Open parent items of target:
+		int target = index;
+		int target_level = items[target].level;
+		while (target_level > 0)
+		{
+			if (items[target - 1].level == target_level - 1)
+			{
+				items[target - 1].open = true;
+				target_level--;
+			}
+			target--;
+		}
+
+		// Recompute scrollbar after opened tree leading to target item:
+		ComputeScrollbarLength();
+
+		// Count visible items before target:
+		int visible_count = 0;
+		int parent_level = 0;
+		bool parent_open = true;
+		for (int i = 0; i <= index; ++i)
+		{
+			auto& item = items[i];
+			if (!parent_open && item.level > parent_level)
+			{
+				continue;
+			}
+			visible_count++;
+			parent_open = item.open;
+			parent_level = item.level;
+		}
+
+		// Set scrollbar offset:
+		float offset = visible_count * item_height();
+		scrollbar.SetOffset(offset);
+	}
+	void TreeList::FocusOnItemByUserdata(uint64_t userdata)
+	{
+		for (size_t i = 0; i < items.size(); ++i)
+		{
+			if (items[i].userdata == userdata)
+			{
+				FocusOnItem(int(i));
+				break;
+			}
+		}
 	}
 	const TreeList::Item& TreeList::GetItem(int index) const
 	{

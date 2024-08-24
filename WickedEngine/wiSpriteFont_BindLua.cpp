@@ -21,6 +21,8 @@ namespace wi::lua
 		lunamethod(SpriteFont_BindLua, SetShadowOffset),
 		lunamethod(SpriteFont_BindLua, SetHorizontalWrapping),
 		lunamethod(SpriteFont_BindLua, SetHidden),
+		lunamethod(SpriteFont_BindLua, SetFlippedHorizontally),
+		lunamethod(SpriteFont_BindLua, SetFlippedVertically),
 
 		lunamethod(SpriteFont_BindLua, SetStyle),
 		lunamethod(SpriteFont_BindLua, GetText),
@@ -37,6 +39,8 @@ namespace wi::lua
 		lunamethod(SpriteFont_BindLua, GetShadowOffset),
 		lunamethod(SpriteFont_BindLua, GetHorizontalWrapping),
 		lunamethod(SpriteFont_BindLua, IsHidden),
+		lunamethod(SpriteFont_BindLua, IsFlippedHorizontally),
+		lunamethod(SpriteFont_BindLua, IsFlippedVertically),
 
 		lunamethod(SpriteFont_BindLua, TextSize),
 		lunamethod(SpriteFont_BindLua, SetTypewriterTime),
@@ -291,6 +295,44 @@ namespace wi::lua
 			wi::lua::SError(L, "SetHidden(bool value) not enough arguments!");
 		return 0;
 	}
+	int SpriteFont_BindLua::SetFlippedHorizontally(lua_State* L)
+	{
+		int argc = wi::lua::SGetArgCount(L);
+		if (argc < 1)
+		{
+			wi::lua::SError(L, "SetFlippedHorizontally(bool value) not enough arguments!");
+			return 0;
+		}
+		bool enabled = wi::lua::SGetBool(L, 1);
+		if (enabled)
+		{
+			font.params.enableFlipHorizontally();
+		}
+		else
+		{
+			font.params.disableFlipHorizontally();
+		}
+		return 0;
+	}
+	int SpriteFont_BindLua::SetFlippedVertically(lua_State* L)
+	{
+		int argc = wi::lua::SGetArgCount(L);
+		if (argc < 1)
+		{
+			wi::lua::SError(L, "SetFlippedVertically(bool value) not enough arguments!");
+			return 0;
+		}
+		bool enabled = wi::lua::SGetBool(L, 1);
+		if (enabled)
+		{
+			font.params.enableFlipVertically();
+		}
+		else
+		{
+			font.params.disableFlipVertically();
+		}
+		return 0;
+	}
 
 	int SpriteFont_BindLua::GetText(lua_State* L)
 	{
@@ -366,6 +408,16 @@ namespace wi::lua
 		wi::lua::SSetBool(L, font.IsHidden());
 		return 1;
 	}
+	int SpriteFont_BindLua::IsFlippedHorizontally(lua_State* L)
+	{
+		wi::lua::SSetBool(L, font.params.isFlippedHorizontally());
+		return 1;
+	}
+	int SpriteFont_BindLua::IsFlippedVertically(lua_State* L)
+	{
+		wi::lua::SSetBool(L, font.params.isFlippedVertically());
+		return 1;
+	}
 
 	int SpriteFont_BindLua::TextSize(lua_State* L)
 	{
@@ -424,8 +476,11 @@ namespace wi::lua
 			wi::lua::SError(L, "SetTypewriterSound(Sound sound, SoundInstance soundinstance) second argument is not a sound instance!");
 			return 0;
 		}
-		font.anim.typewriter.sound = sound->soundResource.GetSound();
-		font.anim.typewriter.soundinstance = soundinstance->soundinstance;
+		if (sound->soundResource.IsValid())
+		{
+			font.anim.typewriter.sound = sound->soundResource.GetSound();
+			font.anim.typewriter.soundinstance = soundinstance->soundinstance;
+		}
 		return 0;
 	}
 	int SpriteFont_BindLua::ResetTypewriter(lua_State* L)

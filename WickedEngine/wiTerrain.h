@@ -91,13 +91,12 @@ namespace wi::terrain
 			wi::graphics::Texture residencyMap;
 			wi::graphics::GPUBuffer requestBuffer;
 			wi::graphics::GPUBuffer allocationBuffer;
-			wi::graphics::GPUBuffer allocationBuffer_CPU_readback[wi::graphics::GraphicsDevice::GetBufferCount() + 1];
+			wi::graphics::GPUBuffer allocationBuffer_CPU_readback[wi::graphics::GraphicsDevice::GetBufferCount()];
 			wi::graphics::GPUBuffer pageBuffer;
-			wi::graphics::GPUBuffer pageBuffer_CPU_upload[wi::graphics::GraphicsDevice::GetBufferCount() + 1];
-			bool data_available_CPU[wi::graphics::GraphicsDevice::GetBufferCount() + 1] = {};
+			wi::graphics::GPUBuffer pageBuffer_CPU_upload[wi::graphics::GraphicsDevice::GetBufferCount()];
+			bool data_available_CPU[wi::graphics::GraphicsDevice::GetBufferCount()] = {};
 			int cpu_resource_id = 0;
 			uint32_t resolution = 0;
-			bool residency_cleared = false;
 
 			void init(uint32_t resolution);
 			void reset();
@@ -287,10 +286,6 @@ namespace wi::terrain
 		std::shared_ptr<Generator> generator;
 		float generation_time_budget_milliseconds = 12; // after this much time, the generation thread will exit. This can help avoid a very long running, resource consuming and slow cancellation generation
 
-		wi::vector<wi::graphics::GPUBarrier> virtual_texture_barriers_before_update;
-		wi::vector<wi::graphics::GPUBarrier> virtual_texture_barriers_after_update;
-		wi::vector<wi::graphics::GPUBarrier> virtual_texture_barriers_before_allocation;
-		wi::vector<wi::graphics::GPUBarrier> virtual_texture_barriers_after_allocation;
 		wi::vector<VirtualTexture*> virtual_textures_in_use;
 		wi::graphics::Sampler sampler;
 		VirtualTextureAtlas atlas;

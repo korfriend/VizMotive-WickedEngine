@@ -92,7 +92,7 @@ void main(uint2 DTid : SV_DispatchThreadID)
 
 			float alphatest = clamp(blue_noise(DTid.xy, q.CandidateTriangleRayT()).r, 0, 0.99);
 
-			if (surface.material.options & SHADERMATERIAL_OPTION_BIT_ADDITIVE)
+			if (surface.material.IsAdditive())
 			{
 				additive_dist.xyz += surface.emissiveColor;
 				additive_dist.w = min(additive_dist.w, q.CandidateTriangleRayT());
@@ -135,10 +135,7 @@ void main(uint2 DTid : SV_DispatchThreadID)
 
 			Surface surface;
 			surface.init();
-			if (!q.CommittedTriangleFrontFace())
-			{
-				surface.flags |= SURFACE_FLAG_BACKFACE;
-			}
+			surface.SetBackface(!q.CommittedTriangleFrontFace());
 			surface.V = -ray.Direction;
 			surface.raycone = raycone;
 			surface.hit_depth = q.CommittedRayT();
@@ -163,9 +160,9 @@ void main(uint2 DTid : SV_DispatchThreadID)
 				lighting.create(0, 0, 0, 0);
 
 				[loop]
-				for (uint iterator = 0; iterator < GetFrame().lightarray_count; iterator++)
+				for (uint iterator = 0; iterator < lights().item_count(); iterator++)
 				{
-					ShaderEntity light = load_entity(GetFrame().lightarray_offset + iterator);
+					ShaderEntity light = load_entity(lights().first_item() + iterator);
 					if ((light.layerMask & surface.material.layerMask) == 0)
 						continue;
 

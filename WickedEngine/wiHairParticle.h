@@ -26,6 +26,7 @@ namespace wi
 		wi::scene::MeshComponent::BufferView vb_nor;
 		wi::scene::MeshComponent::BufferView vb_pos_raytracing;
 		wi::scene::MeshComponent::BufferView vb_uvs;
+		wi::scene::MeshComponent::BufferView wetmap;
 		wi::scene::MeshComponent::BufferView ib_culled;
 		wi::scene::MeshComponent::BufferView indirect_view;
 		wi::graphics::GPUBuffer primitiveBuffer;

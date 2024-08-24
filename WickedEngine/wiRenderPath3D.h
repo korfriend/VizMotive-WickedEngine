@@ -83,6 +83,8 @@ namespace wi
 		bool fsrEnabled = false;
 		bool fsr2Enabled = false;
 
+		mutable bool first_frame = true;
+
 	public:
 		wi::graphics::Texture rtMain;
 		wi::graphics::Texture rtMain_render; // can be MSAA
@@ -117,6 +119,7 @@ namespace wi
 		wi::graphics::Texture depthBuffer_Copy1; // used for disocclusion check
 		wi::graphics::Texture depthBuffer_Reflection; // used for reflection, single sample
 		wi::graphics::Texture rtLinearDepth; // linear depth result + mipchain (max filter)
+		wi::graphics::Texture reprojectedDepth; // prev frame depth reprojected into current, and downsampled for meshlet occlusion culling
 
 		wi::graphics::Texture debugUAV; // debug UAV can be used by some shaders...
 		wi::renderer::TiledLightResources tiledLightResources;
@@ -146,6 +149,8 @@ namespace wi
 
 		wi::graphics::CommandList video_cmd;
 		wi::vector<wi::video::VideoInstance*> video_instances_tmp;
+
+		wi::graphics::Texture distortion_overlay; // optional full screen distortion from an asset
 
 		mutable const wi::graphics::Texture* lastPostprocessRT = &rtPostprocess;
 		// Post-processes are ping-ponged, this function helps to obtain the last postprocess render target that was written

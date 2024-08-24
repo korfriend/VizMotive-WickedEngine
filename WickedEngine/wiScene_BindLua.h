@@ -4,6 +4,8 @@
 #include "wiScene.h"
 #include "wiMath_BindLua.h"
 
+#include <memory>
+
 namespace wi::lua::scene
 {
 	// If the application doesn't use the global scene, but manages it manually,
@@ -20,7 +22,7 @@ namespace wi::lua::scene
 	class Scene_BindLua
 	{
 	private:
-		wi::scene::Scene owning;
+		std::unique_ptr<wi::scene::Scene> owning; // GetScene() is too slow if scene object is always constructed
 	public:
 		wi::scene::Scene* scene = nullptr;
 
@@ -29,7 +31,7 @@ namespace wi::lua::scene
 		static Luna<Scene_BindLua>::PropertyType properties[];
 
 		Scene_BindLua(wi::scene::Scene* scene) :scene(scene) {}
-		Scene_BindLua(lua_State* L) : scene(&owning) {}
+		Scene_BindLua(lua_State* L) : owning(std::make_unique<wi::scene::Scene>()), scene(owning.get()) {}
 
 		int Update(lua_State* L);
 		int Clear(lua_State* L);
@@ -72,6 +74,8 @@ namespace wi::lua::scene
 		int Component_CreateSprite(lua_State* L);
 		int Component_CreateFont(lua_State* L);
 		int Component_CreateVoxelGrid(lua_State* L);
+		int Component_CreateMetadata(lua_State* L);
+		int Component_CreateCharacter(lua_State* L);
 
 		int Component_GetName(lua_State* L);
 		int Component_GetLayer(lua_State* L);
@@ -99,6 +103,8 @@ namespace wi::lua::scene
 		int Component_GetSprite(lua_State* L);
 		int Component_GetFont(lua_State* L);
 		int Component_GetVoxelGrid(lua_State* L);
+		int Component_GetMetadata(lua_State* L);
+		int Component_GetCharacter(lua_State* L);
 
 		int Component_GetNameArray(lua_State* L);
 		int Component_GetLayerArray(lua_State* L);
@@ -126,6 +132,8 @@ namespace wi::lua::scene
 		int Component_GetSpriteArray(lua_State* L);
 		int Component_GetFontArray(lua_State* L);
 		int Component_GetVoxelGridArray(lua_State* L);
+		int Component_GetMetadataArray(lua_State* L);
+		int Component_GetCharacterArray(lua_State* L);
 
 		int Entity_GetNameArray(lua_State* L);
 		int Entity_GetLayerArray(lua_State* L);
@@ -154,6 +162,8 @@ namespace wi::lua::scene
 		int Entity_GetSpriteArray(lua_State* L);
 		int Entity_GetFontArray(lua_State* L);
 		int Entity_GetVoxelGridArray(lua_State* L);
+		int Entity_GetMetadataArray(lua_State* L);
+		int Entity_GetCharacterArray(lua_State* L);
 
 		int Component_RemoveName(lua_State* L);
 		int Component_RemoveLayer(lua_State* L);
@@ -182,6 +192,8 @@ namespace wi::lua::scene
 		int Component_RemoveSprite(lua_State* L);
 		int Component_RemoveFont(lua_State* L);
 		int Component_RemoveVoxelGrid(lua_State* L);
+		int Component_RemoveMetadata(lua_State* L);
+		int Component_RemoveCharacter(lua_State* L);
 
 		int Component_Attach(lua_State* L);
 		int Component_Detach(lua_State* L);
@@ -193,6 +205,8 @@ namespace wi::lua::scene
 		int SetWeather(lua_State* L);
 
 		int RetargetAnimation(lua_State* L);
+		int ResetPose(lua_State* L);
+		int GetOceanPosAt(lua_State* L);
 
 		int VoxelizeObject(lua_State* L);
 		int VoxelizeScene(lua_State* L);
@@ -364,6 +378,10 @@ namespace wi::lua::scene
 		int SetStart(lua_State* L);
 		int GetEnd(lua_State* L);
 		int SetEnd(lua_State* L);
+		int SetPingPong(lua_State* L);
+		int IsPingPong(lua_State* L);
+		int SetPlayOnce(lua_State* L);
+		int IsPlayingOnce(lua_State* L);
 
 		// For Rootmotion
 		int IsRootMotion(lua_State* L);
@@ -400,15 +418,17 @@ namespace wi::lua::scene
 			DisplacementMapping = FloatProperty(&component->displacementMapping);
 			Refraction = FloatProperty(&component->refraction);
 			Transmission = FloatProperty(&component->transmission);
+			Cloak = FloatProperty(&component->cloak);
+			ChromaticAberration = FloatProperty(&component->chromatic_aberration);
 			AlphaRef = FloatProperty(&component->alphaRef);
 			SheenColor = VectorProperty(&component->sheenColor);
 			SheenRoughness = FloatProperty(&component->sheenRoughness);
 			Clearcoat = FloatProperty(&component->clearcoat);
 			ClearcoatRoughness = FloatProperty(&component->clearcoatRoughness);
-			ShadingRate = IntProperty(reinterpret_cast<int*>(&component->roughness));
+			ShadingRate = IntProperty(reinterpret_cast<int*>(&component->shadingRate));
 			TexAnimDirection = VectorProperty(&component->texAnimDirection);
-			TexAnimFrameRate = FloatProperty(&component->roughness);
-			texAnimElapsedTime = FloatProperty(&component->roughness);
+			TexAnimFrameRate = FloatProperty(&component->texAnimFrameRate);
+			texAnimElapsedTime = FloatProperty(&component->texAnimElapsedTime);
 			customShaderID = IntProperty(&component->customShaderID);
 		}
 
@@ -435,6 +455,8 @@ namespace wi::lua::scene
 		FloatProperty DisplacementMapping;
 		FloatProperty Refraction;
 		FloatProperty Transmission;
+		FloatProperty Cloak;
+		FloatProperty ChromaticAberration;
 		FloatProperty AlphaRef;
 		VectorProperty SheenColor;
 		FloatProperty SheenRoughness;
@@ -460,6 +482,8 @@ namespace wi::lua::scene
 		PropertyFunction(DisplacementMapping)
 		PropertyFunction(Refraction)
 		PropertyFunction(Transmission)
+		PropertyFunction(Cloak)
+		PropertyFunction(ChromaticAberration)
 		PropertyFunction(AlphaRef)
 		PropertyFunction(SheenColor)
 		PropertyFunction(SheenRoughness)
@@ -779,6 +803,7 @@ namespace wi::lua::scene
 		int IsForeground(lua_State* L);
 		int IsNotVisibleInMainCamera(lua_State* L);
 		int IsNotVisibleInReflections(lua_State* L);
+		int IsWetmapEnabled(lua_State* L);
 
 		int SetMeshID(lua_State* L);
 		int SetCascadeMask(lua_State* L);
@@ -792,6 +817,7 @@ namespace wi::lua::scene
 		int SetForeground(lua_State* L);
 		int SetNotVisibleInMainCamera(lua_State* L);
 		int SetNotVisibleInReflections(lua_State* L);
+		int SetWetmapEnabled(lua_State* L);
 	};
 
 	class InverseKinematicsComponent_BindLua
@@ -904,6 +930,7 @@ namespace wi::lua::scene
 			Restitution = FloatProperty(&component->restitution);
 			LinearDamping = FloatProperty(&component->damping_linear);
 			AngularDamping = FloatProperty(&component->damping_angular);
+			Buoyancy = FloatProperty(&component->buoyancy);
 			BoxParams_HalfExtents = VectorProperty(&component->box.halfextents);
 			SphereParams_Radius = FloatProperty(&component->sphere.radius);
 			CapsuleParams_Radius = FloatProperty(&component->capsule.radius);
@@ -926,6 +953,7 @@ namespace wi::lua::scene
 		FloatProperty Restitution;
 		FloatProperty LinearDamping;
 		FloatProperty AngularDamping;
+		FloatProperty Buoyancy;
 		VectorProperty BoxParams_HalfExtents;
 		FloatProperty SphereParams_Radius;
 		FloatProperty CapsuleParams_Radius;
@@ -938,6 +966,7 @@ namespace wi::lua::scene
 		PropertyFunction(Restitution)
 		PropertyFunction(LinearDamping)
 		PropertyFunction(AngularDamping)
+		PropertyFunction(Buoyancy)
 		PropertyFunction(BoxParams_HalfExtents)
 		PropertyFunction(SphereParams_Radius)
 		PropertyFunction(CapsuleParams_Radius)
@@ -946,9 +975,11 @@ namespace wi::lua::scene
 
 		int SetDisableDeactivation(lua_State* L);
 		int SetKinematic(lua_State* L);
+		int SetStartDeactivated(lua_State* L);
 
 		int IsDisableDeactivation(lua_State* L);
 		int IsKinematic(lua_State* L);
+		int IsStartDeactivated(lua_State* L);
 	};
 
 	class SoftBodyPhysicsComponent_BindLua
@@ -967,6 +998,7 @@ namespace wi::lua::scene
 			Mass = wi::lua::FloatProperty(&component->mass);
 			Friction = wi::lua::FloatProperty(&component->friction);
 			Restitution = wi::lua::FloatProperty(&component->restitution);
+			VertexRadius = wi::lua::FloatProperty(&component->vertex_radius);
 		}
 
 		SoftBodyPhysicsComponent_BindLua(wi::scene::SoftBodyPhysicsComponent* component) :component(component)
@@ -981,13 +1013,19 @@ namespace wi::lua::scene
 		wi::lua::FloatProperty Mass;
 		wi::lua::FloatProperty Friction;
 		wi::lua::FloatProperty Restitution;
+		wi::lua::FloatProperty VertexRadius;
 
 		PropertyFunction(Mass)
 		PropertyFunction(Friction)
 		PropertyFunction(Restitution)
+		PropertyFunction(VertexRadius)
 
+		int SetDetail(lua_State* L);
+		int GetDetail(lua_State* L);
 		int SetDisableDeactivation(lua_State* L);
 		int IsDisableDeactivation(lua_State* L);
+		int SetWindEnabled(lua_State* L);
+		int IsWindEnabled(lua_State* L);
 		int CreateFromMesh(lua_State* L);
 	};
 
@@ -1770,6 +1808,110 @@ namespace wi::lua::scene
 		int IsBaseColorOnlyAlpha(lua_State* L);
 		int SetSlopeBlendPower(lua_State* L);
 		int GetSlopeBlendPower(lua_State* L);
+	};
+
+	class MetadataComponent_BindLua
+	{
+	private:
+		wi::scene::MetadataComponent owning;
+	public:
+		wi::scene::MetadataComponent* component = nullptr;
+
+		inline static constexpr char className[] = "MetadataComponent";
+		static Luna<MetadataComponent_BindLua>::FunctionType methods[];
+		static Luna<MetadataComponent_BindLua>::PropertyType properties[];
+
+		MetadataComponent_BindLua(wi::scene::MetadataComponent* component) :component(component) {}
+		MetadataComponent_BindLua(lua_State* L) : component(&owning) {}
+
+		int HasBool(lua_State* L);
+		int HasInt(lua_State* L);
+		int HasFloat(lua_State* L);
+		int HasString(lua_State* L);
+
+		int GetPreset(lua_State* L);
+		int GetBool(lua_State* L);
+		int GetInt(lua_State* L);
+		int GetFloat(lua_State* L);
+		int GetString(lua_State* L);
+
+		int SetPreset(lua_State* L);
+		int SetBool(lua_State* L);
+		int SetInt(lua_State* L);
+		int SetFloat(lua_State* L);
+		int SetString(lua_State* L);
+	};
+
+	class CharacterComponent_BindLua
+	{
+	private:
+		wi::scene::CharacterComponent owning;
+	public:
+		wi::scene::CharacterComponent* component = nullptr;
+
+		inline static constexpr char className[] = "CharacterComponent";
+		static Luna<CharacterComponent_BindLua>::FunctionType methods[];
+		static Luna<CharacterComponent_BindLua>::PropertyType properties[];
+
+		CharacterComponent_BindLua(wi::scene::CharacterComponent* component) :component(component) {}
+		CharacterComponent_BindLua(lua_State* L) : component(&owning) {}
+
+		int Move(lua_State* L);
+		int Strafe(lua_State* L);
+		int Jump(lua_State* L);
+		int Turn(lua_State* L);
+		int Lean(lua_State* L);
+
+		int AddAnimation(lua_State* L);
+		int PlayAnimation(lua_State* L);
+		int StopAnimation(lua_State* L);
+		int SetAnimationAmount(lua_State* L);
+		int GetAnimationAmount(lua_State* L);
+		int IsAnimationEnded(lua_State* L);
+
+		int SetGroundFriction(lua_State* L);
+		int SetWaterFriction(lua_State* L);
+		int SetSlopeThreshold(lua_State* L);
+		int SetLeaningLimit(lua_State* L);
+		int SetFixedUpdateFPS(lua_State* L);
+		int SetGravity(lua_State* L);
+		int SetWaterVerticalOffset(lua_State* L);
+
+		int SetActive(lua_State* L);
+		int SetHealth(lua_State* L);
+		int SetWidth(lua_State* L);
+		int SetHeight(lua_State* L);
+		int SetScale(lua_State* L);
+		int SetPosition(lua_State* L);
+		int SetVelocity(lua_State* L);
+		int SetFacing(lua_State* L);
+		int SetRelativeOffset(lua_State* L);
+		int SetFootPlacementEnabled(lua_State* L);
+		int SetCharacterToCharacterCollisionDisabled(lua_State* L);
+
+		int GetHealth(lua_State* L);
+		int GetWidth(lua_State* L);
+		int GetHeight(lua_State* L);
+		int GetScale(lua_State* L);
+		int GetPosition(lua_State* L);
+		int GetPositionInterpolated(lua_State* L);
+		int GetVelocity(lua_State* L);
+		int GetMovement(lua_State* L);
+		int IsActive(lua_State* L);
+		int IsGrounded(lua_State* L);
+		int IsWallIntersect(lua_State* L);
+		int IsSwimming(lua_State* L);
+		int GetCapsule(lua_State* L);
+		int GetFacing(lua_State* L);
+		int GetFacingSmoothed(lua_State* L);
+		int GetRelativeOffset(lua_State* L);
+		int IsFootPlacementEnabled(lua_State* L);
+		int IsCharacterToCharacterCollisionDisabled(lua_State* L);
+		int GetLeaning(lua_State* L);
+		int GetLeaningSmoothed(lua_State* L);
+
+		int SetPathGoal(lua_State* L);
+		int GetPathQuery(lua_State* L);
 	};
 }
 

@@ -4,6 +4,7 @@
 
 #include "ModelImporter.h"
 #include "Translator.h"
+#include "DummyVisualizer.h"
 
 using namespace wi::graphics;
 using namespace wi::primitive;
@@ -17,15 +18,6 @@ extern bool window_recreating;
 #elif defined(PLATFORM_LINUX)
 #include "sdl2.h"
 #endif // PLATFORM_WINDOWS
-
-namespace dummy_female
-{
-#include "dummy_female.h"
-}
-namespace dummy_male
-{
-#include "dummy_male.h"
-}
 
 enum class FileType
 {
@@ -81,6 +73,7 @@ void Editor::Initialize()
 
 	infoDisplay.active = true;
 	infoDisplay.watermark = false; // can be toggled instead on gui
+	infoDisplay.pipeline_creation = true;
 	//infoDisplay.fpsinfo = true;
 	//infoDisplay.resolution = true;
 	//infoDisplay.logical_size = true;
@@ -93,7 +86,12 @@ void Editor::Initialize()
 	wi::renderer::SetOcclusionCullingEnabled(true);
 
 	renderComponent.main = this;
-	renderComponent.setMSAASampleCount(4);
+	uint32_t msaa = 4;
+	if (config.Has("gui_antialiasing"))
+	{
+		msaa = std::max(1u, (uint32_t)config.GetInt("gui_antialiasing"));
+	}
+	renderComponent.setMSAASampleCount(msaa);
 	renderComponent.Load();
 	ActivatePath(&renderComponent, 0.2f);
 }
@@ -104,7 +102,7 @@ void Editor::HotReload()
 
 	static wi::jobsystem::context hotreload_ctx;
 	wi::jobsystem::Wait(hotreload_ctx);
-	hotreload_ctx.priority = wi::jobsystem::Priority::Low;
+	hotreload_ctx.priority = wi::jobsystem::Priority::Streaming;
 
 	if (wi::shadercompiler::GetRegisteredShaderCount() > 0)
 	{
@@ -314,6 +312,7 @@ void EditorComponent::Load()
 		NEW_SPRITE,
 		NEW_FONT,
 		NEW_VOXELGRID,
+		NEW_METADATA,
 	};
 
 	newEntityCombo.Create("New: ");
@@ -348,6 +347,7 @@ void EditorComponent::Load()
 	newEntityCombo.AddItem("Sprite " ICON_SPRITE, NEW_SPRITE);
 	newEntityCombo.AddItem("Font " ICON_FONT, NEW_FONT);
 	newEntityCombo.AddItem("Voxel Grid " ICON_VOXELGRID, NEW_VOXELGRID);
+	newEntityCombo.AddItem("Metadata " ICON_METADATA, NEW_METADATA);
 	newEntityCombo.OnSelect([this](wi::gui::EventArgs args) {
 		newEntityCombo.SetSelectedWithoutCallback(-1);
 		const EditorComponent::EditorScene& editorscene = GetCurrentEditorScene();
@@ -528,6 +528,14 @@ void EditorComponent::Load()
 			scene.voxel_grids.Create(pick.entity).init(64, 64, 64);
 			scene.transforms.Create(pick.entity).Scale(XMFLOAT3(0.25f, 0.25f, 0.25f));
 			scene.names.Create(pick.entity) = "voxelgrid";
+		}
+		break;
+		case NEW_METADATA:
+		{
+			pick.entity = CreateEntity();
+			scene.metadatas.Create(pick.entity);
+			scene.transforms.Create(pick.entity);
+			scene.names.Create(pick.entity) = "metadata";
 		}
 		break;
 		default:
@@ -877,7 +885,8 @@ void EditorComponent::Load()
 		ss += "Select: Left mouse button\n";
 		ss += "Interact with physics/water/grass: Middle mouse button\n";
 		ss += "Faster camera: Left Shift button or controller R2/RT\n";
-		ss += "Snap transform: Left Ctrl (hold while transforming)\n";
+		ss += "Snap to grid transform: Ctrl (hold while transforming)\n";
+		ss += "Snap to surface transform: Shift (hold while transforming)\n";
 		ss += "Camera up: E\n";
 		ss += "Camera down: Q\n";
 		ss += "Duplicate entity: Ctrl + D\n";
@@ -1163,7 +1172,7 @@ void EditorComponent::Update(float dt)
 			yDif = 0.1f * yDif * (1.0f / 60.0f);
 			wi::input::SetPointer(originalMouse);
 			wi::input::HidePointer(true);
-	}
+		}
 		else
 		{
 			camControlStart = true;
@@ -1192,9 +1201,9 @@ void EditorComponent::Update(float dt)
 		const XMFLOAT4 rightStick = wi::input::GetAnalog(wi::input::GAMEPAD_ANALOG_THUMBSTICK_R, 0);
 		const XMFLOAT4 rightTrigger = wi::input::GetAnalog(wi::input::GAMEPAD_ANALOG_TRIGGER_R, 0);
 
-		const float jostickrotspeed = 0.05f;
-		xDif += rightStick.x * jostickrotspeed;
-		yDif += rightStick.y * jostickrotspeed;
+		const float joystickrotspeed = 0.05f;
+		xDif += rightStick.x * joystickrotspeed;
+		yDif += rightStick.y * joystickrotspeed;
 
 		xDif *= cameraWnd.rotationspeedSlider.GetValue();
 		yDif *= cameraWnd.rotationspeedSlider.GetValue();
@@ -1526,6 +1535,25 @@ void EditorComponent::Update(float dt)
 					}
 				}
 			}
+			if (has_flag(componentsWnd.filter, ComponentsWindow::Filter::Metadata))
+			{
+				for (size_t i = 0; i < scene.metadatas.GetCount(); ++i)
+				{
+					Entity entity = scene.metadatas.GetEntity(i);
+					if (!scene.transforms.Contains(entity))
+						continue;
+					const TransformComponent& transform = *scene.transforms.GetComponent(entity);
+
+					XMVECTOR disV = XMVector3LinePointDistance(XMLoadFloat3(&pickRay.origin), XMLoadFloat3(&pickRay.origin) + XMLoadFloat3(&pickRay.direction), transform.GetPositionV());
+					float dis = XMVectorGetX(disV);
+					if (dis > 0.01f && dis < wi::math::Distance(transform.GetPosition(), pickRay.origin) * 0.05f && dis < hovered.distance)
+					{
+						hovered = wi::scene::PickResult();
+						hovered.entity = entity;
+						hovered.distance = dis;
+					}
+				}
+			}
 			if (bone_picking)
 			{
 				for (size_t i = 0; i < scene.armatures.GetCount(); ++i)
@@ -1615,7 +1643,6 @@ void EditorComponent::Update(float dt)
 				{
 					if (
 						wi::input::Down(wi::input::MOUSE_BUTTON_LEFT) ||
-						wi::input::Down(wi::input::MOUSE_BUTTON_MIDDLE) ||
 						inspector_mode
 						)
 					{
@@ -1638,6 +1665,7 @@ void EditorComponent::Update(float dt)
 		// Interactions:
 		{
 			// Interact:
+			bool interaction_happened = false;
 			if (wi::input::Down((wi::input::BUTTON)'P'))
 			{
 				if (wi::input::Press(wi::input::MOUSE_BUTTON_MIDDLE))
@@ -1646,6 +1674,7 @@ void EditorComponent::Update(float dt)
 					wi::physics::RayIntersectionResult result = wi::physics::Intersects(scene, pickRay);
 					if (result.IsValid())
 					{
+						interaction_happened = true;
 						XMFLOAT3 impulse;
 						XMStoreFloat3(&impulse, XMVector3Normalize(XMLoadFloat3(&pickRay.direction)) * 20);
 						if (result.humanoid_ragdoll_entity != INVALID_ENTITY)
@@ -1676,6 +1705,10 @@ void EditorComponent::Update(float dt)
 				if (wi::input::Down(wi::input::MOUSE_BUTTON_MIDDLE))
 				{
 					wi::physics::PickDrag(scene, pickRay, physicsDragOp);
+					if (physicsDragOp.IsValid())
+					{
+						interaction_happened = true;
+					}
 				}
 				else
 				{
@@ -1714,50 +1747,53 @@ void EditorComponent::Update(float dt)
 			}
 
 			// Other:
-			if (hovered.entity != INVALID_ENTITY && wi::input::Down(wi::input::MOUSE_BUTTON_MIDDLE))
+			if (!interaction_happened && wi::input::Down(wi::input::MOUSE_BUTTON_MIDDLE))
 			{
-				if (dummy_enabled)
+				hovered = wi::scene::Pick(pickRay, wi::enums::FILTER_OBJECT_ALL, ~0u, scene);
+				if (hovered.entity != INVALID_ENTITY)
 				{
-					dummy_pos = hovered.position;
-				}
-				else
-				{
-					const ObjectComponent* object = scene.objects.GetComponent(hovered.entity);
-					if (object != nullptr)
+					if (dummy_enabled)
 					{
-						if (object->GetFilterMask() & wi::enums::FILTER_WATER)
+						dummy_pos = hovered.position;
+					}
+					else
+					{
+						const ObjectComponent* object = scene.objects.GetComponent(hovered.entity);
+						if (object != nullptr)
 						{
-							// if water, then put a water ripple onto it:
-							scene.PutWaterRipple(hovered.position);
-						}
-						else
-						{
-							// Check for interactive grass (hair particle that is child of hovered object:
-							for (size_t i = 0; i < scene.hairs.GetCount(); ++i)
+							if (object->GetFilterMask() & wi::enums::FILTER_WATER)
 							{
-								Entity entity = scene.hairs.GetEntity(i);
-								HierarchyComponent* hier = scene.hierarchy.GetComponent(entity);
-								if (hier != nullptr && hier->parentID == hovered.entity)
+								// if water, then put a water ripple onto it:
+								scene.PutWaterRipple(hovered.position);
+							}
+							else
+							{
+								// Check for interactive grass (hair particle that is child of hovered object:
+								for (size_t i = 0; i < scene.hairs.GetCount(); ++i)
 								{
-									XMVECTOR P = XMLoadFloat3(&hovered.position);
-									P += XMLoadFloat3(&hovered.normal) * 2;
-									if (grass_interaction_entity == INVALID_ENTITY)
+									Entity entity = scene.hairs.GetEntity(i);
+									HierarchyComponent* hier = scene.hierarchy.GetComponent(entity);
+									if (hier != nullptr && hier->parentID == hovered.entity)
 									{
-										grass_interaction_entity = CreateEntity();
+										XMVECTOR P = XMLoadFloat3(&hovered.position);
+										P += XMLoadFloat3(&hovered.normal) * 2;
+										if (grass_interaction_entity == INVALID_ENTITY)
+										{
+											grass_interaction_entity = CreateEntity();
+										}
+										ForceFieldComponent& force = scene.forces.Create(grass_interaction_entity);
+										TransformComponent& transform = scene.transforms.Create(grass_interaction_entity);
+										force.type = ForceFieldComponent::Type::Point;
+										force.gravity = -80;
+										force.range = 3;
+										transform.Translate(P);
+										break;
 									}
-									ForceFieldComponent& force = scene.forces.Create(grass_interaction_entity);
-									TransformComponent& transform = scene.transforms.Create(grass_interaction_entity);
-									force.type = ForceFieldComponent::Type::Point;
-									force.gravity = -80;
-									force.range = 3;
-									transform.Translate(P);
-									break;
 								}
 							}
 						}
 					}
 				}
-
 			}
 		}
 
@@ -1786,7 +1822,7 @@ void EditorComponent::Update(float dt)
 			{
 				// Add the hovered item to the selection:
 
-				if (!translator.selected.empty() && wi::input::Down(wi::input::KEYBOARD_BUTTON_LSHIFT))
+				if (!translator.selected.empty() && (wi::input::Down(wi::input::KEYBOARD_BUTTON_LSHIFT) || wi::input::Down(wi::input::KEYBOARD_BUTTON_LCONTROL)))
 				{
 					// Union selection:
 					wi::vector<wi::scene::PickResult> saved = translator.selected;
@@ -2082,6 +2118,7 @@ void EditorComponent::Update(float dt)
 		componentsWnd.spriteWnd.SetEntity(INVALID_ENTITY);
 		componentsWnd.fontWnd.SetEntity(INVALID_ENTITY);
 		componentsWnd.voxelGridWnd.SetEntity(INVALID_ENTITY);
+		componentsWnd.metadataWnd.SetEntity(INVALID_ENTITY);
 	}
 	else
 	{
@@ -2116,6 +2153,7 @@ void EditorComponent::Update(float dt)
 		componentsWnd.spriteWnd.SetEntity(picked.entity);
 		componentsWnd.fontWnd.SetEntity(picked.entity);
 		componentsWnd.voxelGridWnd.SetEntity(picked.entity);
+		componentsWnd.metadataWnd.SetEntity(picked.entity);
 
 		if (picked.subsetIndex >= 0)
 		{
@@ -2285,6 +2323,10 @@ void EditorComponent::Update(float dt)
 
 	if (navtest_enabled)
 	{
+		if (wi::input::Down(wi::input::MOUSE_BUTTON_MIDDLE))
+		{
+			hovered = wi::scene::Pick(pickRay, wi::enums::FILTER_OBJECT_ALL, ~0u, scene);
+		}
 		if (hovered.entity != INVALID_ENTITY && wi::input::Down(wi::input::KEYBOARD_BUTTON_F5))
 		{
 			navtest_start_pick = hovered;
@@ -2417,6 +2459,13 @@ void EditorComponent::PostUpdate()
 void EditorComponent::Render() const
 {
 	const Scene& scene = GetCurrentScene();
+	const CameraComponent& camera = GetCurrentEditorScene().camera;
+
+	// remove camera jittering
+	CameraComponent cam = *renderPath->camera;
+	cam.jitter = XMFLOAT2(0, 0);
+	cam.UpdateCamera();
+	const XMMATRIX VP = cam.GetViewProjection();
 
 	// Hovered item boxes:
 	if (GetGUI().IsVisible())
@@ -2630,72 +2679,6 @@ void EditorComponent::Render() const
 		if(dummy_enabled)
 		{
 			device->EventBegin("Reference Dummy", cmd);
-			static PipelineState pso;
-			if (!pso.IsValid())
-			{
-				static auto LoadShaders = [] {
-					PipelineStateDesc desc;
-					desc.vs = wi::renderer::GetShader(wi::enums::VSTYPE_VERTEXCOLOR);
-					desc.ps = wi::renderer::GetShader(wi::enums::PSTYPE_VERTEXCOLOR);
-					desc.il = wi::renderer::GetInputLayout(wi::enums::ILTYPE_VERTEXCOLOR);
-					desc.dss = wi::renderer::GetDepthStencilState(wi::enums::DSSTYPE_DEPTHDISABLED);
-					desc.rs = wi::renderer::GetRasterizerState(wi::enums::RSTYPE_DOUBLESIDED);
-					desc.bs = wi::renderer::GetBlendState(wi::enums::BSTYPE_TRANSPARENT);
-					desc.pt = PrimitiveTopology::TRIANGLELIST;
-					wi::graphics::GetDevice()->CreatePipelineState(&desc, &pso);
-				};
-				static wi::eventhandler::Handle handle = wi::eventhandler::Subscribe(wi::eventhandler::EVENT_RELOAD_SHADERS, [](uint64_t userdata) { LoadShaders(); });
-				LoadShaders();
-			}
-			struct Vertex
-			{
-				XMFLOAT4 position;
-				XMFLOAT4 color;
-			};
-
-			const float3* vertices = dummy_female::vertices;
-			size_t vertices_size = sizeof(dummy_female::vertices);
-			size_t vertices_count = arraysize(dummy_female::vertices);
-			const unsigned int* indices = dummy_female::indices;
-			size_t indices_size = sizeof(dummy_female::indices);
-			size_t indices_count = arraysize(dummy_female::indices);
-			if (dummy_male)
-			{
-				vertices = dummy_male::vertices;
-				vertices_size = sizeof(dummy_male::vertices);
-				vertices_count = arraysize(dummy_male::vertices);
-				indices = dummy_male::indices;
-				indices_size = sizeof(dummy_male::indices);
-				indices_count = arraysize(dummy_male::indices);
-			}
-
-			static GPUBuffer dummyBuffers[2];
-			if (!dummyBuffers[dummy_male].IsValid())
-			{
-				auto fill_data = [&](void* data) {
-					Vertex* gpu_vertices = (Vertex*)data;
-					for (size_t i = 0; i < vertices_count; ++i)
-					{
-						Vertex vert = {};
-						vert.position.x = vertices[i].x;
-						vert.position.y = vertices[i].y;
-						vert.position.z = vertices[i].z;
-						vert.position.w = 1;
-						vert.color = XMFLOAT4(1, 1, 1, 1);
-						std::memcpy(gpu_vertices + i, &vert, sizeof(vert));
-					}
-
-					uint32_t* gpu_indices = (uint32_t*)(gpu_vertices + vertices_count);
-					std::memcpy(gpu_indices, indices, indices_size);
-				};
-
-				GPUBufferDesc desc;
-				desc.size = indices_count * sizeof(uint32_t) + vertices_count * sizeof(Vertex);
-				desc.bind_flags = BindFlag::INDEX_BUFFER | BindFlag::VERTEX_BUFFER;
-				device->CreateBuffer2(&desc, fill_data, &dummyBuffers[dummy_male]);
-				device->SetName(&dummyBuffers[dummy_male], "dummyBuffer");
-			}
-
 			RenderPassImage rp[] = {
 				RenderPassImage::RenderTarget(&rt_dummyOutline, RenderPassImage::LoadOp::CLEAR),
 			};
@@ -2706,31 +2689,108 @@ void EditorComponent::Render() const
 			vp.height = (float)rt_dummyOutline.GetDesc().height;
 			device->BindViewports(1, &vp, cmd);
 
-			device->BindPipelineState(&pso, cmd);
+			if (dummy_male)
+			{
+				dummy::draw_male(XMMatrixTranslation(dummy_pos.x, dummy_pos.y, dummy_pos.z) * VP, XMFLOAT4(1, 1, 1, 1), false, cmd);
+			}
+			else
+			{
+				dummy::draw_female(XMMatrixTranslation(dummy_pos.x, dummy_pos.y, dummy_pos.z)* VP, XMFLOAT4(1, 1, 1, 1), false, cmd);
+			}
 
-			// remove camera jittering
-			CameraComponent cam = *renderPath->camera;
-			cam.jitter = XMFLOAT2(0, 0);
-			cam.UpdateCamera();
-			const XMMATRIX VP = cam.GetViewProjection();
+			device->RenderPassEnd(cmd);
+			device->EventEnd(cmd);
+		}
 
-			MiscCB sb;
-			XMStoreFloat4x4(&sb.g_xTransform, XMMatrixTranslation(dummy_pos.x, dummy_pos.y, dummy_pos.z) * VP);
-			sb.g_xColor = XMFLOAT4(1, 1, 1, 1);
-			device->BindDynamicConstantBuffer(sb, CB_GETBINDSLOT(MiscCB), cmd);
+		if (has_flag(componentsWnd.filter, ComponentsWindow::Filter::Metadata) && scene.metadatas.GetCount() > 0)
+		{
+			device->EventBegin("Metadata Dummy", cmd);
+			if (renderPath->getMSAASampleCount() > 1)
+			{
+				RenderPassImage rp[] = {
+					RenderPassImage::RenderTarget(&rt_metadataDummies_MSAA, RenderPassImage::LoadOp::CLEAR),
+					RenderPassImage::DepthStencil(renderPath->GetDepthStencil()),
+					RenderPassImage::Resolve(&rt_metadataDummies)
+				};
+				device->RenderPassBegin(rp, arraysize(rp), cmd);
+			}
+			else
+			{
+				RenderPassImage rp[] = {
+					RenderPassImage::RenderTarget(&rt_metadataDummies, RenderPassImage::LoadOp::CLEAR),
+					RenderPassImage::DepthStencil(renderPath->GetDepthStencil()),
+				};
+				device->RenderPassBegin(rp, arraysize(rp), cmd);
+			}
 
-			const GPUBuffer* vbs[] = {
-				&dummyBuffers[dummy_male],
-			};
-			const uint32_t strides[] = {
-				sizeof(Vertex),
-			};
-			const uint64_t offsets[] = {
-				0,
-			};
-			device->BindVertexBuffers(vbs, 0, arraysize(vbs), strides, offsets, cmd);
-			device->BindIndexBuffer(&dummyBuffers[dummy_male], IndexBufferFormat::UINT32, vertices_count * sizeof(Vertex), cmd);
-			device->DrawIndexed((uint32_t)indices_count, 0, 0, cmd);
+			Viewport vp;
+			vp.width = (float)rt_metadataDummies.GetDesc().width;
+			vp.height = (float)rt_metadataDummies.GetDesc().height;
+			device->BindViewports(1, &vp, cmd);
+
+			static float tim = 0;
+			tim += scene.dt;
+			float sca = lerp(0.4f, 0.8f, std::abs(std::sin(tim * 2)));
+
+			XMMATRIX ROT = XMLoadFloat3x3(&camera.rotationMatrix);
+			wi::font::Params fp;
+			fp.customProjection = &VP;
+			fp.customRotation = &ROT;
+			fp.scaling = 0.02f;
+			fp.h_align = wi::font::WIFALIGN_CENTER;
+			fp.v_align = wi::font::WIFALIGN_BOTTOM;
+			fp.enableDepthTest();
+
+			for (size_t i = 0; i < scene.metadatas.GetCount(); ++i)
+			{
+				Entity entity = scene.metadatas.GetEntity(i);
+				if (!scene.transforms.Contains(entity))
+					continue;
+				const TransformComponent& transform = *scene.transforms.GetComponent(entity);
+				const MetadataComponent& metadata = scene.metadatas[i];
+
+				fp.position = transform.GetPosition();
+
+				switch (metadata.preset)
+				{
+				default:
+					break;
+				case MetadataComponent::Preset::Waypoint:
+					fp.position.y += 1;
+					fp.color = wi::Color::fromFloat4(XMFLOAT4(1, 0.2f, 0.5f, 1));
+					wi::font::Draw("Waypoint", fp, cmd);
+					dummy::draw_waypoint(XMLoadFloat4x4(&transform.world) * VP, fp.color, true, cmd);
+					break;
+				case MetadataComponent::Preset::Enemy:
+					fp.position.y += 2;
+					fp.color = wi::Color::fromFloat4(XMFLOAT4(0.8f, 0.2f, 0.2f, 1));
+					wi::font::Draw("Enemy", fp, cmd);
+					dummy::draw_direction(XMMatrixRotationY(XM_PI) * XMMatrixTranslation(0, 0.1f, 0) * XMLoadFloat4x4(&transform.world) * VP, fp.color, true, cmd);
+					dummy::draw_soldier(XMLoadFloat4x4(&transform.world) * VP, fp.color, true, cmd);
+					break;
+				case MetadataComponent::Preset::Player:
+					fp.position.y += 2;
+					fp.color = wi::Color::fromFloat4(XMFLOAT4(0.2f, 0.8f, 0.6f, 1));
+					wi::font::Draw("Player", fp, cmd);
+					dummy::draw_direction(XMMatrixRotationY(XM_PI) * XMMatrixTranslation(0, 0.1f, 0) * XMLoadFloat4x4(&transform.world) * VP, fp.color, true, cmd);
+					dummy::draw_male(XMLoadFloat4x4(&transform.world) * VP, fp.color, true, cmd);
+					break;
+				case MetadataComponent::Preset::NPC:
+					fp.position.y += 1.8f;
+					fp.color = wi::Color::fromFloat4(XMFLOAT4(0.2f, 0.6f, 0.8f, 1));
+					wi::font::Draw("NPC", fp, cmd);
+					dummy::draw_direction(XMMatrixRotationY(XM_PI) * XMMatrixTranslation(0, 0.1f, 0) * XMLoadFloat4x4(&transform.world) * VP, fp.color, true, cmd);
+					dummy::draw_female(XMLoadFloat4x4(&transform.world) * VP, fp.color, true, cmd);
+					break;
+				case MetadataComponent::Preset::Pickup:
+					fp.position.y += 1;
+					fp.color = wi::Color::fromFloat4(XMFLOAT4(1, 0.8f, 0.4f, 1));
+					wi::font::Draw("Pickup", fp, cmd);
+					dummy::draw_pickup(XMMatrixScaling(sca, sca, sca) * XMMatrixTranslation(0, 0.5f, 0) * XMLoadFloat4x4(&transform.world) * VP, fp.color, true, cmd);
+					break;
+				}
+			}
+
 			device->RenderPassEnd(cmd);
 			device->EventEnd(cmd);
 		}
@@ -2738,22 +2798,40 @@ void EditorComponent::Render() const
 		// Full resolution:
 		{
 			const Texture& render_result = renderPath->GetRenderResult();
-			RenderPassImage rp[] = {
-				RenderPassImage::RenderTarget(
-					&editor_rendertarget,
-					RenderPassImage::LoadOp::CLEAR,
-					RenderPassImage::StoreOp::DONTCARE,
-					ResourceState::RENDERTARGET,
-					ResourceState::RENDERTARGET
-				),
-				RenderPassImage::DepthStencil(
-					&editor_depthbuffer,
-					RenderPassImage::LoadOp::CLEAR,
-					RenderPassImage::StoreOp::DONTCARE
-				),
-				RenderPassImage::Resolve(&render_result),
-			};
-			device->RenderPassBegin(rp, arraysize(rp), cmd);
+			if (getMSAASampleCount() > 1)
+			{
+				RenderPassImage rp[] = {
+					RenderPassImage::RenderTarget(
+						&editor_rendertarget,
+						RenderPassImage::LoadOp::CLEAR,
+						RenderPassImage::StoreOp::DONTCARE,
+						ResourceState::RENDERTARGET,
+						ResourceState::RENDERTARGET
+					),
+					RenderPassImage::DepthStencil(
+						&editor_depthbuffer,
+						RenderPassImage::LoadOp::CLEAR,
+						RenderPassImage::StoreOp::DONTCARE
+					),
+					RenderPassImage::Resolve(&render_result),
+				};
+				device->RenderPassBegin(rp, arraysize(rp), cmd);
+			}
+			else
+			{
+				RenderPassImage rp[] = {
+					RenderPassImage::RenderTarget(
+						&render_result,
+						RenderPassImage::LoadOp::CLEAR
+					),
+					RenderPassImage::DepthStencil(
+						&editor_depthbuffer,
+						RenderPassImage::LoadOp::CLEAR,
+						RenderPassImage::StoreOp::DONTCARE
+					),
+				};
+				device->RenderPassBegin(rp, arraysize(rp), cmd);
+			}
 
 			Viewport vp;
 			vp.width = (float)editor_depthbuffer.GetDesc().width;
@@ -2791,16 +2869,6 @@ void EditorComponent::Render() const
 				dummyColorBlinking.w = wi::math::Lerp(0.4f, 1, selectionColorIntensity);
 				wi::renderer::Postprocess_Outline(rt_dummyOutline, cmd, 0.1f, 1, dummyColorBlinking);
 			}
-
-			const CameraComponent& camera = GetCurrentEditorScene().camera;
-
-			const Scene& scene = GetCurrentScene();
-
-			// remove camera jittering
-			CameraComponent cam = *renderPath->camera;
-			cam.jitter = XMFLOAT2(0, 0);
-			cam.UpdateCamera();
-			const XMMATRIX VP = cam.GetViewProjection();
 
 			MiscCB sb;
 			XMStoreFloat4x4(&sb.g_xTransform, VP);
@@ -3240,8 +3308,49 @@ void EditorComponent::Render() const
 						}
 					}
 
-
 					wi::font::Draw(ICON_VOXELGRID, fp, cmd);
+				}
+			}
+			if (has_flag(componentsWnd.filter, ComponentsWindow::Filter::Metadata))
+			{
+				if (scene.metadatas.GetCount() > 0)
+				{
+					wi::image::Params fx;
+					fx.enableFullScreen();
+					fx.blendFlag = wi::enums::BLENDMODE_PREMULTIPLIED;
+					fx.color.x = wi::math::Lerp(fx.color.x * 0.4f, fx.color.x, selectionColorIntensity);
+					fx.color.y = wi::math::Lerp(fx.color.y * 0.4f, fx.color.y, selectionColorIntensity);
+					fx.color.z = wi::math::Lerp(fx.color.z * 0.4f, fx.color.z, selectionColorIntensity);
+					fx.color.w = 0.6f;
+					//fx.color.w = wi::math::Lerp(fx.color.w * 0.8f, fx.color.w, selectionColorIntensity);
+					wi::image::Draw(&rt_metadataDummies, fx, cmd);
+				}
+
+				for (size_t i = 0; i < scene.metadatas.GetCount(); ++i)
+				{
+					Entity entity = scene.metadatas.GetEntity(i);
+					if (!scene.transforms.Contains(entity))
+						continue;
+					const TransformComponent& transform = *scene.transforms.GetComponent(entity);
+
+					fp.position = transform.GetPosition();
+					fp.scaling = scaling * wi::math::Distance(transform.GetPosition(), camera.Eye);
+					fp.color = inactiveEntityColor;
+
+					if (hovered.entity == entity)
+					{
+						fp.color = hoveredEntityColor;
+					}
+					for (auto& picked : translator.selected)
+					{
+						if (picked.entity == entity)
+						{
+							fp.color = selectedEntityColor;
+							break;
+						}
+					}
+
+					wi::font::Draw(ICON_METADATA, fp, cmd);
 				}
 			}
 			if (bone_picking)
@@ -3686,11 +3795,11 @@ void EditorComponent::ResizeViewport3D()
 
 		GraphicsDevice* device = wi::graphics::GetDevice();
 
+		XMUINT2 internalResolution = renderPath->GetInternalResolution();
+
 		if (renderPath->GetDepthStencil() != nullptr)
 		{
 			bool success = false;
-
-			XMUINT2 internalResolution = renderPath->GetInternalResolution();
 
 			TextureDesc desc;
 			desc.width = internalResolution.x;
@@ -3742,11 +3851,33 @@ void EditorComponent::ResizeViewport3D()
 			device->CreateTexture(&desc, nullptr, &editor_depthbuffer);
 			device->SetName(&editor_depthbuffer, "editor_depthbuffer");
 
+			if (getMSAASampleCount() > 1)
+			{
+				desc.format = Format::R8G8B8A8_UNORM;
+				desc.bind_flags = BindFlag::RENDER_TARGET;
+				desc.layout = ResourceState::RENDERTARGET;
+				device->CreateTexture(&desc, nullptr, &editor_rendertarget);
+				device->SetName(&editor_rendertarget, "editor_rendertarget");
+			}
+		}
+
+		{
+			TextureDesc desc;
+			desc.width = internalResolution.x;
+			desc.height = internalResolution.y;
 			desc.format = Format::R8G8B8A8_UNORM;
-			desc.bind_flags = BindFlag::RENDER_TARGET;
-			desc.layout = ResourceState::RENDERTARGET;
-			device->CreateTexture(&desc, nullptr, &editor_rendertarget);
-			device->SetName(&editor_rendertarget, "editor_rendertarget");
+			desc.bind_flags = BindFlag::RENDER_TARGET | BindFlag::SHADER_RESOURCE;
+			device->CreateTexture(&desc, nullptr, &rt_metadataDummies);
+			device->SetName(&rt_metadataDummies, "rt_metadataDummies");
+
+			if (renderPath->getMSAASampleCount() > 1)
+			{
+				desc.sample_count = renderPath->getMSAASampleCount();
+				desc.bind_flags = BindFlag::RENDER_TARGET;
+				desc.misc_flags = ResourceMiscFlag::TRANSIENT_ATTACHMENT;
+				device->CreateTexture(&desc, nullptr, &rt_metadataDummies_MSAA);
+				device->SetName(&rt_metadataDummies_MSAA, "rt_metadataDummies_MSAA");
+			}
 		}
 	}
 
@@ -3769,13 +3900,13 @@ void EditorComponent::ClearSelected()
 {
 	translator.selected.clear();
 }
-void EditorComponent::AddSelected(Entity entity)
+void EditorComponent::AddSelected(Entity entity, bool allow_refocus)
 {
 	wi::scene::PickResult res;
 	res.entity = entity;
-	AddSelected(res);
+	AddSelected(res, allow_refocus);
 }
-void EditorComponent::AddSelected(const PickResult& picked)
+void EditorComponent::AddSelected(const PickResult& picked, bool allow_refocus)
 {
 	wi::scene::Scene& scene = GetCurrentScene();
 
@@ -3795,6 +3926,10 @@ void EditorComponent::AddSelected(const PickResult& picked)
 	if (!removal)
 	{
 		translator.selected.push_back(picked);
+		if (allow_refocus)
+		{
+			componentsWnd.entityTree.FocusOnItemByUserdata(picked.entity);
+		}
 	}
 }
 bool EditorComponent::IsSelected(Entity entity) const
@@ -4969,6 +5104,7 @@ void EditorComponent::RefreshSceneList()
 			componentsWnd.spriteWnd.SetEntity(wi::ecs::INVALID_ENTITY);
 			componentsWnd.fontWnd.SetEntity(wi::ecs::INVALID_ENTITY);
 			componentsWnd.voxelGridWnd.SetEntity(wi::ecs::INVALID_ENTITY);
+			componentsWnd.metadataWnd.SetEntity(wi::ecs::INVALID_ENTITY);
 
 			componentsWnd.RefreshEntityTree();
 			ResetHistory();

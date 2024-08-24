@@ -96,10 +96,7 @@ void RTReflection_ClosestHit(inout RayPayload payload, in BuiltInTriangleInterse
 
 	Surface surface;
 	surface.init();
-	if (HitKind() != HIT_KIND_TRIANGLE_FRONT_FACE)
-	{
-		surface.flags |= SURFACE_FLAG_BACKFACE;
-	}
+	surface.SetBackface(HitKind() != HIT_KIND_TRIANGLE_FRONT_FACE);
 	if (!surface.load(prim, attr.barycentrics))
 		return;
 
@@ -121,9 +118,9 @@ void RTReflection_ClosestHit(inout RayPayload payload, in BuiltInTriangleInterse
 		lighting.create(0, 0, GetAmbient(surface.N), 0);
 
 		[loop]
-		for (uint iterator = 0; iterator < GetFrame().lightarray_count; iterator++)
+		for (uint iterator = 0; iterator < GetFrame().light_oterator.item_count(); iterator++)
 		{
-			ShaderEntity light = load_entity(GetFrame().lightarray_offset + iterator);
+			ShaderEntity light = load_entity(lights().forst_item() + iterator);
 			if ((light.layerMask & surface.material.layerMask) == 0)
 				continue;
 

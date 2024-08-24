@@ -1,9 +1,138 @@
 #ifndef WI_SHADER_GLOBALS_HF
 #define WI_SHADER_GLOBALS_HF
+
+// Enable / disable FP16 shader ops here
+//	Note: when using -enable-16bit-types compile flag, half will be always FP16
+#if 1
+#ifndef __XBOX_SCARLETT // currently there is some issue on xbox
+#ifndef __PSSL__ // min types are already redefined on PS5
+#define half min16float
+#define half2 min16float2
+#define half3 min16float3
+#define half4 min16float4
+#define half3x3 min16float3x3
+#define half3x4 min16float3x4
+#define half4x4 min16float4x4
+#endif // __PSSL__
+#endif // __XBOX_SCARLETT
+#endif
+
 #include "ColorSpaceUtility.hlsli"
 #include "PixelPacking_R11G11B10.hlsli"
 #include "PixelPacking_RGBE.hlsli"
 #include "ShaderInterop.h"
+
+inline uint pack_unitvector(in half3 value)
+{
+	uint retVal = 0;
+	retVal |= (uint)((value.x * 0.5 + 0.5) * 255.0) << 0u;
+	retVal |= (uint)((value.y * 0.5 + 0.5) * 255.0) << 8u;
+	retVal |= (uint)((value.z * 0.5 + 0.5) * 255.0) << 16u;
+	return retVal;
+}
+inline half3 unpack_unitvector(in uint value)
+{
+	half3 retVal;
+	retVal.x = (half)((value >> 0u) & 0xFF) / 255.0 * 2 - 1;
+	retVal.y = (half)((value >> 8u) & 0xFF) / 255.0 * 2 - 1;
+	retVal.z = (half)((value >> 16u) & 0xFF) / 255.0 * 2 - 1;
+	return retVal;
+}
+
+inline uint pack_utangent(in half4 value)
+{
+	uint retVal = 0;
+	retVal |= (uint)((value.x) * 255.0) << 0u;
+	retVal |= (uint)((value.y) * 255.0) << 8u;
+	retVal |= (uint)((value.z) * 255.0) << 16u;
+	retVal |= (uint)((value.w) * 255.0) << 24u;
+	return retVal;
+}
+inline half4 unpack_utangent(in uint value)
+{
+	half4 retVal;
+	retVal.x = (half)((value >> 0u) & 0xFF) / 255.0;
+	retVal.y = (half)((value >> 8u) & 0xFF) / 255.0;
+	retVal.z = (half)((value >> 16u) & 0xFF) / 255.0;
+	retVal.w = (half)((value >> 24u) & 0xFF) / 255.0;
+	return retVal;
+}
+
+inline uint pack_rgba(in half4 value)
+{
+	uint retVal = 0;
+	retVal |= (uint)(value.x * 255.0) << 0u;
+	retVal |= (uint)(value.y * 255.0) << 8u;
+	retVal |= (uint)(value.z * 255.0) << 16u;
+	retVal |= (uint)(value.w * 255.0) << 24u;
+	return retVal;
+}
+inline half4 unpack_rgba(in uint value)
+{
+	half4 retVal;
+	retVal.x = (half)((value >> 0u) & 0xFF) / 255.0;
+	retVal.y = (half)((value >> 8u) & 0xFF) / 255.0;
+	retVal.z = (half)((value >> 16u) & 0xFF) / 255.0;
+	retVal.w = (half)((value >> 24u) & 0xFF) / 255.0;
+	return retVal;
+}
+
+inline uint pack_half2(in half2 value)
+{
+	uint retVal = 0;
+	retVal = f32tof16(value.x) | (f32tof16(value.y) << 16u);
+	return retVal;
+}
+inline half2 unpack_half2(in uint value)
+{
+	half2 retVal;
+	retVal.x = (half)f16tof32(value.x);
+	retVal.y = (half)f16tof32(value.x >> 16u);
+	return retVal;
+}
+inline uint2 pack_half3(in half3 value)
+{
+	uint2 retVal = 0;
+	retVal.x = f32tof16(value.x) | (f32tof16(value.y) << 16u);
+	retVal.y = f32tof16(value.z);
+	return retVal;
+}
+inline half3 unpack_half3(in uint2 value)
+{
+	half3 retVal;
+	retVal.x = (half)f16tof32(value.x);
+	retVal.y = (half)f16tof32(value.x >> 16u);
+	retVal.z = (half)f16tof32(value.y);
+	return retVal;
+}
+inline uint2 pack_half4(in float4 value)
+{
+	uint2 retVal = 0;
+	retVal.x = f32tof16(value.x) | (f32tof16(value.y) << 16u);
+	retVal.y = f32tof16(value.z) | (f32tof16(value.w) << 16u);
+	return retVal;
+}
+inline half4 unpack_half4(in uint2 value)
+{
+	half4 retVal;
+	retVal.x = (half)f16tof32(value.x);
+	retVal.y = (half)f16tof32(value.x >> 16u);
+	retVal.z = (half)f16tof32(value.y);
+	retVal.w = (half)f16tof32(value.y >> 16u);
+	return retVal;
+}
+
+inline uint pack_pixel(uint2 value)
+{
+	return (value.x & 0xFFFF) | ((value.y & 0xFFFF) << 16u);
+}
+inline uint2 unpack_pixel(uint value)
+{
+	uint2 retVal;
+	retVal.x = value & 0xFFFF;
+	retVal.y = (value >> 16u) & 0xFFFF;
+	return retVal;
+}
 
 // The root signature will affect shader compilation for DX12.
 //	The shader compiler will take the defined name: WICKED_ENGINE_DEFAULT_ROOTSIGNATURE and use it as root signature
@@ -237,27 +366,27 @@ RWTexture2D<uint4> bindless_rwtextures_uint4[] : register(space36);
 static const BindlessResource<StructuredBuffer<ShaderMeshInstance>> bindless_structured_meshinstance;
 static const BindlessResource<StructuredBuffer<ShaderGeometry>> bindless_structured_geometry;
 static const BindlessResource<StructuredBuffer<ShaderMeshlet>> bindless_structured_meshlet;
+static const BindlessResource<StructuredBuffer<ShaderCluster>> bindless_structured_cluster;
+static const BindlessResource<StructuredBuffer<ShaderClusterBounds>> bindless_structured_cluster_bounds;
 static const BindlessResource<StructuredBuffer<ShaderMaterial>> bindless_structured_material;
-static const BindlessResource<StructuredBuffer<ShaderEntity>> bindless_structured_entity;
-static const BindlessResource<StructuredBuffer<float4x4>> bindless_structured_matrix;
 static const BindlessResource<StructuredBuffer<uint>> bindless_structured_uint;
 static const BindlessResource<StructuredBuffer<ShaderTerrainChunk>> bindless_structured_terrain_chunks;
 #elif defined(__spirv__)
 [[vk::binding(0, DESCRIPTOR_SET_BINDLESS_STORAGE_BUFFER)]] StructuredBuffer<ShaderMeshInstance> bindless_structured_meshinstance[];
 [[vk::binding(0, DESCRIPTOR_SET_BINDLESS_STORAGE_BUFFER)]] StructuredBuffer<ShaderGeometry> bindless_structured_geometry[];
 [[vk::binding(0, DESCRIPTOR_SET_BINDLESS_STORAGE_BUFFER)]] StructuredBuffer<ShaderMeshlet> bindless_structured_meshlet[];
+[[vk::binding(0, DESCRIPTOR_SET_BINDLESS_STORAGE_BUFFER)]] StructuredBuffer<ShaderCluster> bindless_structured_cluster[];
+[[vk::binding(0, DESCRIPTOR_SET_BINDLESS_STORAGE_BUFFER)]] StructuredBuffer<ShaderClusterBounds> bindless_structured_cluster_bounds[];
 [[vk::binding(0, DESCRIPTOR_SET_BINDLESS_STORAGE_BUFFER)]] StructuredBuffer<ShaderMaterial> bindless_structured_material[];
-[[vk::binding(0, DESCRIPTOR_SET_BINDLESS_STORAGE_BUFFER)]] StructuredBuffer<ShaderEntity> bindless_structured_entity[];
-[[vk::binding(0, DESCRIPTOR_SET_BINDLESS_STORAGE_BUFFER)]] StructuredBuffer<float4x4> bindless_structured_matrix[];
 [[vk::binding(0, DESCRIPTOR_SET_BINDLESS_STORAGE_BUFFER)]] StructuredBuffer<uint> bindless_structured_uint[];
 [[vk::binding(0, DESCRIPTOR_SET_BINDLESS_STORAGE_BUFFER)]] StructuredBuffer<ShaderTerrainChunk> bindless_structured_terrain_chunks[];
 #else
 StructuredBuffer<ShaderMeshInstance> bindless_structured_meshinstance[] : register(space37);
 StructuredBuffer<ShaderGeometry> bindless_structured_geometry[] : register(space38);
 StructuredBuffer<ShaderMeshlet> bindless_structured_meshlet[] : register(space39);
-StructuredBuffer<ShaderMaterial> bindless_structured_material[] : register(space40);
-StructuredBuffer<ShaderEntity> bindless_structured_entity[] : register(space41);
-StructuredBuffer<float4x4> bindless_structured_matrix[] : register(space42);
+StructuredBuffer<ShaderCluster> bindless_structured_cluster[] : register(space40);
+StructuredBuffer<ShaderClusterBounds> bindless_structured_cluster_bounds[] : register(space41);
+StructuredBuffer<ShaderMaterial> bindless_structured_material[] : register(space42);
 StructuredBuffer<uint> bindless_structured_uint[] : register(space43);
 StructuredBuffer<ShaderTerrainChunk> bindless_structured_terrain_chunks[] : register(space44);
 #endif // __spirv__
@@ -296,19 +425,19 @@ inline ShaderMaterial load_material(uint materialIndex)
 }
 uint load_entitytile(uint tileIndex)
 {
+	uint offset = 0;
 #ifdef TRANSPARENT
-	return bindless_structured_uint[GetCamera().buffer_entitytiles_index][GetCamera().entity_culling_tile_bucket_count_flat + tileIndex];
-#else
-	return bindless_structured_uint[GetCamera().buffer_entitytiles_index][tileIndex];
+	offset += GetCamera().entity_culling_tile_bucket_count_flat;
 #endif // TRANSPARENT
+	return bindless_structured_uint[GetCamera().buffer_entitytiles_index][offset + tileIndex];
 }
 inline ShaderEntity load_entity(uint entityIndex)
 {
-	return bindless_structured_entity[GetFrame().buffer_entity_index][entityIndex];
+	return GetFrame().entityArray[entityIndex];
 }
 inline float4x4 load_entitymatrix(uint matrixIndex)
 {
-	return bindless_structured_matrix[GetFrame().buffer_entity_index][SHADER_ENTITY_COUNT + matrixIndex];
+	return GetFrame().matrixArray[matrixIndex];
 }
 inline void write_mipmap_feedback(uint materialIndex, float4 uvsets_dx, float4 uvsets_dy)
 {
@@ -337,37 +466,82 @@ inline void write_mipmap_feedback(uint materialIndex, uint resolution0, uint res
 	}
 }
 
+inline ShaderEntityIterator lights()
+{
+	ShaderEntityIterator iter;
+	iter.value = GetFrame().lights;
+	return iter;
+}
+inline ShaderEntityIterator directional_lights()
+{
+	ShaderEntityIterator iter;
+	iter.value = GetFrame().directional_lights;
+	return iter;
+}
+inline ShaderEntityIterator spotlights()
+{
+	ShaderEntityIterator iter;
+	iter.value = GetFrame().spotlights;
+	return iter;
+}
+inline ShaderEntityIterator pointlights()
+{
+	ShaderEntityIterator iter;
+	iter.value = GetFrame().pointlights;
+	return iter;
+}
+inline ShaderEntityIterator probes()
+{
+	ShaderEntityIterator iter;
+	iter.value = GetFrame().probes;
+	return iter;
+}
+inline ShaderEntityIterator decals()
+{
+	ShaderEntityIterator iter;
+	iter.value = GetFrame().decals;
+	return iter;
+}
+inline ShaderEntityIterator forces()
+{
+	ShaderEntityIterator iter;
+	iter.value = GetFrame().forces;
+	return iter;
+}
+
 struct PrimitiveID
 {
 	uint primitiveIndex;
 	uint instanceIndex;
 	uint subsetIndex;
+	bool maybe_clustered;
 
 	// These packing methods require meshlet data, and pack into 32 bits:
 	inline uint pack()
 	{
-		// 24 bit meshletIndex
-		// 8  bit meshletPrimitiveIndex
+		// 25 bit meshletIndex
+		// 7  bit meshletPrimitiveIndex
 		ShaderMeshInstance inst = load_instance(instanceIndex);
 		ShaderGeometry geometry = load_geometry(inst.geometryOffset + subsetIndex);
 		uint meshletIndex = inst.meshletOffset + geometry.meshletOffset + primitiveIndex / MESHLET_TRIANGLE_COUNT;
 		meshletIndex += 1; // indicate that it is valid
-		meshletIndex &= ~0u >> 8u; // mask 24 active bits
+		meshletIndex &= ~0u >> 7u; // mask 25 active bits
 		uint meshletPrimitiveIndex = primitiveIndex % MESHLET_TRIANGLE_COUNT;
-		meshletPrimitiveIndex &= 0xFF; // mask 8 active bits
-		meshletPrimitiveIndex <<= 24u;
+		meshletPrimitiveIndex &= 0x7F; // mask 7 active bits
+		meshletPrimitiveIndex <<= 25u;
 		return meshletPrimitiveIndex | meshletIndex;
 	}
 	inline void unpack(uint value)
 	{
-		uint meshletIndex = value & (~0u >> 8u);
+		uint meshletIndex = value & (~0u >> 7u);
 		meshletIndex -= 1; // remove valid check
-		uint meshletPrimitiveIndex = (value >> 24u) & 0xFF;
+		uint meshletPrimitiveIndex = (value >> 25u) & 0x7F;
 		ShaderMeshlet meshlet = load_meshlet(meshletIndex);
 		ShaderMeshInstance inst = load_instance(meshlet.instanceIndex);
 		primitiveIndex = meshlet.primitiveOffset + meshletPrimitiveIndex;
 		instanceIndex = meshlet.instanceIndex;
 		subsetIndex = meshlet.geometryIndex - inst.geometryOffset;
+		maybe_clustered = true;
 	}
 
 	// These packing methods don't need meshlets, but they are packed into 64 bits:
@@ -383,7 +557,33 @@ struct PrimitiveID
 		primitiveIndex = value.x - 1; // remove valid check
 		instanceIndex = value.y & 0xFFFFFF;
 		subsetIndex = (value.y >> 24u) & 0xFF;
+		maybe_clustered = false;
 	}
+
+	uint3 tri()
+	{
+		ShaderMeshInstance inst = load_instance(instanceIndex);
+		ShaderGeometry geometry = load_geometry(inst.geometryOffset + subsetIndex);
+		if (maybe_clustered && geometry.vb_clu >= 0)
+		{
+			const uint clusterID = primitiveIndex >> 7u;
+			const uint triangleID = primitiveIndex & 0x7F;
+			ShaderCluster cluster = bindless_structured_cluster[NonUniformResourceIndex(geometry.vb_clu)][clusterID];
+			uint i0 = cluster.vertices[cluster.triangles[triangleID].i0()];
+			uint i1 = cluster.vertices[cluster.triangles[triangleID].i1()];
+			uint i2 = cluster.vertices[cluster.triangles[triangleID].i2()];
+			return uint3(i0, i1, i2);
+		}
+		const uint startIndex = primitiveIndex * 3 + geometry.indexOffset;
+		Buffer<uint> indexBuffer = bindless_buffers_uint[NonUniformResourceIndex(geometry.ib)];
+		uint i0 = indexBuffer[startIndex + 0];
+		uint i1 = indexBuffer[startIndex + 1];
+		uint i2 = indexBuffer[startIndex + 2];
+		return uint3(i0, i1, i2);
+	}
+	uint i0() { return tri().x; }
+	uint i1() { return tri().y; }
+	uint i2() { return tri().z; }
 };
 
 #define texture_random64x64 bindless_textures[GetFrame().texture_random64x64_index]
@@ -396,6 +596,7 @@ struct PrimitiveID
 #define texture_cameravolumelut bindless_textures3D[GetFrame().texture_cameravolumelut_index]
 #define texture_wind bindless_textures3D[GetFrame().texture_wind_index]
 #define texture_wind_prev bindless_textures3D[GetFrame().texture_wind_prev_index]
+#define texture_caustics bindless_textures[GetFrame().texture_caustics_index]
 #define scene_acceleration_structure bindless_accelerationstructures[GetScene().TLAS]
 
 #define texture_depth bindless_textures_float[GetCamera().texture_depth_index]
@@ -406,17 +607,21 @@ struct PrimitiveID
 #define texture_normal bindless_textures_float2[GetCamera().texture_normal_index]
 #define texture_roughness bindless_textures_float[GetCamera().texture_roughness_index]
 
-static const float PI = 3.14159265358979323846;
-static const float SQRT2 = 1.41421356237309504880;
-static const float FLT_MAX = 3.402823466e+38;
-static const float FLT_EPSILON = 1.192092896e-07;
-static const float GOLDEN_RATIO = 1.6180339887;
-static const float M_TO_SKY_UNIT = 0.001f; // Engine units are in meters
-static const float SKY_UNIT_TO_M = rcp(M_TO_SKY_UNIT);
+// Note: defines can be better for choosing between half/float by compiler than "static const float"
+#define PI 3.14159265358979323846
+#define SQRT2 1.41421356237309504880
+#define FLT_MAX 3.402823466e+38
+#define FLT_EPSILON 1.192092896e-07
+#define GOLDEN_RATIO 1.6180339887
+#define M_TO_SKY_UNIT 0.001
+#define SKY_UNIT_TO_M rcp(M_TO_SKY_UNIT)
+#define MEDIUMP_FLT_MAX 65504.0
 
 #define sqr(a) ((a)*(a))
-#define pow5(x) pow(x, 5)
+#define pow5(a) ((a)*(a)*(a)*(a)*(a))
 #define arraysize(a) (sizeof(a) / sizeof(a[0]))
+#define saturateMediump(x) min(x, MEDIUMP_FLT_MAX)
+#define highp
 
 template<typename T>
 float max3(T v)
@@ -495,19 +700,13 @@ float4 med3(float4 a, float4 b, float4 c)
 //	a2 : attribute at triangle corner 2
 //  bary : (u,v) barycentrics [same as you get from raytracing]; w is computed as 1 - u - w
 //	computation can be also written as: p0 * w + p1 * u + p2 * v
-inline float attribute_at_bary(in float a0, in float a1, in float a2, in float2 bary)
+template<typename T>
+inline T attribute_at_bary(in T a0, in T a1, in T a2, in float2 bary)
 {
 	return mad(a0, 1 - bary.x - bary.y, mad(a1, bary.x, a2 * bary.y));
 }
-inline float2 attribute_at_bary(in float2 a0, in float2 a1, in float2 a2, in float2 bary)
-{
-	return mad(a0, 1 - bary.x - bary.y, mad(a1, bary.x, a2 * bary.y));
-}
-inline float3 attribute_at_bary(in float3 a0, in float3 a1, in float3 a2, in float2 bary)
-{
-	return mad(a0, 1 - bary.x - bary.y, mad(a1, bary.x, a2 * bary.y));
-}
-inline float4 attribute_at_bary(in float4 a0, in float4 a1, in float4 a2, in float2 bary)
+template<typename T>
+inline T attribute_at_bary(in T a0, in T a1, in T a2, in half2 bary)
 {
 	return mad(a0, 1 - bary.x - bary.y, mad(a1, bary.x, a2 * bary.y));
 }
@@ -519,11 +718,15 @@ inline float bilinear(float4 gather, float2 pixel_frac)
 	const float bottom_row = lerp(gather.x, gather.y, pixel_frac.x);
 	return lerp(top_row, bottom_row, pixel_frac.y);
 }
+inline half bilinear(half4 gather, half2 pixel_frac)
+{
+	const half top_row = lerp(gather.w, gather.z, pixel_frac.x);
+	const half bottom_row = lerp(gather.x, gather.y, pixel_frac.x);
+	return lerp(top_row, bottom_row, pixel_frac.y);
+}
 
-inline bool is_saturated(float a) { return a == saturate(a); }
-inline bool is_saturated(float2 a) { return all(a == saturate(a)); }
-inline bool is_saturated(float3 a) { return all(a == saturate(a)); }
-inline bool is_saturated(float4 a) { return all(a == saturate(a)); }
+template<typename T>
+inline bool is_saturated(T a) { return all(a == saturate(a)); }
 
 inline uint align(uint value, uint alignment)
 {
@@ -548,6 +751,12 @@ inline float2 uv_to_clipspace(in float2 uv)
 	clipspace.y *= -1;
 	return clipspace;
 }
+inline half2 uv_to_clipspace(in half2 uv)
+{
+	half2 clipspace = uv * 2 - 1;
+	clipspace.y *= -1;
+	return clipspace;
+}
 inline float2 clipspace_to_uv(in float2 clipspace)
 {
 	return clipspace * float2(0.5, -0.5) + 0.5;
@@ -555,6 +764,14 @@ inline float2 clipspace_to_uv(in float2 clipspace)
 inline float3 clipspace_to_uv(in float3 clipspace)
 {
 	return clipspace * float3(0.5, -0.5, 0.5) + 0.5;
+}
+inline half2 clipspace_to_uv(in half2 clipspace)
+{
+	return clipspace * half2(0.5, -0.5) + 0.5;
+}
+inline half3 clipspace_to_uv(in half3 clipspace)
+{
+	return clipspace * half3(0.5, -0.5, 0.5) + 0.5;
 }
 
 template<typename T>
@@ -569,18 +786,60 @@ inline float3 GetHorizonColor() { return GetWeather().horizon.rgb; }
 inline float3 GetZenithColor() { return GetWeather().zenith.rgb; }
 inline float3 GetAmbientColor() { return GetWeather().ambient.rgb; }
 inline uint2 GetInternalResolution() { return GetCamera().internal_resolution; }
+inline float GetDeltaTime() { return GetFrame().delta_time; }
 inline float GetTime() { return GetFrame().time; }
 inline float GetTimePrev() { return GetFrame().time_previous; }
-inline uint2 GetTemporalAASampleRotation() { return uint2((GetFrame().temporalaa_samplerotation >> 0u) & 0x000000FF, (GetFrame().temporalaa_samplerotation >> 8) & 0x000000FF); }
+inline float GetFrameCount() { return GetFrame().frame_count; }
+inline min16uint2 GetTemporalAASampleRotation() { return uint2(GetFrame().temporalaa_samplerotation & 0xFF, (GetFrame().temporalaa_samplerotation >> 8u) & 0xFF); }
 inline bool IsStaticSky() { return GetScene().globalenvmap >= 0; }
+
+// Mie scaterring approximated with Henyey-Greenstein phase function.
+//	https://www.alexandre-pestana.com/volumetric-lights/
+#define G_SCATTERING 0.66
+float ComputeScattering(float lightDotView)
+{
+	float result = 1.0 - G_SCATTERING * G_SCATTERING;
+	result /= (4.0 * PI * pow(1.0 + G_SCATTERING * G_SCATTERING - (2.0 * G_SCATTERING) * lightDotView, 1.5));
+	return result;
+}
+half ComputeScattering(half lightDotView)
+{
+	half result = 1.0 - G_SCATTERING * G_SCATTERING;
+	result /= (4.0 * PI * pow(1.0 + G_SCATTERING * G_SCATTERING - (2.0 * G_SCATTERING) * lightDotView, 1.5));
+	return result;
+}
 
 inline float3 tonemap(float3 x)
 {
 	return x / (x + 1); // Reinhard tonemap
 }
+inline float4 tonemap(float4 x)
+{
+	return float4(tonemap(x.xyz), x.w);
+}
+inline half3 tonemap(half3 x)
+{
+	return x / (x + 1); // Reinhard tonemap
+}
+inline half4 tonemap(half4 x)
+{
+	return half4(tonemap(x.xyz), x.w);
+}
 inline float3 inverse_tonemap(float3 x)
 {
 	return x / (1 - x);
+}
+inline float4 inverse_tonemap(float4 x)
+{
+	return float4(inverse_tonemap(x.xyz), x.w);
+}
+inline half3 inverse_tonemap(half3 x)
+{
+	return x / (1 - x);
+}
+inline half4 inverse_tonemap(half4 x)
+{
+	return half4(inverse_tonemap(x.xyz), x.w);
 }
 
 inline float4 blue_noise(uint2 pixel)
@@ -1083,117 +1342,6 @@ float4 SampleTextureCatmullRom(in Texture2D<float4> tex, in SamplerState linearS
 	return result;
 }
 
-inline uint pack_unitvector(in float3 value)
-{
-	uint retVal = 0;
-	retVal |= (uint)((value.x * 0.5 + 0.5) * 255.0) << 0u;
-	retVal |= (uint)((value.y * 0.5 + 0.5) * 255.0) << 8u;
-	retVal |= (uint)((value.z * 0.5 + 0.5) * 255.0) << 16u;
-	return retVal;
-}
-inline float3 unpack_unitvector(in uint value)
-{
-	float3 retVal;
-	retVal.x = (float)((value >> 0u) & 0xFF) / 255.0 * 2 - 1;
-	retVal.y = (float)((value >> 8u) & 0xFF) / 255.0 * 2 - 1;
-	retVal.z = (float)((value >> 16u) & 0xFF) / 255.0 * 2 - 1;
-	return retVal;
-}
-
-inline uint pack_utangent(in float4 value)
-{
-	uint retVal = 0;
-	retVal |= (uint)((value.x) * 255.0) << 0u;
-	retVal |= (uint)((value.y) * 255.0) << 8u;
-	retVal |= (uint)((value.z) * 255.0) << 16u;
-	retVal |= (uint)((value.w) * 255.0) << 24u;
-	return retVal;
-}
-inline float4 unpack_utangent(in uint value)
-{
-	float4 retVal;
-	retVal.x = (float)((value >> 0u) & 0xFF) / 255.0;
-	retVal.y = (float)((value >> 8u) & 0xFF) / 255.0;
-	retVal.z = (float)((value >> 16u) & 0xFF) / 255.0;
-	retVal.w = (float)((value >> 24u) & 0xFF) / 255.0;
-	return retVal;
-}
-
-inline uint pack_rgba(in float4 value)
-{
-	uint retVal = 0;
-	retVal |= (uint)(value.x * 255.0) << 0u;
-	retVal |= (uint)(value.y * 255.0) << 8u;
-	retVal |= (uint)(value.z * 255.0) << 16u;
-	retVal |= (uint)(value.w * 255.0) << 24u;
-	return retVal;
-}
-inline float4 unpack_rgba(in uint value)
-{
-	float4 retVal;
-	retVal.x = (float)((value >> 0u) & 0xFF) / 255.0;
-	retVal.y = (float)((value >> 8u) & 0xFF) / 255.0;
-	retVal.z = (float)((value >> 16u) & 0xFF) / 255.0;
-	retVal.w = (float)((value >> 24u) & 0xFF) / 255.0;
-	return retVal;
-}
-
-inline uint pack_half2(in float2 value)
-{
-	uint retVal = 0;
-	retVal = f32tof16(value.x) | (f32tof16(value.y) << 16u);
-	return retVal;
-}
-inline float2 unpack_half2(in uint value)
-{
-	float2 retVal;
-	retVal.x = f16tof32(value.x);
-	retVal.y = f16tof32(value.x >> 16u);
-	return retVal;
-}
-inline uint2 pack_half3(in float3 value)
-{
-	uint2 retVal = 0;
-	retVal.x = f32tof16(value.x) | (f32tof16(value.y) << 16u);
-	retVal.y = f32tof16(value.z);
-	return retVal;
-}
-inline float3 unpack_half3(in uint2 value)
-{
-	float3 retVal;
-	retVal.x = f16tof32(value.x);
-	retVal.y = f16tof32(value.x >> 16u);
-	retVal.z = f16tof32(value.y);
-	return retVal;
-}
-inline uint2 pack_half4(in float4 value)
-{
-	uint2 retVal = 0;
-	retVal.x = f32tof16(value.x) | (f32tof16(value.y) << 16u);
-	retVal.y = f32tof16(value.z) | (f32tof16(value.w) << 16u);
-	return retVal;
-}
-inline float4 unpack_half4(in uint2 value)
-{
-	float4 retVal;
-	retVal.x = f16tof32(value.x);
-	retVal.y = f16tof32(value.x >> 16u);
-	retVal.z = f16tof32(value.y);
-	retVal.w = f16tof32(value.y >> 16u);
-	return retVal;
-}
-
-inline uint pack_pixel(uint2 value)
-{
-	return (value.x & 0xFFFF) | ((value.y & 0xFFFF) << 16u);
-}
-inline uint2 unpack_pixel(uint value)
-{
-	uint2 retVal;
-	retVal.x = value & 0xFFFF;
-	retVal.y = (value >> 16u) & 0xFFFF;
-	return retVal;
-}
 
 
 // Expands a 10-bit integer into 30 bits
@@ -1225,40 +1373,40 @@ inline uint morton3D(in float3 pos)
 //	Journal of Computer Graphics Techniques Vol. 3, No. 2, 2014 http://jcgt.org
 
 // Returns +/-1
-float2 signNotZero(float2 v)
+half2 signNotZero(half2 v)
 {
-	return float2((v.x >= 0.0) ? +1.0 : -1.0, (v.y >= 0.0) ? +1.0 : -1.0);
+	return half2((v.x >= 0.0) ? +1.0 : -1.0, (v.y >= 0.0) ? +1.0 : -1.0);
 }
 // Assume normalized input. Output is on [-1, 1] for each component.
-float2 encode_oct(in float3 v)
+half2 encode_oct(in half3 v)
 {
 	// Project the sphere onto the octahedron, and then onto the xy plane
-	float2 p = v.xy * (1.0 / (abs(v.x) + abs(v.y) + abs(v.z)));
+	half2 p = v.xy * (1.0 / (abs(v.x) + abs(v.y) + abs(v.z)));
 	// Reflect the folds of the lower hemisphere over the diagonals
 	return (v.z <= 0.0) ? ((1.0 - abs(p.yx)) * signNotZero(p)) : p;
 }
-float3 decode_oct(float2 e)
+half3 decode_oct(half2 e)
 {
-	float3 v = float3(e.xy, 1.0 - abs(e.x) - abs(e.y));
+	half3 v = half3(e.xy, 1.0 - abs(e.x) - abs(e.y));
 	if (v.z < 0) v.xy = (1.0 - abs(v.yx)) * signNotZero(v.xy);
 	return normalize(v);
 }
 
 // Assume normalized input on +Z hemisphere.
 // Output is on [-1, 1].
-float2 encode_hemioct(in float3 v)
+half2 encode_hemioct(in half3 v)
 {
 	// Project the hemisphere onto the hemi-octahedron,
 	// and then into the xy plane
-	float2 p = v.xy * (1.0 / (abs(v.x) + abs(v.y) + v.z));
+	half2 p = v.xy * (1.0 / (abs(v.x) + abs(v.y) + v.z));
 	// Rotate and scale the center diamond to the unit square
-	return float2(p.x + p.y, p.x - p.y);
+	return half2(p.x + p.y, p.x - p.y);
 }
-float3 decode_hemioct(float2 e)
+half3 decode_hemioct(half2 e)
 {
 	// Rotate and scale the unit square back to the center diamond
-	float2 temp = float2(e.x + e.y, e.x - e.y) * 0.5;
-	float3 v = float3(temp, 1.0 - abs(temp.x) - abs(temp.y));
+	half2 temp = half2(e.x + e.y, e.x - e.y) * 0.5;
+	half3 v = half3(temp, 1.0 - abs(temp.x) - abs(temp.y));
 	return normalize(v);
 }
 
@@ -1282,20 +1430,20 @@ uint2 remap_lane_8x8(uint lane) {
 }
 
 
-static const float2x2 BayerMatrix2 =
+static const half2x2 BayerMatrix2 =
 {
 	1.0 / 5.0, 3.0 / 5.0,
 	4.0 / 5.0, 2.0 / 5.0
 };
 
-static const float3x3 BayerMatrix3 =
+static const half3x3 BayerMatrix3 =
 {
 	3.0 / 10.0, 7.0 / 10.0, 4.0 / 10.0,
 	6.0 / 10.0, 1.0 / 10.0, 9.0 / 10.0,
 	2.0 / 10.0, 8.0 / 10.0, 5.0 / 10.0
 };
 
-static const float4x4 BayerMatrix4 =
+static const half4x4 BayerMatrix4 =
 {
 	1.0 / 17.0, 9.0 / 17.0, 3.0 / 17.0, 11.0 / 17.0,
 	13.0 / 17.0, 5.0 / 17.0, 15.0 / 17.0, 7.0 / 17.0,
@@ -1303,7 +1451,7 @@ static const float4x4 BayerMatrix4 =
 	16.0 / 17.0, 8.0 / 17.0, 14.0 / 17.0, 6.0 / 17.0
 };
 
-static const float BayerMatrix8[8][8] =
+static const half BayerMatrix8[8][8] =
 {
 	{ 1.0 / 65.0, 49.0 / 65.0, 13.0 / 65.0, 61.0 / 65.0, 4.0 / 65.0, 52.0 / 65.0, 16.0 / 65.0, 64.0 / 65.0 },
 	{ 33.0 / 65.0, 17.0 / 65.0, 45.0 / 65.0, 29.0 / 65.0, 36.0 / 65.0, 20.0 / 65.0, 48.0 / 65.0, 32.0 / 65.0 },
@@ -1316,37 +1464,98 @@ static const float BayerMatrix8[8][8] =
 };
 
 
-inline float ditherMask2(in float2 pixel)
+inline half ditherMask2(in min16uint2 pixel)
 {
 	return BayerMatrix2[pixel.x % 2][pixel.y % 2];
 }
 
-inline float ditherMask3(in float2 pixel)
+inline half ditherMask3(in min16uint2 pixel)
 {
 	return BayerMatrix3[pixel.x % 3][pixel.y % 3];
 }
 
-inline float ditherMask4(in float2 pixel)
+inline half ditherMask4(in min16uint2 pixel)
 {
 	return BayerMatrix4[pixel.x % 4][pixel.y % 4];
 }
 
-inline float ditherMask8(in float2 pixel)
+inline half ditherMask8(in min16uint2 pixel)
 {
 	return BayerMatrix8[pixel.x % 8][pixel.y % 8];
 }
 
-inline float dither(in float2 pixel)
+inline half dither(in min16uint2 pixel)
 {
 	return ditherMask8(pixel);
 }
 
+// For every value of BayerMatrix8, this contains: half2(sin(value * 2 * PI), cos(value * 2 * PI))
+static const half2 BayerMatrix8_sincos[8][8] = {
+	{half2(0.096514, 0.995332),half2(-0.999708, 0.024164),half2(0.951057, 0.309017),half2(-0.377095, 0.926175),half2(0.377095, 0.926175),half2(-0.951056, 0.309017),half2(0.999708, 0.024164),half2(-0.096514, 0.995332),},
+	{half2(-0.048314, -0.998832),half2(0.997373, -0.072435),half2(-0.935016, -0.354605),half2(0.331908, -0.943312),half2(-0.331908, -0.943312),half2(0.935016, -0.354605),half2(-0.997373, -0.072434),half2(0.048313, -0.998832),},
+	{half2(0.764316, 0.644842),half2(-0.698511, 0.715599),half2(0.464723, 0.885456),half2(-0.916792, 0.399365),half2(0.916792, 0.399364),half2(-0.464723, 0.885456),half2(0.698511, 0.715599),half2(-0.764316, 0.644842),},
+	{half2(-0.732269, -0.681016),half2(0.663123, -0.748511),half2(-0.421401, -0.906874),half2(0.896427, -0.443192),half2(-0.896427, -0.443191),half2(0.421401, -0.906874),half2(-0.663123, -0.748511),half2(0.732269, -0.681016),},
+	{half2(0.285946, 0.958246),half2(-0.976441, 0.215784),half2(0.992709, 0.120537),half2(-0.192127, 0.981370),half2(0.192127, 0.981370),half2(-0.992709, 0.120537),half2(0.976441, 0.215784),half2(-0.285946, 0.958246),},
+	{half2(-0.239316, -0.970942),half2(0.964876, -0.262708),half2(-0.985726, -0.168357),half2(0.144489, -0.989506),half2(-0.144489, -0.989506),half2(0.985726, -0.168357),half2(-0.964876, -0.262707),half2(0.239316, -0.970942),},
+	{half2(0.873968, 0.485983),half2(-0.548012, 0.836470),half2(0.626185, 0.779674),half2(-0.822984, 0.568065),half2(0.822984, 0.568065),half2(-0.626185, 0.779675),half2(0.548013, 0.836470),half2(-0.873968, 0.485984),},
+	{half2(-0.849468, -0.527640),half2(0.506960, -0.861970),half2(-0.587786, -0.809017),half2(0.794578, -0.607163),half2(-0.794578, -0.607162),half2(0.587785, -0.809017),half2(-0.506960, -0.861970),half2(0.849468, -0.527640),},
+};
+inline half2 dither_sincos(in min16uint2 pixel)
+{
+	return BayerMatrix8_sincos[pixel.x % 8][pixel.y % 8];
+}
+inline half2x2 dither_rot2x2(in min16uint2 pixel)
+{
+	half2 sincos = dither_sincos(pixel);
+	return half2x2(
+		sincos.y, -sincos.x,
+		sincos.x, sincos.y
+	);
+}
+
+// Quaternion multiplication
+// http://mathworld.wolfram.com/Quaternion.html
+float4 qmul(float4 q1, float4 q2)
+{
+    return float4(
+        q2.xyz * q1.w + q1.xyz * q2.w + cross(q1.xyz, q2.xyz),
+        q1.w * q2.w - dot(q1.xyz, q2.xyz)
+    );
+}
+half4 qmul(half4 q1, half4 q2)
+{
+    return half4(
+        q2.xyz * q1.w + q1.xyz * q2.w + cross(q1.xyz, q2.xyz),
+        q1.w * q2.w - dot(q1.xyz, q2.xyz)
+    );
+}
+
+// Vector rotation with a quaternion
+// http://mathworld.wolfram.com/Quaternion.html
+float3 rotate_vector(float3 v, float4 r)
+{
+    float4 r_c = r * float4(-1, -1, -1, 1);
+    return qmul(r, qmul(float4(v, 0), r_c)).xyz;
+}
+half3 rotate_vector(half3 v, half4 r)
+{
+    half4 r_c = r * half4(-1, -1, -1, 1);
+    return qmul(r, qmul(half4(v, 0), r_c)).xyz;
+}
 
 inline float sphere_surface_area(in float radius)
 {
 	return 4 * PI * radius * radius;
 }
+inline half sphere_surface_area(in half radius)
+{
+	return 4 * PI * radius * radius;
+}
 inline float sphere_volume(in float radius)
+{
+	return 4.0 / 3.0 * PI * radius * radius * radius;
+}
+inline half sphere_volume(in half radius)
 {
 	return 4.0 / 3.0 * PI * radius * radius * radius;
 }
@@ -1678,8 +1887,8 @@ static const float NUM_PARALLAX_OCCLUSION_STEPS_RCP = 1.0 / NUM_PARALLAX_OCCLUSI
 inline void ParallaxOcclusionMapping_Impl(
 	inout float4 uvsets,		// uvsets to modify
 	in float3 V,				// view vector (pointing towards camera)
-	in float3x3 TBN,			// tangent basis matrix (same that is used for normal mapping)
-	in float strength,			// material parameters
+	in half3x3 TBN,				// tangent basis matrix (same that is used for normal mapping)
+	in half strength,			// material parameters
 	in Texture2D tex,			// displacement map texture
 	in float2 uv,				// uv to use for the displacement map
 	in float2 uv_dx,			// horizontal derivative of displacement map uv

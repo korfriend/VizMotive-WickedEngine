@@ -236,10 +236,21 @@ namespace wi::scene
 				archive >> textures[TRANSPARENCYMAP].name;
 				archive >> textures[TRANSPARENCYMAP].uvset;
 			}
-
 			if (seri.GetVersion() >= 4)
 			{
 				archive >> blend_with_terrain_height;
+			}
+			if (seri.GetVersion() >= 5)
+			{
+				archive >> extinctionColor;
+			}
+			if (seri.GetVersion() >= 6)
+			{
+				archive >> cloak;
+			}
+			if (seri.GetVersion() >= 7)
+			{
+				archive >> chromatic_aberration;
 			}
 
 			for (auto& x : textures)
@@ -386,10 +397,21 @@ namespace wi::scene
 				archive << wi::helper::GetPathRelative(dir, textures[TRANSPARENCYMAP].name);
 				archive << textures[TRANSPARENCYMAP].uvset;
 			}
-
 			if (seri.GetVersion() >= 4)
 			{
 				archive << blend_with_terrain_height;
+			}
+			if (seri.GetVersion() >= 5)
+			{
+				archive << extinctionColor;
+			}
+			if (seri.GetVersion() >= 6)
+			{
+				archive << cloak;
+			}
+			if (seri.GetVersion() >= 7)
+			{
+				archive << chromatic_aberration;
 			}
 		}
 	}
@@ -472,6 +494,12 @@ namespace wi::scene
 				archive >> subsets_per_lod;
 			}
 
+			if (seri.GetVersion() >= 3)
+			{
+				archive >> vertex_boneindices2;
+				archive >> vertex_boneweights2;
+			}
+
 			wi::jobsystem::Execute(seri.ctx, [&](wi::jobsystem::JobArgs args) {
 				CreateRenderData();
 
@@ -552,6 +580,12 @@ namespace wi::scene
 			if (archive.GetVersion() >= 76)
 			{
 				archive << subsets_per_lod;
+			}
+
+			if (seri.GetVersion() >= 3)
+			{
+				archive << vertex_boneindices2;
+				archive << vertex_boneweights2;
 			}
 
 		}
@@ -706,6 +740,16 @@ namespace wi::scene
 			{
 				archive >> local_offset;
 			}
+			if (shape == CollisionShape::CYLINDER && seri.GetVersion() < 3)
+			{
+				// convert old assumption that was used in Bullet Physics:
+				capsule.height = box.halfextents.y;
+				capsule.radius = box.halfextents.x;
+			}
+			if (seri.GetVersion() >= 4)
+			{
+				archive >> buoyancy;
+			}
 		}
 		else
 		{
@@ -737,10 +781,16 @@ namespace wi::scene
 			{
 				archive << local_offset;
 			}
+			if (seri.GetVersion() >= 4)
+			{
+				archive << buoyancy;
+			}
 		}
 	}
 	void SoftBodyPhysicsComponent::Serialize(wi::Archive& archive, EntitySerializer& seri)
 	{
+		wi::vector<uint32_t> graphicsToPhysicsVertexMapping;
+
 		if (archive.IsReadMode())
 		{
 			archive >> _flags;
@@ -766,6 +816,37 @@ namespace wi::scene
 				friction = 0.5f;
 			}
 
+			if (seri.GetVersion() >= 1)
+			{
+				archive >> vertex_radius;
+				archive >> detail;
+			}
+			else
+			{
+				SetWindEnabled(true);
+			}
+
+			if (seri.GetVersion() >= 2)
+			{
+				archive >> pressure;
+			}
+			else
+			{
+				// Convert weights from per-physics to per-graphics vertex:
+				//	Per graphics vertex is better, because regenerating soft body with different detail will keep the pinning
+				wi::vector<float> weights2(graphicsToPhysicsVertexMapping.size());
+				for (size_t i = 0; i < weights2.size(); ++i)
+				{
+					weights2[i] = weights[graphicsToPhysicsVertexMapping[i]];
+				}
+				std::swap(weights, weights2);
+			}
+
+			if (seri.GetVersion() >= 3)
+			{
+				archive >> physicsIndices;
+			}
+
 			_flags &= ~SAFE_TO_REGISTER;
 		}
 		else
@@ -781,6 +862,21 @@ namespace wi::scene
 			{
 				archive << restitution;
 			}
+
+			if (seri.GetVersion() >= 1)
+			{
+				archive << vertex_radius;
+				archive << detail;
+			}
+			if (seri.GetVersion() >= 2)
+			{
+				archive << pressure;
+			}
+
+			if (seri.GetVersion() >= 3)
+			{
+				archive << physicsIndices;
+			}
 		}
 	}
 	void ArmatureComponent::Serialize(wi::Archive& archive, EntitySerializer& seri)
@@ -794,9 +890,7 @@ namespace wi::scene
 			boneCollection.resize(boneCount);
 			for (size_t i = 0; i < boneCount; ++i)
 			{
-				Entity boneID;
-				SerializeEntity(archive, boneID, seri);
-				boneCollection[i] = boneID;
+				SerializeEntity(archive, boneCollection[i], seri);
 			}
 
 			archive >> inverseBindMatrices;
@@ -892,6 +986,10 @@ namespace wi::scene
 				archive >> radius;
 				archive >> length;
 			}
+			if (seri.GetVersion() >= 3)
+			{
+				archive >> volumetric_boost;
+			}
 
 			wi::jobsystem::Execute(seri.ctx, [&](wi::jobsystem::JobArgs args) {
 				lensFlareRimTextures.resize(lensFlareNames.size());
@@ -959,6 +1057,10 @@ namespace wi::scene
 			{
 				archive << radius;
 				archive << length;
+			}
+			if (seri.GetVersion() >= 3)
+			{
+				archive << volumetric_boost;
 			}
 		}
 	}
@@ -1499,6 +1601,10 @@ namespace wi::scene
 				archive >> rain_splash_scale;
 				archive >> rain_color;
 			}
+			if (seri.GetVersion() >= 6)
+			{
+				archive >> oceanParameters.extinctionColor;
+			}
 		}
 		else
 		{
@@ -1718,6 +1824,10 @@ namespace wi::scene
 				archive << rain_scale;
 				archive << rain_splash_scale;
 				archive << rain_color;
+			}
+			if (seri.GetVersion() >= 6)
+			{
+				archive << oceanParameters.extinctionColor;
 			}
 		}
 	}
@@ -2034,6 +2144,118 @@ namespace wi::scene
 				archive << ragdoll_fatness;
 				archive << ragdoll_headsize;
 			}
+		}
+	}
+	void MetadataComponent::Serialize(wi::Archive& archive, EntitySerializer& seri)
+	{
+		if (archive.IsReadMode())
+		{
+			archive >> _flags;
+
+			int intpreset = 0;
+			archive >> intpreset;
+			preset = (Preset)intpreset;
+
+			size_t count = 0;
+
+			archive >> count;
+			bool_values.reserve(count);
+			for (size_t i = 0; i < count; ++i)
+			{
+				std::string name;
+				archive >> name;
+				bool value;
+				archive >> value;
+				bool_values.set(name, value);
+			}
+
+			archive >> count;
+			int_values.reserve(count);
+			for (size_t i = 0; i < count; ++i)
+			{
+				std::string name;
+				archive >> name;
+				int value;
+				archive >> value;
+				int_values.set(name, value);
+			}
+
+			archive >> count;
+			float_values.reserve(count);
+			for (size_t i = 0; i < count; ++i)
+			{
+				std::string name;
+				archive >> name;
+				float value;
+				archive >> value;
+				float_values.set(name, value);
+			}
+
+			archive >> count;
+			string_values.reserve(count);
+			for (size_t i = 0; i < count; ++i)
+			{
+				std::string name;
+				archive >> name;
+				std::string value;
+				archive >> value;
+				string_values.set(name, value);
+			}
+		}
+		else
+		{
+			archive << _flags;
+
+			archive << (int)preset;
+
+			archive << bool_values.lookup.size();
+			for (auto& x : bool_values.lookup)
+			{
+				archive << x.first;
+				archive << bool_values.get(x.first);
+			}
+
+			archive << int_values.lookup.size();
+			for (auto& x : int_values.lookup)
+			{
+				archive << x.first;
+				archive << int_values.get(x.first);
+			}
+
+			archive << float_values.lookup.size();
+			for (auto& x : float_values.lookup)
+			{
+				archive << x.first;
+				archive << float_values.get(x.first);
+			}
+
+			archive << string_values.lookup.size();
+			for (auto& x : string_values.lookup)
+			{
+				archive << x.first;
+				archive << string_values.get(x.first);
+			}
+		}
+	}
+	void CharacterComponent::Serialize(wi::Archive& archive, EntitySerializer& seri)
+	{
+		if (archive.IsReadMode())
+		{
+			archive >> _flags;
+
+			archive >> health;
+			archive >> width;
+			archive >> height;
+			archive >> scale;
+		}
+		else
+		{
+			archive << _flags;
+
+			archive << health;
+			archive << width;
+			archive << height;
+			archive << scale;
 		}
 	}
 

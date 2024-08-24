@@ -61,17 +61,22 @@ namespace wi
 		float emit = 0.0f;
 		int burst = 0;
 		float dt = 0;
+		uint32_t active_frames = 0;
 
 		uint32_t MAX_PARTICLES = 1000;
+
+		mutable wi::vector<EmitLocation> emit_locations;
 
 	public:
 		void UpdateCPU(const wi::scene::TransformComponent& transform, float dt);
 		void Burst(int num);
+		void Burst(int num, const XMFLOAT3& position, const wi::Color& color = wi::Color::White());
+		void Burst(int num, const XMFLOAT4X4& transform, const wi::Color& color = wi::Color::White());
 		void Restart();
 
 		// Must have a transform and material component, but mesh is optional
 		void UpdateGPU(uint32_t instanceIndex, const wi::scene::MeshComponent* mesh, wi::graphics::CommandList cmd) const;
-		void Draw(const wi::scene::MaterialComponent& material, wi::graphics::CommandList cmd) const;
+		void Draw(const wi::scene::MaterialComponent& material, wi::graphics::CommandList cmd, const PARTICLESHADERTYPE* shadertype_override = nullptr) const;
 
 		void CreateRaytracingRenderData();
 
@@ -132,6 +137,8 @@ namespace wi
 		void SetMaxParticleCount(uint32_t value);
 		uint32_t GetMaxParticleCount() const { return MAX_PARTICLES; }
 		uint64_t GetMemorySizeInBytes() const;
+
+		bool IsInactive() const { return active_frames == 0; }
 
 		// Non-serialized attributes:
 		XMFLOAT3 center;

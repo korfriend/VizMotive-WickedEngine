@@ -348,16 +348,20 @@ namespace vulkan_internal
 		case ResourceState::UNORDERED_ACCESS:
 			return VK_IMAGE_LAYOUT_GENERAL;
 		case ResourceState::COPY_SRC:
-			return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 		case ResourceState::COPY_DST:
-			return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+			// we can't assume transfer layout because it's allowed for resource to be used by multiple queues like DX12 (decay to common state), so this is a workaround
+			//	the problem is that image copy commands will require specifying the current layout, but different queues can often use textures in different layouts
+			return VK_IMAGE_LAYOUT_GENERAL;
 		case ResourceState::SHADING_RATE_SOURCE:
 			return VK_IMAGE_LAYOUT_FRAGMENT_SHADING_RATE_ATTACHMENT_OPTIMAL_KHR;
 		case ResourceState::VIDEO_DECODE_SRC:
 		case ResourceState::VIDEO_DECODE_DST:
 			return VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR;
 		default:
-			return VK_IMAGE_LAYOUT_UNDEFINED;
+			// combination of state flags will default to general
+			//	whether the combination of states is valid needs to be validated by the user
+			//	combining read-only states should be fine
+			return VK_IMAGE_LAYOUT_GENERAL;
 		}
 	}
 	constexpr VkShaderStageFlags _ConvertStageFlags(ShaderStage value)
@@ -741,6 +745,7 @@ namespace vulkan_internal
 		std::shared_ptr<GraphicsDevice_Vulkan::AllocationHandler> allocationhandler;
 		VmaAllocation allocation = nullptr;
 		VkImage resource = VK_NULL_HANDLE;
+		VkImageLayout defaultLayout = VK_IMAGE_LAYOUT_GENERAL;
 		VkBuffer staging_resource = VK_NULL_HANDLE;
 		struct TextureSubresource
 		{
@@ -1321,6 +1326,26 @@ using namespace vulkan_internal;
 
 
 
+	void GraphicsDevice_Vulkan::CommandQueue::signal(VkSemaphore semaphore)
+	{
+		if (queue == VK_NULL_HANDLE)
+			return;
+		VkSemaphoreSubmitInfo& signalSemaphore = submit_signalSemaphoreInfos.emplace_back();
+		signalSemaphore.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+		signalSemaphore.semaphore = semaphore;
+		signalSemaphore.value = 0; // not a timeline semaphore
+		signalSemaphore.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+	}
+	void GraphicsDevice_Vulkan::CommandQueue::wait(VkSemaphore semaphore)
+	{
+		if (queue == VK_NULL_HANDLE)
+			return;
+		VkSemaphoreSubmitInfo& waitSemaphore = submit_waitSemaphoreInfos.emplace_back();
+		waitSemaphore.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+		waitSemaphore.semaphore = semaphore;
+		waitSemaphore.value = 0; // not a timeline semaphore
+		waitSemaphore.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+	}
 	void GraphicsDevice_Vulkan::CommandQueue::submit(GraphicsDevice_Vulkan* device, VkFence fence)
 	{
 		if (queue == VK_NULL_HANDLE)
@@ -1848,8 +1873,7 @@ using namespace vulkan_internal;
 							auto texture_internal = to_internal((const Texture*)&resource);
 							auto& subresource_descriptor = subresource >= 0 ? texture_internal->subresources_srv[subresource] : texture_internal->srv;
 							imageInfos.back().imageView = subresource_descriptor.image_view;
-
-							imageInfos.back().imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+							imageInfos.back().imageLayout = texture_internal->defaultLayout;
 						}
 					}
 					break;
@@ -3607,11 +3631,15 @@ using namespace vulkan_internal;
 			{
 				x.destroy();
 			}
-			vkDestroySemaphore(device, commandlist->semaphore, nullptr);
 		}
 		for (auto& x : pipelines_global)
 		{
 			vkDestroyPipeline(device, x.second, nullptr);
+		}
+
+		for (auto& x : semaphore_pool)
+		{
+			vkDestroySemaphore(device, x, nullptr);
 		}
 
 		vmaDestroyBuffer(allocationhandler->allocator, nullBuffer, nullBufferAllocation);
@@ -4056,6 +4084,7 @@ using namespace vulkan_internal;
 	{
 		auto internal_state = std::make_shared<Texture_Vulkan>();
 		internal_state->allocationhandler = allocationhandler;
+		internal_state->defaultLayout = _ConvertImageLayout(desc->layout);
 		texture->internal_state = internal_state;
 		texture->type = GPUResource::Type::TEXTURE;
 		texture->mapped_data = nullptr;
@@ -4487,6 +4516,7 @@ using namespace vulkan_internal;
 					}
 
 					copyOffset += dst_slicepitch * depth;
+					copyOffset = AlignTo(copyOffset, VkDeviceSize(4)); // fix for validation: on transfer queue the srcOffset must be 4-byte aligned
 
 					width = std::max(1u, width / 2);
 					height = std::max(1u, height / 2);
@@ -5235,7 +5265,6 @@ using namespace vulkan_internal;
 				auto shader_internal = to_internal(shader);
 
 				uint32_t i = 0;
-				size_t check_max = internal_state->layoutBindings.size(); // dont't check for duplicates within self table
 				for (auto& x : shader_internal->layoutBindings)
 				{
 					bool found = false;
@@ -5253,8 +5282,6 @@ using namespace vulkan_internal;
 							y.stageFlags |= x.stageFlags;
 							break;
 						}
-						if (j++ >= check_max)
-							break;
 					}
 
 					if (!found)
@@ -7051,7 +7078,6 @@ using namespace vulkan_internal;
 		commandlist.reset(GetBufferIndex());
 		commandlist.queue = queue;
 		commandlist.id = cmd_current;
-		commandlist.waited_on.store(false);
 
 		if (commandlist.GetCommandBuffer() == VK_NULL_HANDLE)
 		{
@@ -7095,11 +7121,6 @@ using namespace vulkan_internal;
 
 				commandlist.binder_pools[buffer].init(this);
 			}
-
-			VkSemaphoreCreateInfo createInfo = {};
-			createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-			res = vkCreateSemaphore(device, &createInfo, nullptr, &commandlist.semaphore);
-			assert(res == VK_SUCCESS);
 
 			commandlist.binder.init(this);
 		}
@@ -7163,6 +7184,14 @@ using namespace vulkan_internal;
 				assert(res == VK_SUCCESS);
 
 				CommandQueue& queue = queues[commandlist.queue];
+				const bool dependency = !commandlist.signals.empty() || !commandlist.waits.empty() || !commandlist.wait_queues.empty();
+
+				if (dependency)
+				{
+					// If the current commandlist must resolve a dependency, then previous ones will be submitted before doing that:
+					//	This improves GPU utilization because not the whole batch of command lists will need to synchronize, but only the one that handles it
+					queue.submit(this, VK_NULL_HANDLE);
+				}
 
 				VkCommandBufferSubmitInfo& cbSubmitInfo = queue.submit_cmds.emplace_back();
 				cbSubmitInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
@@ -7189,29 +7218,43 @@ using namespace vulkan_internal;
 					signalSemaphore.value = 0; // not a timeline semaphore
 				}
 
-				if (commandlist.waited_on.load() || !commandlist.waits.empty())
+				if (dependency)
 				{
-					for (auto& wait : commandlist.waits)
+					for (auto& wait : commandlist.wait_queues)
+					{
+						CommandQueue& waitqueue = queues[wait.first];
+						VkSemaphore semaphore = wait.second;
+
+						// The WaitQueue operation will submit and signal the specified dependency queue:
+						waitqueue.signal(semaphore); // signal recorded, will be executed at submit
+						waitqueue.submit(this, VK_NULL_HANDLE);
+
+						// The current queue will be waiting for the dependency queue to complete:
+						queue.wait(semaphore);
+
+						// recycle semaphore
+						free_semaphore(semaphore);
+					}
+					commandlist.wait_queues.clear();
+
+					for (auto& semaphore : commandlist.waits)
 					{
 						// Wait for command list dependency:
-						CommandList_Vulkan& waitcommandlist = GetCommandList(wait);
+						queue.wait(semaphore);
 
-						VkSemaphoreSubmitInfo& waitSemaphore = queue.submit_waitSemaphoreInfos.emplace_back();
-						waitSemaphore.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-						waitSemaphore.semaphore = waitcommandlist.semaphore;
-						waitSemaphore.value = 0; // not a timeline semaphore
-						waitSemaphore.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+						// semaphore is not recycled here, only the signals recycle themselves vecause wait will use the same
 					}
+					commandlist.waits.clear();
 
-					if (commandlist.waited_on.load())
+					for (auto& semaphore : commandlist.signals)
 					{
 						// Signal this command list's completion:
-						VkSemaphoreSubmitInfo& signalSemaphore = queue.submit_signalSemaphoreInfos.emplace_back();
-						signalSemaphore.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-						signalSemaphore.semaphore = commandlist.semaphore;
-						signalSemaphore.value = 0; // not a timeline semaphore
-						signalSemaphore.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+						queue.signal(semaphore);
+
+						// recycle semaphore
+						free_semaphore(semaphore);
 					}
+					commandlist.signals.clear();
 
 					queue.submit(this, VK_NULL_HANDLE);
 				}
@@ -7562,8 +7605,14 @@ using namespace vulkan_internal;
 		CommandList_Vulkan& commandlist = GetCommandList(cmd);
 		CommandList_Vulkan& commandlist_wait_for = GetCommandList(wait_for);
 		assert(commandlist_wait_for.id < commandlist.id); // can't wait for future command list!
-		commandlist.waits.push_back(wait_for);
-		commandlist_wait_for.waited_on.store(true);
+		VkSemaphore semaphore = new_semaphore();
+		commandlist.waits.push_back(semaphore);
+		commandlist_wait_for.signals.push_back(semaphore);
+	}
+	void GraphicsDevice_Vulkan::WaitQueue(CommandList cmd, QUEUE_TYPE wait_for)
+	{
+		CommandList_Vulkan& commandlist = GetCommandList(cmd);
+		commandlist.wait_queues.push_back(std::make_pair(wait_for, new_semaphore()));
 	}
 	void GraphicsDevice_Vulkan::RenderPassBegin(const SwapChain* swapchain, CommandList cmd)
 	{
@@ -8191,10 +8240,6 @@ using namespace vulkan_internal;
 	void GraphicsDevice_Vulkan::BindPipelineState(const PipelineState* pso, CommandList cmd)
 	{
 		CommandList_Vulkan& commandlist = GetCommandList(cmd);
-		if (commandlist.active_pso == pso)
-		{
-			return;
-		}
 		commandlist.active_cs = nullptr;
 		commandlist.active_rt = nullptr;
 
@@ -8202,7 +8247,10 @@ using namespace vulkan_internal;
 
 		if (internal_state->pipeline != VK_NULL_HANDLE)
 		{
-			vkCmdBindPipeline(commandlist.GetCommandBuffer(), VK_PIPELINE_BIND_POINT_GRAPHICS, internal_state->pipeline);
+			if (commandlist.active_pso != pso)
+			{
+				vkCmdBindPipeline(commandlist.GetCommandBuffer(), VK_PIPELINE_BIND_POINT_GRAPHICS, internal_state->pipeline);
+			}
 
 			commandlist.prev_pipeline_hash = 0;
 			commandlist.dirty_pso = false;
@@ -8441,7 +8489,7 @@ using namespace vulkan_internal;
 						commandlist.GetCommandBuffer(),
 						internal_state_src->staging_resource,
 						internal_state_dst->resource,
-						VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+						_ConvertImageLayout(ResourceState::COPY_DST),
 						1,
 						&copy
 					);
@@ -8479,7 +8527,7 @@ using namespace vulkan_internal;
 						vkCmdCopyImageToBuffer(
 							commandlist.GetCommandBuffer(),
 							internal_state_src->resource,
-							VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+							_ConvertImageLayout(ResourceState::COPY_SRC),
 							internal_state_dst->staging_resource,
 							1,
 							&copy
@@ -8542,8 +8590,8 @@ using namespace vulkan_internal;
 				copy.dstSubresource.mipLevel = 0;
 
 				vkCmdCopyImage(commandlist.GetCommandBuffer(),
-					internal_state_src->resource, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-					internal_state_dst->resource, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+					internal_state_src->resource, _ConvertImageLayout(ResourceState::COPY_SRC),
+					internal_state_dst->resource, _ConvertImageLayout(ResourceState::COPY_DST),
 					1, &copy
 				);
 			}
@@ -8639,9 +8687,9 @@ using namespace vulkan_internal;
 		vkCmdCopyImage(
 			commandlist.GetCommandBuffer(),
 			src_internal->resource,
-			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			_ConvertImageLayout(ResourceState::COPY_SRC),
 			dst_internal->resource,
-			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			_ConvertImageLayout(ResourceState::COPY_DST),
 			1,
 			&copy
 		);

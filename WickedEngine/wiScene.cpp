@@ -231,6 +231,8 @@ namespace wi::scene
 			});
 		}
 
+		RunCharacterUpdateSystem(ctx);
+
 		RunAnimationUpdateSystem(ctx);
 
 		wi::physics::RunPhysicsUpdateSystem(ctx, *this, dt);
@@ -955,6 +957,7 @@ namespace wi::scene
 		shaderscene.weather.atmosphere = weather.atmosphereParameters;
 		shaderscene.weather.volumetric_clouds = weather.volumetricCloudParameters;
 		shaderscene.weather.ocean.water_color = weather.oceanParameters.waterColor;
+		shaderscene.weather.ocean.extinction_color = XMFLOAT4(1 - weather.oceanParameters.extinctionColor.x, 1 - weather.oceanParameters.extinctionColor.y, 1 - weather.oceanParameters.extinctionColor.z, 1);
 		shaderscene.weather.ocean.water_height = weather.oceanParameters.waterHeight;
 		shaderscene.weather.ocean.patch_size_rcp = 1.0f / weather.oceanParameters.patch_length;
 		shaderscene.weather.ocean.texture_displacementmap = device->GetDescriptorIndex(ocean.getDisplacementMap(), SubresourceType::SRV);
@@ -1035,6 +1038,7 @@ namespace wi::scene
 
 		surfelgi = {};
 		ddgi = {};
+		ocean = {};
 
 		aabb_objects.clear();
 		aabb_lights.clear();
@@ -1047,12 +1051,16 @@ namespace wi::scene
 		collider_count_cpu = 0;
 		collider_count_gpu = 0;
 	}
-	void Scene::Merge(Scene& other)
+	void Scene::MergeFastInternal(Scene& other)
 	{
 		for (auto& entry : componentLibrary.entries)
 		{
 			entry.second.component_manager->Merge(*other.componentLibrary.entries[entry.first].component_manager);
 		}
+	}
+	void Scene::Merge(Scene& other)
+	{
+		MergeFastInternal(other);
 
 		bounds = AABB::Merge(bounds, other.bounds);
 
@@ -1165,8 +1173,17 @@ namespace wi::scene
 		wi::Archive archive;
 		EntitySerializer seri;
 
-		archive.SetReadModeAndResetPos(false);
-		prefab.componentLibrary.Serialize(archive, seri);
+		if (!prefab.optimized_instatiation_data.IsReadMode())
+		{
+			// Create optimized data
+			prefab.locker.lock();
+			prefab.optimized_instatiation_data.SetReadModeAndResetPos(false);
+			prefab.componentLibrary.Serialize(prefab.optimized_instatiation_data, seri);
+			prefab.optimized_instatiation_data.SetReadModeAndResetPos(true);
+			prefab.locker.unlock();
+		}
+
+		archive = wi::Archive(prefab.optimized_instatiation_data.GetData(), prefab.optimized_instatiation_data.GetSize());
 
 		archive.SetReadModeAndResetPos(true);
 		tmp.componentLibrary.Serialize(archive, seri);
@@ -1189,6 +1206,8 @@ namespace wi::scene
 					tmp.Component_Attach(entity, rootEntity);
 				}
 			}
+
+			tmp.RunHierarchyUpdateSystem(seri.ctx);
 		}
 
 		wi::jobsystem::Wait(seri.ctx); // wait for completion of component serializations background threads here
@@ -1806,6 +1825,49 @@ namespace wi::scene
 
 		return entity;
 	}
+	Entity Scene::Entity_CreateMeshFromData(
+		const std::string& name,
+		size_t index_count,
+		const uint32_t* indices,
+		size_t vertex_count,
+		const XMFLOAT3* positions
+	)
+	{
+		Entity entity = CreateEntity();
+
+		if (!name.empty())
+		{
+			names.Create(entity) = name;
+		}
+
+		layers.Create(entity);
+
+		transforms.Create(entity);
+
+		ObjectComponent& object = objects.Create(entity);
+
+		MeshComponent& mesh = meshes.Create(entity);
+
+		// object references the mesh entity (there can be multiple objects referencing one mesh):
+		object.meshID = entity;
+
+		mesh.indices.resize(index_count);
+		std::memcpy(mesh.indices.data(), indices, sizeof(uint32_t) * index_count);
+
+		mesh.vertex_positions.resize(vertex_count);
+		std::memcpy(mesh.vertex_positions.data(), positions, sizeof(XMFLOAT3) * vertex_count);
+
+		// Subset maps a part of the mesh to a material:
+		MeshComponent::MeshSubset& subset = mesh.subsets.emplace_back();
+		subset.indexCount = uint32_t(mesh.indices.size());
+		materials.Create(entity);
+		subset.materialID = entity; // the material component is created on the same entity as the mesh component, though it is not required as it could also use a different material entity
+
+		// vertex buffer GPU data will be packed and uploaded here:
+		mesh.ComputeNormals(MeshComponent::COMPUTE_NORMALS_SMOOTH_FAST); // smooth fast is used because it will keep vertex/index count, only averages face normals
+
+		return entity;
+	}
 
 	void Scene::Component_Attach(Entity entity, Entity parent, bool child_already_in_local_space)
 	{
@@ -1881,6 +1943,8 @@ namespace wi::scene
 			for (size_t animation_index = 0; animation_index < animation_queue.animations.size(); ++animation_index)
 			{
 				AnimationComponent& animation = *animation_queue.animations[animation_index];
+				if (!animation.IsPlaying())
+					continue;
 				animation.last_update_time = animation.timer;
 
 				for (const AnimationComponent::AnimationChannel& channel : animation.channels)
@@ -2679,12 +2743,46 @@ namespace wi::scene
 
 				}
 
-				if (animation.IsLooped() && animation.timer > animation.end)
+				if (animation.timer > animation.end && animation.speed > 0)
 				{
-					animation.timer = animation.start;
-					for (auto& channel : animation.channels)
+					if (animation.IsLooped())
 					{
-						channel.next_event = 0;
+						animation.timer = animation.start;
+						for (auto& channel : animation.channels)
+						{
+							channel.next_event = 0;
+						}
+					}
+					else if (animation.IsPingPong())
+					{
+						animation.timer = animation.end;
+						animation.speed = -animation.speed;
+					}
+					else
+					{
+						animation.timer = animation.end;
+						animation.Pause();
+					}
+				}
+				else if (animation.timer < animation.start && animation.speed < 0)
+				{
+					if (animation.IsLooped())
+					{
+						animation.timer = animation.end;
+						for (auto& channel : animation.channels)
+						{
+							channel.next_event = 0;
+						}
+					}
+					else if (animation.IsPingPong())
+					{
+						animation.timer = animation.start;
+						animation.speed = -animation.speed;
+					}
+					else
+					{
+						animation.timer = animation.start;
+						animation.Pause();
 					}
 				}
 
@@ -3075,6 +3173,145 @@ namespace wi::scene
 
 		auto range = wi::profiler::BeginRangeCPU("Procedural Animations");
 
+		// Character IK foot placement, should be after animations and hierarchy update:
+		for (size_t i = 0; i < characters.GetCount(); ++i)
+		{
+			CharacterComponent& character = characters[i];
+			if (character.left_foot != INVALID_ENTITY && character.right_foot != INVALID_ENTITY)
+				continue;
+			HumanoidComponent* humanoid = humanoids.GetComponent(character.humanoidEntity);
+			if (humanoid == nullptr)
+				continue;
+			character.left_foot = humanoid->bones[size_t(HumanoidComponent::HumanoidBone::LeftFoot)];
+			{
+				InverseKinematicsComponent& ik = inverse_kinematics.Create(character.left_foot);
+				ik.use_target_position = true;
+				ik.chain_length = 2;
+				ik.iteration_count = 10;
+			}
+			character.right_foot = humanoid->bones[size_t(HumanoidComponent::HumanoidBone::RightFoot)];
+			{
+				InverseKinematicsComponent& ik = inverse_kinematics.Create(character.right_foot);
+				ik.use_target_position = true;
+				ik.chain_length = 2;
+				ik.iteration_count = 10;
+			}
+		}
+		wi::jobsystem::Dispatch(ctx, (uint32_t)characters.GetCount(), 1, [&](wi::jobsystem::JobArgs args) {
+			CharacterComponent& character = characters[args.jobIndex];
+			if (character.left_foot == INVALID_ENTITY || character.right_foot == INVALID_ENTITY)
+				return;
+			if (character.humanoidEntity == INVALID_ENTITY)
+				return;
+			HumanoidComponent* humanoid = humanoids.GetComponent(character.humanoidEntity);
+			if (humanoid == nullptr)
+				return;
+
+			Entity entity = characters.GetEntity(args.jobIndex);
+			uint32_t layer = 0;
+			LayerComponent* layercomponent = layers.GetComponent(entity);
+			if (layercomponent != nullptr)
+			{
+				layer = layercomponent->GetLayerMask();
+			}
+
+			float base_y = character.position.y;
+			Entity ik_foot = INVALID_ENTITY;
+			XMFLOAT3 ik_pos = XMFLOAT3(0, 0, 0);
+			XMFLOAT3 left_pos = XMFLOAT3(0, 0, 0);
+			XMFLOAT3 right_pos = XMFLOAT3(0, 0, 0);
+			TransformComponent* left_transform = transforms.GetComponent(character.left_foot);
+			TransformComponent* right_transform = transforms.GetComponent(character.right_foot);
+			if (left_transform != nullptr && right_transform != nullptr)
+			{
+				left_pos = left_transform->GetPosition();
+				right_pos = right_transform->GetPosition();
+			}
+
+			if (character.IsFootPlacementEnabled() && character.ground_intersect)
+			{
+				// Compute root offset :
+				// I determine which foot wants to step on lower ground, that will offset whole root downwards
+				// 	The other foot will be the upper foot which will be later attached an Inverse Kinematics(IK) effector
+				Ray left_ray(XMFLOAT3(left_pos.x, left_pos.y + 0.5f, left_pos.z), XMFLOAT3(0, -1, 0), 0, 1);
+				Ray right_ray(XMFLOAT3(right_pos.x, right_pos.y + 0.5f, right_pos.z), XMFLOAT3(0, -1, 0), 0, 1);
+				RayIntersectionResult left_result = Intersects(left_ray, FILTER_NAVIGATION_MESH | FILTER_COLLIDER, ~layer);
+				RayIntersectionResult right_result = Intersects(right_ray, FILTER_NAVIGATION_MESH | FILTER_COLLIDER, ~layer);
+				float left_diff = 0;
+				float right_diff = 0;
+				if (left_result.entity != INVALID_ENTITY)
+				{
+					left_diff = left_result.position.y - base_y;
+				}
+				if (right_result.entity != INVALID_ENTITY)
+				{
+					right_diff = right_result.position.y - base_y;
+				}
+				float diff = left_diff;
+				if (left_result.position.y > right_result.position.y + 0.01f)
+				{
+					diff = right_diff;
+					if (left_result.entity != INVALID_ENTITY)
+					{
+						ik_foot = character.left_foot;
+						ik_pos = left_result.position;
+					}
+				}
+				else
+				{
+					if (right_result.entity != INVALID_ENTITY)
+					{
+						ik_foot = character.right_foot;
+						ik_pos = right_result.position;
+					}
+				}
+				character.root_offset = wi::math::Lerp(character.root_offset, diff, 0.1f);
+			}
+			else
+			{
+				character.root_offset = wi::math::Lerp(character.root_offset, 0.0f, 0.1f);
+			}
+
+			TransformComponent* humanoid_transform = transforms.GetComponent(character.humanoidEntity);
+			if (humanoid_transform != nullptr)
+			{
+				// Offset root transform to lower foot pos:
+				humanoid_transform->translation_local.y = character.root_offset;
+				humanoid_transform->SetDirty();
+			}
+
+			// Ease out inverse kinematics by default:
+			if (inverse_kinematics.Contains(character.left_foot))
+			{
+				InverseKinematicsComponent& ik = *inverse_kinematics.GetComponent(character.left_foot);
+				ik.target_position = wi::math::Lerp(ik.target_position, left_pos, 0.6f);
+			}
+			if (inverse_kinematics.Contains(character.right_foot))
+			{
+				InverseKinematicsComponent& ik = *inverse_kinematics.GetComponent(character.right_foot);
+				ik.target_position = wi::math::Lerp(ik.target_position, right_pos, 0.6f);
+			}
+
+			// The upper foot will use IK:
+			if (ik_foot != INVALID_ENTITY && inverse_kinematics.Contains(ik_foot))
+			{
+				InverseKinematicsComponent& ik = *inverse_kinematics.GetComponent(ik_foot);
+				ik_pos.y += 0.16f;
+				ik.target_position = wi::math::Lerp(ik.target_position, ik_pos, 0.6f);
+#if 0
+				// Debug draw foot target:
+				locker.lock();
+				wi::renderer::RenderablePoint point;
+				point.position = ik.target_position;
+				point.color = XMFLOAT4(1, 1, 0, 1);
+				point.size = 0.1f;
+				wi::renderer::DrawPoint(point);
+				locker.unlock();
+#endif
+			}
+		});
+		wi::jobsystem::Wait(ctx);
+
 		if (inverse_kinematics.GetCount() > 0 || humanoids.GetCount() > 0)
 		{
 			transforms_temp = transforms.GetComponentArray(); // make copy
@@ -3090,16 +3327,29 @@ namespace wi::scene
 			}
 			Entity entity = inverse_kinematics.GetEntity(i);
 			size_t transform_index = transforms.GetIndex(entity);
-			size_t target_index = transforms.GetIndex(ik.target);
 			const HierarchyComponent* hier = hierarchy.GetComponent(entity);
-			if (transform_index == ~0ull || target_index == ~0ull || hier == nullptr)
+			if (transform_index == ~0ull || hier == nullptr)
 			{
 				continue;
 			}
 			TransformComponent& transform = transforms_temp[transform_index];
-			TransformComponent& target = transforms_temp[target_index];
 
-			const XMVECTOR target_pos = target.GetPositionV();
+			XMVECTOR target_pos;
+			if (ik.use_target_position)
+			{
+				target_pos = XMLoadFloat3(&ik.target_position);
+			}
+			else
+			{
+				size_t target_index = transforms.GetIndex(ik.target);
+				if (target_index == ~0ull)
+				{
+					continue;
+				}
+				TransformComponent& target = transforms_temp[target_index];
+				target_pos = target.GetPositionV();
+			}
+
 			for (uint32_t iteration = 0; iteration < ik.iteration_count; ++iteration)
 			{
 				TransformComponent* stack[32] = {};
@@ -3128,8 +3378,6 @@ namespace wi::scene
 					for (size_t humanoid_idx = 0; (humanoid_idx < humanoids.GetCount()) && !constrain; ++humanoid_idx)
 					{
 						const HumanoidComponent& humanoid = humanoids[humanoid_idx];
-						Entity humanoidEntity = humanoids.GetEntity(humanoid_idx);
-						const float facing = GetHumanoidDefaultFacing(humanoid, humanoidEntity);
 						int bone_type_idx = 0;
 						for (auto& bone : humanoid.bones)
 						{
@@ -3152,25 +3400,6 @@ namespace wi::scene
 									constraint_max = XMFLOAT3(XM_PI * 0.8f, 0, 0);
 									break;
 								}
-							}
-							if (constrain)
-							{
-								// Constraint swapping fixes for flipped model orientations:
-								if (facing < 0)
-								{
-									// Note: this is a fix for VRM 1.0 and Mixamo model
-									std::swap(constraint_min, constraint_max);
-								}
-								const TransformComponent* bone_transform = transforms.GetComponent(bone);
-								if (bone_transform != nullptr)
-								{
-									if (bone_transform->GetForward().z < 0)
-									{
-										// Note: this is a fix for FBX Mixamo models
-										std::swap(constraint_min, constraint_max);
-									}
-								}
-								break;
 							}
 							bone_type_idx++;
 						}
@@ -3586,6 +3815,13 @@ namespace wi::scene
 
 			armature.aabb = AABB(_min, _max);
 		});
+		wi::jobsystem::Dispatch(ctx, (uint32_t)softbodies.GetCount(), 1, [&](wi::jobsystem::JobArgs args) {
+			SoftBodyPhysicsComponent& softbody = softbodies[args.jobIndex];
+			const uint32_t dataSize = uint32_t(softbody.boneData.size() * sizeof(ShaderTransform));
+			softbody.gpuBoneOffset = skinningAllocator.fetch_add(dataSize);
+			ShaderTransform* gpu_dst = (ShaderTransform*)((uint8_t*)skinningDataMapped + softbody.gpuBoneOffset);
+			std::memcpy(gpu_dst, softbody.boneData.data(), dataSize);
+		});
 	}
 	void Scene::RunMeshUpdateSystem(wi::jobsystem::context& ctx)
 	{
@@ -3593,15 +3829,6 @@ namespace wi::scene
 
 			Entity entity = meshes.GetEntity(args.jobIndex);
 			MeshComponent& mesh = meshes[args.jobIndex];
-
-			if (!mesh.streamoutBuffer.IsValid())
-			{
-				const SoftBodyPhysicsComponent* softbody = softbodies.GetComponent(entity);
-				if (softbody != nullptr && wi::physics::IsEnabled())
-				{
-					mesh.CreateStreamoutRenderData();
-				}
-			}
 
 			if (mesh.so_pos.IsValid() && mesh.so_pre.IsValid())
 			{
@@ -3663,6 +3890,11 @@ namespace wi::scene
 				geometry.vb_uvs = mesh.vb_uvs.descriptor_srv;
 				geometry.vb_atl = mesh.vb_atl.descriptor_srv;
 				geometry.vb_pre = mesh.so_pre.descriptor_srv;
+				if (wi::renderer::IsMeshShaderAllowed())
+				{
+					geometry.vb_clu = mesh.vb_clu.descriptor_srv;
+					geometry.vb_bou = mesh.vb_bou.descriptor_srv;
+				}
 				geometry.aabb_min = mesh.aabb._min;
 				geometry.aabb_max = mesh.aabb._max;
 				geometry.tessellation_factor = mesh.tessellationFactor;
@@ -3695,13 +3927,26 @@ namespace wi::scene
 						subset.materialIndex = 0;
 					}
 
-					geometry.indexOffset = subset.indexOffset;
-					geometry.indexCount = subset.indexCount;
-					geometry.materialIndex = subset.materialIndex;
-					geometry.meshletOffset = mesh.meshletCount;
-					geometry.meshletCount = triangle_count_to_meshlet_count(subset.indexCount / 3u);
-					mesh.meshletCount += geometry.meshletCount;
-					std::memcpy(geometryArrayMapped + mesh.geometryOffset + subsetIndex, &geometry, sizeof(geometry));
+					ShaderGeometry subsetGeometry = geometry;
+					subsetGeometry.indexOffset = subset.indexOffset;
+					subsetGeometry.indexCount = subset.indexCount;
+					subsetGeometry.materialIndex = subset.materialIndex;
+					if (wi::renderer::IsMeshShaderAllowed() && subsetIndex < mesh.cluster_ranges.size())
+					{
+						subsetGeometry.meshletOffset = mesh.cluster_ranges[subsetIndex].clusterOffset;
+						subsetGeometry.meshletCount = mesh.cluster_ranges[subsetIndex].clusterCount;
+					}
+					else
+					{
+						subsetGeometry.meshletOffset = mesh.meshletCount;
+						subsetGeometry.meshletCount = triangle_count_to_meshlet_count(subset.indexCount / 3u);
+					}
+					mesh.meshletCount += subsetGeometry.meshletCount;
+					if (material != nullptr && material->IsDoubleSided())
+					{
+						subsetGeometry.flags |= SHADERMESH_FLAG_DOUBLE_SIDED;
+					}
+					std::memcpy(geometryArrayMapped + mesh.geometryOffset + subsetIndex, &subsetGeometry, sizeof(subsetGeometry));
 					subsetIndex++;
 				}
 			}
@@ -4001,6 +4246,7 @@ namespace wi::scene
 			Entity entity = objects.GetEntity(args.jobIndex);
 			ObjectComponent& object = objects[args.jobIndex];
 			AABB& aabb = aabb_objects[args.jobIndex];
+			GraphicsDevice* device = wi::graphics::GetDevice();
 
 			// Update occlusion culling status:
 			OcclusionResult& occlusion_result = occlusion_results_objects[args.jobIndex];
@@ -4047,6 +4293,21 @@ namespace wi::scene
 				object.mesh_index = (uint32_t)meshes.GetIndex(object.meshID);
 				const MeshComponent& mesh = meshes[object.mesh_index];
 
+				if (object.IsWetmapEnabled() && !object.wetmap.IsValid())
+				{
+					GPUBufferDesc desc;
+					desc.size = mesh.vertex_positions.size() * sizeof(uint16_t);
+					desc.format = Format::R16_UNORM;
+					desc.bind_flags = BindFlag::SHADER_RESOURCE | BindFlag::UNORDERED_ACCESS;
+					device->CreateBuffer(&desc, nullptr, &object.wetmap);
+					device->SetName(&object.wetmap, "wetmap");
+					object.wetmap_cleared = false;
+				}
+				else if(!object.IsWetmapEnabled() && object.wetmap.IsValid())
+				{
+					object.wetmap = {};
+				}
+
 				const TransformComponent& transform = *transforms.GetComponent(entity);
 
 				XMMATRIX W = XMLoadFloat4x4(&transform.world);
@@ -4069,7 +4330,7 @@ namespace wi::scene
 				}
 
 				SoftBodyPhysicsComponent* softbody = softbodies.GetComponent(object.meshID);
-				if (softbody != nullptr && mesh.streamoutBuffer.IsValid())
+				if (softbody != nullptr)
 				{
 					if (wi::physics::IsEnabled())
 					{
@@ -4078,18 +4339,16 @@ namespace wi::scene
 
 						// soft body manipulated with the object matrix
 						softbody->worldMatrix = transform.world;
-
-						if (softbody->graphicsToPhysicsVertexMapping.empty())
-						{
-							softbody->CreateFromMesh(mesh);
-						}
 					}
 
-					// simulation aabb will be used for soft bodies
-					aabb = softbody->aabb;
+					if (softbody->physicsobject != nullptr)
+					{
+						// simulation aabb will be used for soft bodies
+						aabb = softbody->aabb;
 
-					// soft bodies have no transform, their vertices are simulated in world space
-					W = XMMatrixIdentity();
+						// soft bodies have no transform, their vertices are simulated in world space
+						W = XMMatrixIdentity();
+					}
 				}
 
 				object.center = aabb.getCenter();
@@ -4144,7 +4403,7 @@ namespace wi::scene
 
 					if (material != nullptr)
 					{
-						object.filterMask |= material->GetFilterMask();
+						object.filterMaskDynamic |= material->GetFilterMask();
 
 						if (material->HasPlanarReflection())
 						{
@@ -4166,13 +4425,12 @@ namespace wi::scene
 
 				object.sort_bits = sort_bits.value;
 
-				// Correction matrix for mesh normals with non-uniform object scaling:
-				XMMATRIX worldMatrixInverseTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, W));
-				XMFLOAT4X4 transformIT;
-				XMStoreFloat4x4(&transformIT, worldMatrixInverseTranspose);
+				//// Correction matrix for mesh normals with non-uniform object scaling:
+				//XMMATRIX worldMatrixInverseTranspose = XMMatrixTranspose(XMMatrixInverse(nullptr, W));
+				//XMFLOAT4X4 transformIT;
+				//XMStoreFloat4x4(&transformIT, worldMatrixInverseTranspose);
 
 				// Create GPU instance data:
-				GraphicsDevice* device = wi::graphics::GetDevice();
 				ShaderMeshInstance inst;
 				inst.init();
 				XMFLOAT4X4 worldMatrixPrev = matrix_objects[args.jobIndex];
@@ -4180,6 +4438,7 @@ namespace wi::scene
 				XMStoreFloat4x4(matrix_objects.data() + args.jobIndex, W);
 				XMFLOAT4X4 worldMatrix = matrix_objects[args.jobIndex];
 
+				inst.transformRaw.Create(worldMatrix);
 				if (IsFormatUnorm(mesh.position_format) && !mesh.so_pos.IsValid())
 				{
 					// The UNORM correction is only done for the GPU data!
@@ -4190,7 +4449,12 @@ namespace wi::scene
 				inst.transform.Create(worldMatrix);
 				inst.transformPrev.Create(worldMatrixPrev);
 
-				inst.transformInverseTranspose.Create(transformIT);
+				// Get the quaternion from W because that reflects changes by other components (eg. softbody)
+				XMVECTOR S, R, T;
+				XMMatrixDecompose(&S, &R, &T, W);
+				XMStoreFloat4(&inst.quaternion, R);
+				float size = std::max(XMVectorGetX(S), std::max(XMVectorGetY(S), XMVectorGetZ(S)));
+
 				if (object.lightmap.IsValid())
 				{
 					inst.lightmap = device->GetDescriptorIndex(&object.lightmap, SubresourceType::SRV);
@@ -4198,7 +4462,7 @@ namespace wi::scene
 				inst.uid = entity;
 				inst.layerMask = layerMask;
 				inst.color = wi::math::CompressColor(object.color);
-				inst.emissive = wi::math::Pack_R11G11B10_FLOAT(XMFLOAT3(object.emissiveColor.x * object.emissiveColor.w, object.emissiveColor.y * object.emissiveColor.w, object.emissiveColor.z * object.emissiveColor.w));
+				inst.emissive = wi::math::pack_half3(XMFLOAT3(object.emissiveColor.x * object.emissiveColor.w, object.emissiveColor.y * object.emissiveColor.w, object.emissiveColor.z * object.emissiveColor.w));
 				inst.baseGeometryOffset = mesh.geometryOffset;
 				inst.baseGeometryCount = (uint)mesh.subsets.size();
 				inst.geometryOffset = inst.baseGeometryOffset + first_subset;
@@ -4208,7 +4472,8 @@ namespace wi::scene
 				inst.center = object.center;
 				inst.radius = object.radius;
 				inst.vb_ao = object.vb_ao_srv;
-				inst.alphaTest = 1 - object.alphaRef;
+				inst.vb_wetmap = device->GetDescriptorIndex(&object.wetmap, SubresourceType::SRV);
+				inst.alphaTest_size = wi::math::pack_half2(XMFLOAT2(1 - object.alphaRef, size));
 				inst.SetUserStencilRef(object.userStencilRef);
 
 				std::memcpy(instanceArrayMapped + args.jobIndex, &inst, sizeof(inst)); // memcpy whole structure into mapped pointer to avoid read from uncached memory
@@ -4593,7 +4858,7 @@ namespace wi::scene
 			inst.init();
 			inst.uid = entity;
 			inst.layerMask = hair.layerMask;
-			inst.emissive = wi::math::Pack_R11G11B10_FLOAT(XMFLOAT3(1, 1, 1));
+			inst.emissive = wi::math::pack_half3(XMFLOAT3(1, 1, 1));
 			inst.color = wi::math::CompressColor(XMFLOAT4(1, 1, 1, 1));
 			inst.center = hair.aabb.getCenter();
 			inst.radius = hair.aabb.getRadius();
@@ -4602,6 +4867,7 @@ namespace wi::scene
 			inst.baseGeometryOffset = inst.geometryOffset;
 			inst.baseGeometryCount = inst.geometryCount;
 			inst.meshletOffset = meshletOffset;
+			inst.vb_wetmap = hair.wetmap.descriptor_srv;
 
 			XMFLOAT4X4 remapMatrix;
 			XMStoreFloat4x4(&remapMatrix, hair.aabb.getUnormRemapMatrix());
@@ -4673,6 +4939,8 @@ namespace wi::scene
 
 			const TransformComponent& transform = *transforms.GetComponent(entity);
 			emitter.UpdateCPU(transform, dt);
+			if (emitter.IsInactive()) // check after UpdateCPU
+				return; // can skip writing TLAS instace below
 
 			GraphicsDevice* device = wi::graphics::GetDevice();
 
@@ -4695,7 +4963,7 @@ namespace wi::scene
 			inst.init();
 			inst.uid = entity;
 			inst.layerMask = emitter.layerMask;
-			inst.emissive = wi::math::Pack_R11G11B10_FLOAT(XMFLOAT3(1, 1, 1));
+			inst.emissive = wi::math::pack_half3(XMFLOAT3(1, 1, 1));
 			inst.color = wi::math::CompressColor(XMFLOAT4(1, 1, 1, 1));
 			inst.geometryOffset = (uint)geometryAllocation;
 			inst.geometryCount = 1;
@@ -4744,6 +5012,10 @@ namespace wi::scene
 			{
 				OceanRegenerate();
 			}
+			if (!weather.IsOceanEnabled())
+			{
+				ocean = {};
+			}
 
 			// Ocean occlusion status:
 			if (!wi::renderer::GetFreezeCullingCameraEnabled() && weather.IsOceanEnabled())
@@ -4764,6 +5036,11 @@ namespace wi::scene
 				}
 			}
 			ocean.occlusionQueries[queryheap_idx] = -1; // invalidate query
+		}
+
+		if (ocean.IsValid())
+		{
+			ocean.params = weather.oceanParameters;
 		}
 
 		if (weather.rain_amount > 0)
@@ -4798,7 +5075,7 @@ namespace wi::scene
 			{
 				Texture gradientTex = wi::texturehelper::CreateGradientTexture(
 					wi::texturehelper::GradientType::Circular,
-					32, 32,
+					64, 64,
 					XMFLOAT2(0.5f, 0.5f), XMFLOAT2(0.5f, 0),
 					wi::texturehelper::GradientFlags::Smoothstep | wi::texturehelper::GradientFlags::Inverse
 				);
@@ -4811,7 +5088,21 @@ namespace wi::scene
 				wi::renderer::AddDeferredBlockCompression(gradientTex, gradientTexBC);
 				rainMaterial.textures[MaterialComponent::BASECOLORMAP].resource.SetTexture(gradientTexBC);
 			}
-			rainMaterial.shadingRate = ShadingRate::RATE_4X4;
+			if (!rainMaterial.textures[MaterialComponent::NORMALMAP].resource.IsValid())
+			{
+				Texture gradientTex = wi::texturehelper::CreateLensDistortionNormalMap(
+					32, 32
+				);
+				Texture gradientTexBC;
+				TextureDesc desc = gradientTex.GetDesc();
+				desc.format = Format::BC5_UNORM;
+				desc.swizzle = { wi::graphics::ComponentSwizzle::R,wi::graphics::ComponentSwizzle::G,wi::graphics::ComponentSwizzle::ONE,wi::graphics::ComponentSwizzle::ONE };
+				bool success = device->CreateTexture(&desc, nullptr, &gradientTexBC);
+				assert(success);
+				wi::renderer::AddDeferredBlockCompression(gradientTex, gradientTexBC);
+				rainMaterial.textures[MaterialComponent::NORMALMAP].resource.SetTexture(gradientTexBC);
+			}
+			//rainMaterial.shadingRate = ShadingRate::RATE_4X4;
 			TransformComponent transform;
 			transform.scale_local = XMFLOAT3(30, 30, 30);
 			transform.translation_local.x = camera.Eye.x + camera.At.x * 10;
@@ -4844,7 +5135,7 @@ namespace wi::scene
 			inst.init();
 			inst.uid = 0;
 			inst.layerMask = ~0u;
-			inst.emissive = wi::math::Pack_R11G11B10_FLOAT(XMFLOAT3(1, 1, 1));
+			inst.emissive = wi::math::pack_half3(XMFLOAT3(1, 1, 1));
 			inst.color = wi::math::CompressColor(XMFLOAT4(1, 1, 1, 1));
 			inst.geometryOffset = (uint)rainGeometryOffset;
 			inst.geometryCount = 1;
@@ -4884,6 +5175,12 @@ namespace wi::scene
 		{
 			rainMaterial = {};
 			rainEmitter = {};
+		}
+
+		wetmap_fadeout_time -= dt;
+		if (weather.IsOceanEnabled() || weather.rain_amount > 0)
+		{
+			wetmap_fadeout_time = 60; // allow 60 sec for remaining wetmaps to fade out
 		}
 	}
 	void Scene::RunSoundUpdateSystem(wi::jobsystem::context& ctx)
@@ -5025,6 +5322,323 @@ namespace wi::scene
 			font.Update(dt);
 		});
 	}
+	void Scene::RunCharacterUpdateSystem(wi::jobsystem::context& ctx)
+	{
+		static const XMVECTOR up = XMVectorSet(0, 1, 0, 0);
+		static const XMMATRIX rotY = XMMatrixRotationY(XM_PI);
+		static const int max_substeps = 4;
+
+		character_capsules.resize(characters.GetCount());
+		for (size_t i = 0; i < characters.GetCount(); ++i)
+		{
+			const HumanoidComponent* humanoid = humanoids.GetComponent(characters[i].humanoidEntity);
+			if (humanoid != nullptr && humanoid->IsRagdollPhysicsEnabled())
+			{
+				characters[i].SetActive(false);
+				continue;
+			}
+			character_capsules[i] = characters[i].GetCapsule();
+		}
+
+		wi::jobsystem::Dispatch(ctx, (uint32_t)characters.GetCount(), 1, [&](wi::jobsystem::JobArgs args) {
+			CharacterComponent& character = characters[args.jobIndex];
+			if (!character.IsActive())
+				return;
+			Entity entity = characters.GetEntity(args.jobIndex);
+			uint32_t layer = 0;
+			LayerComponent* layercomponent = layers.GetComponent(entity);
+			if (layercomponent != nullptr)
+			{
+				layer = layercomponent->GetLayerMask();
+			}
+
+			const float fixed_update_fps = character.fixed_update_fps;
+			const float timestep = 1.0f / fixed_update_fps;
+			const float ground_friction = character.ground_friction;
+			const XMVECTOR wall_friction = XMVectorSet(character.ground_friction, 1, character.ground_friction, 1);
+			const float water_friction = character.water_friction;
+			const float slope_threshold = character.slope_threshold;
+			const float leaning_limit = character.leaning_limit;
+			const XMVECTOR gravity = XMVectorSet(0, character.gravity * timestep, 0, 0);
+
+			if (character.humanoidEntity == INVALID_ENTITY)
+			{
+				// Search for humanoid entity that is either this entity or a child:
+				if (humanoids.Contains(entity))
+				{
+					character.humanoidEntity = entity;
+				}
+				else
+				{
+					for (size_t i = 0; i < humanoids.GetCount(); ++i)
+					{
+						Entity humanoidEntity = humanoids.GetEntity(i);
+						if (Entity_IsDescendant(humanoidEntity, entity))
+						{
+							character.humanoidEntity = humanoidEntity;
+						}
+					}
+				}
+			}
+			const HumanoidComponent* humanoid = humanoids.GetComponent(character.humanoidEntity);
+			if (humanoid != nullptr && humanoid->IsRagdollPhysicsEnabled())
+				return;
+
+			XMVECTOR velocity = XMLoadFloat3(&character.velocity);
+			XMVECTOR movement = XMLoadFloat3(&character.movement);
+			XMVECTOR position = XMLoadFloat3(&character.position);
+			XMVECTOR height = XMVectorSet(0, character.height, 0, 0);
+			XMVECTOR platform_velocity_accumulation = XMVectorZero();
+			float platform_velocity_count = 0;
+
+			XMMATRIX facing_rot = XMMatrixLookToLH(XMVectorZero(), XMLoadFloat3(&character.facing), up);
+			
+			// Swimming:
+			character.swimming = false;
+			float swim_offset = 0;
+			if (humanoid != nullptr && humanoid->bones[size_t(HumanoidComponent::HumanoidBone::Neck)] != INVALID_ENTITY)
+			{
+				Entity neck_entity = humanoid->bones[size_t(HumanoidComponent::HumanoidBone::Neck)];
+				TransformComponent* neck_transform = transforms.GetComponent(neck_entity);
+				if (neck_transform != nullptr)
+				{
+					XMFLOAT3 neck_pos = neck_transform->GetPosition();
+					neck_pos.y += character.water_vertical_offset;
+					XMFLOAT3 ocean_pos = GetOceanPosAt(neck_pos);
+					float water_distance = ocean_pos.y - neck_pos.y;
+					if (water_distance > 0)
+					{
+						// Ocean is above the neck:
+						character.swimming = true;
+						swim_offset = water_distance;
+					}
+					else
+					{
+						Ray ray(neck_pos, XMFLOAT3(0, 1, 0), 0, 100);
+						RayIntersectionResult result = Intersects(ray, FILTER_WATER);
+						if (result.entity != INVALID_ENTITY)
+						{
+							character.swimming = true;
+							swim_offset = result.distance;
+						}
+					}
+				}
+			}
+
+			character.accumulator += dt;
+
+			const bool timestep_occurred = character.accumulator >= timestep;
+			if (timestep_occurred)
+			{
+				character.ground_intersect = false;
+				character.wall_intersect = false;
+			}
+
+			// Fixed timestep logic:
+			int steps = 0;
+			while (character.accumulator >= timestep && steps <= max_substeps)
+			{
+				steps++;
+				XMStoreFloat3(&character.position_prev, position);
+				character.accumulator -= timestep;
+				if (character.swimming)
+				{
+					velocity *= water_friction;
+				}
+				if (character.velocity.y > character.gravity && !character.swimming)
+				{
+					velocity += gravity;
+				}
+				velocity += movement;
+
+				position += velocity * timestep;
+
+				// Check ground:
+				Capsule capsule = Capsule(position, position + height, character.width);
+				CapsuleIntersectionResult result = Intersects(capsule, FILTER_NAVIGATION_MESH | FILTER_COLLIDER, ~layer);
+				if (result.entity != INVALID_ENTITY)
+				{
+					XMVECTOR collisionNormal = XMLoadFloat3(&result.normal);
+					const float slope = XMVectorGetX(XMVector3Dot(collisionNormal, up));
+					if (slope > slope_threshold)
+{				
+						character.ground_intersect = true;
+						velocity *= ground_friction;
+						position += XMVectorSet(0, result.depth, 0, 0);
+						platform_velocity_accumulation += XMLoadFloat3(&result.velocity);
+						platform_velocity_count += 1.0f;
+					}
+				}
+
+				// Check wall:
+				capsule = Capsule(position, position + height, character.width);
+				result = Intersects(capsule, FILTER_NAVIGATION_MESH | FILTER_COLLIDER, ~layer);
+				if (result.entity != INVALID_ENTITY)
+				{
+					XMVECTOR collisionNormal = XMLoadFloat3(&result.normal);
+					const float slope = XMVectorGetX(XMVector3Dot(collisionNormal, up));
+					if (slope <= slope_threshold)
+					{
+						character.wall_intersect = true;
+						if (!character.ground_intersect)
+						{
+							velocity *= wall_friction;
+						}
+						float velocityLen = XMVectorGetX(XMVector3Length(velocity));
+						XMVECTOR velocityNormalized = XMVector3Normalize(velocity);
+						XMVECTOR undesiredMotion = collisionNormal * XMVector3Dot(velocityNormalized, collisionNormal);
+						XMVECTOR desiredMotion = velocityNormalized - undesiredMotion;
+						velocity = desiredMotion * velocityLen;
+						position += collisionNormal * result.depth;
+					}
+				}
+
+				// Check character capsules:
+				if (!character.IsCharacterToCharacterCollisionDisabled())
+				{
+					capsule = Capsule(position, position + height, character.width);
+					XMFLOAT3 incident_position = XMFLOAT3(0, 0, 0);
+					XMFLOAT3 incident_normal = XMFLOAT3(0, 0, 0);
+					float penetration_depth = 0;
+					for (size_t i = 0; i < character_capsules.size(); ++i)
+					{
+						if (i == args.jobIndex)
+							continue;
+						if (!characters[i].IsActive())
+							continue;
+						if (characters[i].IsCharacterToCharacterCollisionDisabled())
+							continue;
+						if (capsule.intersects(character_capsules[i], incident_position, incident_normal, penetration_depth))
+						{
+							XMVECTOR collisionNormal = XMLoadFloat3(&incident_normal);
+							float velocityLen = XMVectorGetX(XMVector3Length(velocity));
+							XMVECTOR velocityNormalized = XMVector3Normalize(velocity);
+							XMVECTOR undesiredMotion = collisionNormal * XMVector3Dot(velocityNormalized, collisionNormal);
+							XMVECTOR desiredMotion = velocityNormalized - undesiredMotion;
+							velocity = desiredMotion * velocityLen;
+							position += collisionNormal * penetration_depth;
+							break;
+						}
+					}
+				}
+
+				// Some other things also updated at fixed rate:
+				character.facing = wi::math::Lerp(character.facing, character.facing_next, 0.05f); // smooth turning
+				character.facing.y = 0;
+				XMVECTOR facing_next = XMVector3Normalize(XMLoadFloat3(&character.facing_next));
+				XMVECTOR facing = XMVector3Normalize(XMLoadFloat3(&character.facing));
+				XMStoreFloat3(&character.facing, facing);
+				XMVECTOR facediff = XMVector3TransformNormal(facing_next - facing, facing_rot);
+				float velocity_leaning = clamp(XMVectorGetX(facediff * XMVector3Length(XMVectorSetY(velocity, 0))) * 0.08f, -leaning_limit, leaning_limit);
+				character.leaning_next = lerp(character.leaning_next, velocity_leaning, 0.05f);
+				character.leaning = lerp(character.leaning, character.leaning_next, 0.05f);
+			}
+			character.accumulator = clamp(character.accumulator, 0.0f, timestep);
+			character.alpha = character.accumulator / timestep;
+
+			if (platform_velocity_count > 0)
+			{
+				position += platform_velocity_accumulation / platform_velocity_count;
+			}
+			position += XMVectorSet(0, swim_offset, 0, 0);
+
+			// Simple animation blending:
+			for (Entity animEntity : character.animations)
+			{
+				AnimationComponent* animation = animations.GetComponent(animEntity);
+				if (animation == nullptr)
+					continue;
+				if (animEntity == character.currentAnimation)
+				{
+					if (character.reset_anim)
+					{
+						character.reset_anim = false;
+						animation->timer = animation->start;
+					}
+					animation->amount = clamp(animation->amount + dt, 0.0f, character.anim_amount);
+					animation->Play();
+					character.anim_ended = animation->timer >= animation->end;
+				}
+				else
+				{
+					animation->amount = clamp(animation->amount - dt, 0.0f, 0.1f);
+					if (animation->amount <= 0)
+					{
+						animation->Stop();
+					}
+				}
+			}
+
+			// Try to put water ripple under character:
+			float horizontal_velocity_length = XMVectorGetX(XMVector3Length(XMVectorSetY(velocity, 0)));
+			if (horizontal_velocity_length > 0.01)
+			{
+				XMFLOAT3 ocean_pos = GetOceanPosAt(character.position);
+				if (character.position.y < ocean_pos.y)
+				{
+					PutWaterRipple(XMFLOAT3(character.position.x, ocean_pos.y, character.position.z));
+				}
+				else
+				{
+					Capsule capsule = Capsule(position, position + height, character.width);
+					CapsuleIntersectionResult result = Intersects(capsule, FILTER_WATER);
+					if (result.entity != INVALID_ENTITY)
+					{
+						PutWaterRipple(result.position);
+					}
+				}
+			}
+
+			XMStoreFloat3(&character.position, position);
+			XMStoreFloat3(&character.velocity, velocity);
+			character.movement = XMFLOAT3(0, 0, 0);
+
+			// Apply character transformation on transform component:
+			TransformComponent* transform = transforms.GetComponent(entity);
+			if (transform != nullptr)
+			{
+				facing_rot = XMMatrixInverse(nullptr, facing_rot);
+
+				XMVECTOR quat = XMQuaternionRotationMatrix(facing_rot * rotY);
+				XMStoreFloat4(&transform->rotation_local, quat);
+				transform->RotateRollPitchYaw(XMFLOAT3(0, 0, character.leaning * XM_PI));
+
+				transform->scale_local = XMFLOAT3(character.scale, character.scale, character.scale);
+
+				transform->translation_local = character.GetPositionInterpolated();
+
+				XMVECTOR offset = XMLoadFloat3(&character.relative_offset);
+				offset = XMVector3TransformNormal(offset, facing_rot);
+				transform->Translate(offset);
+
+				transform->SetDirty();
+			}
+
+			if (character.pathfinding_thread == nullptr && character.process_goal)
+			{
+				character.pathfinding_thread = std::make_shared<CharacterComponent::PathfindingThreadContext>();
+			}
+			if (character.pathfinding_thread)
+			{
+				if (AtomicLoad(&character.pathfinding_thread->process_goal_completed) != 0)
+				{
+					AtomicAnd(&character.pathfinding_thread->process_goal_completed, 0);
+					std::swap(character.pathfinding_thread->pathquery_work, character.pathquery);
+				}
+				if (character.process_goal && character.voxelgrid != nullptr && !wi::jobsystem::IsBusy(character.pathfinding_thread->ctx))
+				{
+					character.process_goal = false;
+					character.pathfinding_thread->ctx.priority = wi::jobsystem::Priority::Low;
+					wi::jobsystem::Execute(character.pathfinding_thread->ctx, [&](wi::jobsystem::JobArgs args) {
+						character.pathfinding_thread->pathquery_work.process(character.position, character.goal, *character.voxelgrid);
+						AtomicOr(&character.pathfinding_thread->process_goal_completed, 1);
+					});
+				}
+			}
+
+		});
+		wi::jobsystem::Wait(ctx);
+	}
 
 	Scene::RayIntersectionResult Scene::Intersects(const Ray& ray, uint32_t filterMask, uint32_t layerMask, uint32_t lod) const
 	{
@@ -5118,28 +5732,23 @@ namespace wi::scene
 					XMVECTOR p0;
 					XMVECTOR p1;
 					XMVECTOR p2;
-
-					const bool softbody_active = softbody != nullptr && softbody->HasVertices();
-					if (softbody_active)
+					if (softbody != nullptr && !softbody->boneData.empty())
 					{
-						p0 = softbody->vertex_positions_simulation[i0].LoadPOS();
-						p1 = softbody->vertex_positions_simulation[i1].LoadPOS();
-						p2 = softbody->vertex_positions_simulation[i2].LoadPOS();
+						p0 = SkinVertex(*mesh, *softbody, i0);
+						p1 = SkinVertex(*mesh, *softbody, i1);
+						p2 = SkinVertex(*mesh, *softbody, i2);
+					}
+					else if (armature != nullptr && !armature->boneData.empty())
+					{
+						p0 = SkinVertex(*mesh, *armature, i0);
+						p1 = SkinVertex(*mesh, *armature, i1);
+						p2 = SkinVertex(*mesh, *armature, i2);
 					}
 					else
 					{
-						if (armature == nullptr || armature->boneData.empty())
-						{
-							p0 = XMLoadFloat3(&mesh->vertex_positions[i0]);
-							p1 = XMLoadFloat3(&mesh->vertex_positions[i1]);
-							p2 = XMLoadFloat3(&mesh->vertex_positions[i2]);
-						}
-						else
-						{
-							p0 = SkinVertex(*mesh, *armature, i0);
-							p1 = SkinVertex(*mesh, *armature, i1);
-							p2 = SkinVertex(*mesh, *armature, i2);
-						}
+						p0 = XMLoadFloat3(&mesh->vertex_positions[i0]);
+						p1 = XMLoadFloat3(&mesh->vertex_positions[i1]);
+						p2 = XMLoadFloat3(&mesh->vertex_positions[i2]);
 					}
 
 					float distance;
@@ -5216,9 +5825,9 @@ namespace wi::scene
 					Ray ray_local = Ray(rayOrigin_local, rayDirection_local);
 
 					mesh->bvh.Intersects(ray_local, 0, [&](uint32_t index) {
-						const uint32_t userdata = mesh->bvh_leaf_aabbs[index].userdata;
-						const uint32_t triangleIndex = userdata & 0xFFFFFF;
-						const uint32_t subsetIndex = userdata >> 24u;
+						const AABB& leaf = mesh->bvh_leaf_aabbs[index];
+						const uint32_t triangleIndex = leaf.layerMask;
+						const uint32_t subsetIndex = leaf.userdata;
 						const MeshComponent::MeshSubset& subset = mesh->subsets[subsetIndex];
 						if (subset.indexCount == 0)
 							return;
@@ -5254,7 +5863,7 @@ namespace wi::scene
 
 		return result;
 	}
-	bool Scene::IntersectsFirst(const wi::primitive::Ray& ray, uint32_t filterMask, uint32_t layerMask, uint32_t lod) const
+	bool Scene::IntersectsFirst(const Ray& ray, uint32_t filterMask, uint32_t layerMask, uint32_t lod) const
 	{
 		bool result = false;
 
@@ -5337,28 +5946,23 @@ namespace wi::scene
 					XMVECTOR p0;
 					XMVECTOR p1;
 					XMVECTOR p2;
-
-					const bool softbody_active = softbody != nullptr && softbody->HasVertices();
-					if (softbody_active)
+					if (softbody != nullptr && !softbody->boneData.empty())
 					{
-						p0 = softbody->vertex_positions_simulation[i0].LoadPOS();
-						p1 = softbody->vertex_positions_simulation[i1].LoadPOS();
-						p2 = softbody->vertex_positions_simulation[i2].LoadPOS();
+						p0 = SkinVertex(*mesh, *softbody, i0);
+						p1 = SkinVertex(*mesh, *softbody, i1);
+						p2 = SkinVertex(*mesh, *softbody, i2);
+					}
+					else if (armature != nullptr && !armature->boneData.empty())
+					{
+						p0 = SkinVertex(*mesh, *armature, i0);
+						p1 = SkinVertex(*mesh, *armature, i1);
+						p2 = SkinVertex(*mesh, *armature, i2);
 					}
 					else
 					{
-						if (armature == nullptr || armature->boneData.empty())
-						{
-							p0 = XMLoadFloat3(&mesh->vertex_positions[i0]);
-							p1 = XMLoadFloat3(&mesh->vertex_positions[i1]);
-							p2 = XMLoadFloat3(&mesh->vertex_positions[i2]);
-						}
-						else
-						{
-							p0 = SkinVertex(*mesh, *armature, i0);
-							p1 = SkinVertex(*mesh, *armature, i1);
-							p2 = SkinVertex(*mesh, *armature, i2);
-						}
+						p0 = XMLoadFloat3(&mesh->vertex_positions[i0]);
+						p1 = XMLoadFloat3(&mesh->vertex_positions[i1]);
+						p2 = XMLoadFloat3(&mesh->vertex_positions[i2]);
 					}
 
 					float distance;
@@ -5384,9 +5988,9 @@ namespace wi::scene
 					Ray ray_local = Ray(rayOrigin_local, rayDirection_local);
 
 					mesh->bvh.IntersectsFirst(ray_local, [&](uint32_t index) {
-						const uint32_t userdata = mesh->bvh_leaf_aabbs[index].userdata;
-						const uint32_t triangleIndex = userdata & 0xFFFFFF;
-						const uint32_t subsetIndex = userdata >> 24u;
+						const AABB& leaf = mesh->bvh_leaf_aabbs[index];
+						const uint32_t triangleIndex = leaf.layerMask;
+						const uint32_t subsetIndex = leaf.userdata;
 						const MeshComponent::MeshSubset& subset = mesh->subsets[subsetIndex];
 						if (subset.indexCount == 0)
 							return false;
@@ -5510,33 +6114,30 @@ namespace wi::scene
 					XMVECTOR p0;
 					XMVECTOR p1;
 					XMVECTOR p2;
-
-					const bool softbody_active = softbody != nullptr && softbody->HasVertices();
-					if (softbody_active)
+					if (softbody != nullptr && !softbody->boneData.empty())
 					{
-						p0 = softbody->vertex_positions_simulation[i0].LoadPOS();
-						p1 = softbody->vertex_positions_simulation[i1].LoadPOS();
-						p2 = softbody->vertex_positions_simulation[i2].LoadPOS();
+						p0 = SkinVertex(*mesh, *softbody, i0);
+						p1 = SkinVertex(*mesh, *softbody, i1);
+						p2 = SkinVertex(*mesh, *softbody, i2);
+					}
+					else if (armature != nullptr && !armature->boneData.empty())
+					{
+						p0 = SkinVertex(*mesh, *armature, i0);
+						p1 = SkinVertex(*mesh, *armature, i1);
+						p2 = SkinVertex(*mesh, *armature, i2);
+						p0 = XMVector3Transform(p0, objectMat);
+						p1 = XMVector3Transform(p1, objectMat);
+						p2 = XMVector3Transform(p2, objectMat);
 					}
 					else
 					{
-						if (armature == nullptr || armature->boneData.empty())
-						{
-							p0 = XMLoadFloat3(&mesh->vertex_positions[i0]);
-							p1 = XMLoadFloat3(&mesh->vertex_positions[i1]);
-							p2 = XMLoadFloat3(&mesh->vertex_positions[i2]);
-						}
-						else
-						{
-							p0 = SkinVertex(*mesh, *armature, i0);
-							p1 = SkinVertex(*mesh, *armature, i1);
-							p2 = SkinVertex(*mesh, *armature, i2);
-						}
+						p0 = XMLoadFloat3(&mesh->vertex_positions[i0]);
+						p1 = XMLoadFloat3(&mesh->vertex_positions[i1]);
+						p2 = XMLoadFloat3(&mesh->vertex_positions[i2]);
+						p0 = XMVector3Transform(p0, objectMat);
+						p1 = XMVector3Transform(p1, objectMat);
+						p2 = XMVector3Transform(p2, objectMat);
 					}
-
-					p0 = XMVector3Transform(p0, objectMat);
-					p1 = XMVector3Transform(p1, objectMat);
-					p2 = XMVector3Transform(p2, objectMat);
 
 					XMFLOAT3 min, max;
 					XMStoreFloat3(&min, XMVectorMin(p0, XMVectorMin(p1, p2)));
@@ -5663,9 +6264,9 @@ namespace wi::scene
 					Sphere sphere_local = Sphere(center_local, radius_local);
 
 					mesh->bvh.Intersects(sphere_local, 0, [&](uint32_t index) {
-						const uint32_t userdata = mesh->bvh_leaf_aabbs[index].userdata;
-						const uint32_t triangleIndex = userdata & 0xFFFFFF;
-						const uint32_t subsetIndex = userdata >> 24u;
+						const AABB& leaf = mesh->bvh_leaf_aabbs[index];
+						const uint32_t triangleIndex = leaf.layerMask;
+						const uint32_t subsetIndex = leaf.userdata;
 						const MeshComponent::MeshSubset& subset = mesh->subsets[subsetIndex];
 						if (subset.indexCount == 0)
 							return;
@@ -5795,33 +6396,30 @@ namespace wi::scene
 					XMVECTOR p0;
 					XMVECTOR p1;
 					XMVECTOR p2;
-
-					const bool softbody_active = softbody != nullptr && softbody->HasVertices();
-					if (softbody_active)
+					if (softbody != nullptr && !softbody->boneData.empty())
 					{
-						p0 = softbody->vertex_positions_simulation[i0].LoadPOS();
-						p1 = softbody->vertex_positions_simulation[i1].LoadPOS();
-						p2 = softbody->vertex_positions_simulation[i2].LoadPOS();
+						p0 = SkinVertex(*mesh, *softbody, i0);
+						p1 = SkinVertex(*mesh, *softbody, i1);
+						p2 = SkinVertex(*mesh, *softbody, i2);
+					}
+					else if (armature != nullptr && !armature->boneData.empty())
+					{
+						p0 = SkinVertex(*mesh, *armature, i0);
+						p1 = SkinVertex(*mesh, *armature, i1);
+						p2 = SkinVertex(*mesh, *armature, i2);
+						p0 = XMVector3Transform(p0, objectMat);
+						p1 = XMVector3Transform(p1, objectMat);
+						p2 = XMVector3Transform(p2, objectMat);
 					}
 					else
 					{
-						if (armature == nullptr || armature->boneData.empty())
-						{
-							p0 = XMLoadFloat3(&mesh->vertex_positions[i0]);
-							p1 = XMLoadFloat3(&mesh->vertex_positions[i1]);
-							p2 = XMLoadFloat3(&mesh->vertex_positions[i2]);
-						}
-						else
-						{
-							p0 = SkinVertex(*mesh, *armature, i0);
-							p1 = SkinVertex(*mesh, *armature, i1);
-							p2 = SkinVertex(*mesh, *armature, i2);
-						}
+						p0 = XMLoadFloat3(&mesh->vertex_positions[i0]);
+						p1 = XMLoadFloat3(&mesh->vertex_positions[i1]);
+						p2 = XMLoadFloat3(&mesh->vertex_positions[i2]);
+						p0 = XMVector3Transform(p0, objectMat);
+						p1 = XMVector3Transform(p1, objectMat);
+						p2 = XMVector3Transform(p2, objectMat);
 					}
-
-					p0 = XMVector3Transform(p0, objectMat);
-					p1 = XMVector3Transform(p1, objectMat);
-					p2 = XMVector3Transform(p2, objectMat);
 
 					XMFLOAT3 min, max;
 					XMStoreFloat3(&min, XMVectorMin(p0, XMVectorMin(p1, p2)));
@@ -6062,9 +6660,9 @@ namespace wi::scene
 					AABB capsule_local_aabb = Capsule(base_local, tip_local, radius_local).getAABB();
 
 					mesh->bvh.Intersects(capsule_local_aabb, 0, [&](uint32_t index){
-						const uint32_t userdata = mesh->bvh_leaf_aabbs[index].userdata;
-						const uint32_t triangleIndex = userdata & 0xFFFFFF;
-						const uint32_t subsetIndex = userdata >> 24u;
+						const AABB& leaf = mesh->bvh_leaf_aabbs[index];
+						const uint32_t triangleIndex = leaf.layerMask;
+						const uint32_t subsetIndex = leaf.userdata;
 						const MeshComponent::MeshSubset& subset = mesh->subsets[subsetIndex];
 						if (subset.indexCount == 0)
 							return;
@@ -6135,29 +6733,26 @@ namespace wi::scene
 				XMVECTOR p0;
 				XMVECTOR p1;
 				XMVECTOR p2;
-
-				const bool softbody_active = softbody != nullptr && softbody->HasVertices();
-				if (softbody_active)
+				if (softbody != nullptr && !softbody->boneData.empty())
 				{
-					p0 = softbody->vertex_positions_simulation[i0].LoadPOS();
-					p1 = softbody->vertex_positions_simulation[i1].LoadPOS();
-					p2 = softbody->vertex_positions_simulation[i2].LoadPOS();
+					p0 = SkinVertex(*mesh, *softbody, i0);
+					p1 = SkinVertex(*mesh, *softbody, i1);
+					p2 = SkinVertex(*mesh, *softbody, i2);
+				}
+				else if (armature != nullptr && !armature->boneData.empty())
+				{
+					p0 = SkinVertex(*mesh, *armature, i0);
+					p1 = SkinVertex(*mesh, *armature, i1);
+					p2 = SkinVertex(*mesh, *armature, i2);
+					p0 = XMVector3Transform(p0, objectMat);
+					p1 = XMVector3Transform(p1, objectMat);
+					p2 = XMVector3Transform(p2, objectMat);
 				}
 				else
 				{
-					if (armature == nullptr || armature->boneData.empty())
-					{
-						p0 = XMLoadFloat3(&mesh->vertex_positions[i0]);
-						p1 = XMLoadFloat3(&mesh->vertex_positions[i1]);
-						p2 = XMLoadFloat3(&mesh->vertex_positions[i2]);
-					}
-					else
-					{
-						p0 = SkinVertex(*mesh, *armature, i0);
-						p1 = SkinVertex(*mesh, *armature, i1);
-						p2 = SkinVertex(*mesh, *armature, i2);
-					}
-
+					p0 = XMLoadFloat3(&mesh->vertex_positions[i0]);
+					p1 = XMLoadFloat3(&mesh->vertex_positions[i1]);
+					p2 = XMLoadFloat3(&mesh->vertex_positions[i2]);
 					p0 = XMVector3Transform(p0, objectMat);
 					p1 = XMVector3Transform(p1, objectMat);
 					p2 = XMVector3Transform(p2, objectMat);
@@ -6249,37 +6844,35 @@ namespace wi::scene
 		const SoftBodyPhysicsComponent* softbody = softbodies.GetComponent(object->meshID);
 		const ArmatureComponent* armature = mesh->IsSkinned() ? armatures.GetComponent(mesh->armatureID) : nullptr;
 
+		XMVECTOR P;
 		XMVECTOR p0;
 		XMVECTOR p1;
 		XMVECTOR p2;
-
-		const bool softbody_active = softbody != nullptr && softbody->HasVertices();
-		if (softbody_active)
+		if (softbody != nullptr && !softbody->boneData.empty())
 		{
-			p0 = softbody->vertex_positions_simulation[vertexID0].LoadPOS();
-			p1 = softbody->vertex_positions_simulation[vertexID1].LoadPOS();
-			p2 = softbody->vertex_positions_simulation[vertexID2].LoadPOS();
+			p0 = SkinVertex(*mesh, *softbody, vertexID0);
+			p1 = SkinVertex(*mesh, *softbody, vertexID1);
+			p2 = SkinVertex(*mesh, *softbody, vertexID2);
+			P = XMVectorBaryCentric(p0, p1, p2, bary.x, bary.y);
+		}
+		else if (armature != nullptr && !armature->boneData.empty())
+		{
+			p0 = SkinVertex(*mesh, *armature, vertexID0);
+			p1 = SkinVertex(*mesh, *armature, vertexID1);
+			p2 = SkinVertex(*mesh, *armature, vertexID2);
+
+			P = XMVectorBaryCentric(p0, p1, p2, bary.x, bary.y);
+			const size_t objectIndex = objects.GetIndex(objectEntity);
+			const XMMATRIX objectMat = XMLoadFloat4x4(&matrix_objects[objectIndex]);
+			P = XMVector3Transform(P, objectMat);
 		}
 		else
 		{
-			if (armature == nullptr || armature->boneData.empty())
-			{
-				p0 = XMLoadFloat3(&mesh->vertex_positions[vertexID0]);
-				p1 = XMLoadFloat3(&mesh->vertex_positions[vertexID1]);
-				p2 = XMLoadFloat3(&mesh->vertex_positions[vertexID2]);
-			}
-			else
-			{
-				p0 = SkinVertex(*mesh, *armature, vertexID0);
-				p1 = SkinVertex(*mesh, *armature, vertexID1);
-				p2 = SkinVertex(*mesh, *armature, vertexID2);
-			}
-		}
+			p0 = XMLoadFloat3(&mesh->vertex_positions[vertexID0]);
+			p1 = XMLoadFloat3(&mesh->vertex_positions[vertexID1]);
+			p2 = XMLoadFloat3(&mesh->vertex_positions[vertexID2]);
 
-		XMVECTOR P = XMVectorBaryCentric(p0, p1, p2, bary.x, bary.y);
-
-		if (!softbody_active)
-		{
+			P = XMVectorBaryCentric(p0, p1, p2, bary.x, bary.y);
 			const size_t objectIndex = objects.GetIndex(objectEntity);
 			const XMMATRIX objectMat = XMLoadFloat4x4(&matrix_objects[objectIndex]);
 			P = XMVector3Transform(P, objectMat);
@@ -6290,6 +6883,58 @@ namespace wi::scene
 		return result;
 	}
 
+	void Scene::ResetPose(wi::ecs::Entity entity)
+	{
+		// All child armatures will be also calling ResetPose, in case you give a parent entity of them, for convenience:
+		for (size_t i = 0; i < armatures.GetCount(); ++i)
+		{
+			Entity armatureEntity = armatures.GetEntity(i);
+			if (Entity_IsDescendant(armatureEntity, entity))
+			{
+				ResetPose(armatureEntity);
+			}
+		}
+
+		const ArmatureComponent* armature = armatures.GetComponent(entity);
+		if (armature == nullptr)
+			return;
+
+		XMMATRIX W = XMMatrixIdentity();
+		const TransformComponent* armature_transform = transforms.GetComponent(entity);
+		if (armature_transform != nullptr)
+		{
+			W = XMLoadFloat4x4(&armature_transform->world);
+		}
+
+		for (size_t i = 0; i < armature->boneCollection.size(); ++i)
+		{
+			Entity bone = armature->boneCollection[i];
+			TransformComponent* transform = transforms.GetComponent(bone);
+			if (transform != nullptr)
+			{
+				transform->ClearTransform();
+				transform->MatrixTransform(XMMatrixInverse(nullptr, XMLoadFloat4x4(&armature->inverseBindMatrices[i])) * W);
+				transform->UpdateTransform();
+				const HierarchyComponent* hier = hierarchy.GetComponent(bone);
+				if (hier != nullptr && hier->parentID != INVALID_ENTITY)
+				{
+					Component_Attach(bone, hier->parentID, false);
+				}
+			}
+		}
+	}
+
+	XMFLOAT3 Scene::GetOceanPosAt(const XMFLOAT3& worldPosition) const
+	{
+		if (!ocean.IsValid())
+			return worldPosition;
+		return ocean.GetDisplacedPosition(worldPosition);
+	}
+
+	bool Scene::IsWetmapProcessingRequired() const
+	{
+		return wetmap_fadeout_time > 0;
+	}
 
 	void Scene::PutWaterRipple(const std::string& image, const XMFLOAT3& pos)
 	{
@@ -6304,7 +6949,9 @@ namespace wi::scene
 		img.params.siz = XMFLOAT2(1, 1);
 		img.params.quality = wi::image::QUALITY_ANISOTROPIC;
 		img.params.pivot = XMFLOAT2(0.5f, 0.5f);
+		locker.lock();
 		waterRipples.push_back(img);
+		locker.unlock();
 	}
 	void Scene::PutWaterRipple(const XMFLOAT3& pos)
 	{
@@ -6320,46 +6967,68 @@ namespace wi::scene
 		img.params.siz = XMFLOAT2(1, 1);
 		img.params.quality = wi::image::QUALITY_ANISOTROPIC;
 		img.params.pivot = XMFLOAT2(0.5f, 0.5f);
+		locker.lock();
 		waterRipples.push_back(img);
+		locker.unlock();
 	}
 
-	XMVECTOR SkinVertex(const MeshComponent& mesh, const ArmatureComponent& armature, uint32_t index, XMVECTOR* N)
+	XMVECTOR SkinVertex(const MeshComponent& mesh, const wi::vector<ShaderTransform>& boneData, uint32_t index, XMVECTOR* N)
 	{
 		XMVECTOR P = XMLoadFloat3(&mesh.vertex_positions[index]);
-		const XMUINT4& ind = mesh.vertex_boneindices[index];
-		const XMFLOAT4& wei = mesh.vertex_boneweights[index];
 
-		const XMFLOAT4X4 mat[] = {
-			armature.boneData[ind.x].GetMatrix(),
-			armature.boneData[ind.y].GetMatrix(),
-			armature.boneData[ind.z].GetMatrix(),
-			armature.boneData[ind.w].GetMatrix(),
-		};
-		const XMMATRIX M[] = {
-			XMMatrixTranspose(XMLoadFloat4x4(&mat[0])),
-			XMMatrixTranspose(XMLoadFloat4x4(&mat[1])),
-			XMMatrixTranspose(XMLoadFloat4x4(&mat[2])),
-			XMMatrixTranspose(XMLoadFloat4x4(&mat[3])),
-		};
+		const uint32_t influence_div4 = mesh.GetBoneInfluenceDiv4();
 
-		XMVECTOR skinned;
-		skinned =  XMVector3Transform(P, M[0]) * wei.x;
-		skinned += XMVector3Transform(P, M[1]) * wei.y;
-		skinned += XMVector3Transform(P, M[2]) * wei.z;
-		skinned += XMVector3Transform(P, M[3]) * wei.w;
-		P = skinned;
+		XMVECTOR skinnedP = XMVectorZero();
+		XMVECTOR skinnedN = XMVectorZero();
+		for (uint32_t influence = 0; influence < influence_div4; ++influence)
+		{
+			const XMUINT4& ind = influence == 0 ? mesh.vertex_boneindices[index] : mesh.vertex_boneindices2[index];
+			const XMFLOAT4& wei = influence == 0 ? mesh.vertex_boneweights[index]: mesh.vertex_boneweights2[index];
+
+			const XMFLOAT4X4 mat[] = {
+				boneData[ind.x].GetMatrix(),
+				boneData[ind.y].GetMatrix(),
+				boneData[ind.z].GetMatrix(),
+				boneData[ind.w].GetMatrix(),
+			};
+			const XMMATRIX M[] = {
+				XMMatrixTranspose(XMLoadFloat4x4(&mat[0])),
+				XMMatrixTranspose(XMLoadFloat4x4(&mat[1])),
+				XMMatrixTranspose(XMLoadFloat4x4(&mat[2])),
+				XMMatrixTranspose(XMLoadFloat4x4(&mat[3])),
+			};
+
+			skinnedP += XMVector3Transform(P, M[0]) * wei.x;
+			skinnedP += XMVector3Transform(P, M[1]) * wei.y;
+			skinnedP += XMVector3Transform(P, M[2]) * wei.z;
+			skinnedP += XMVector3Transform(P, M[3]) * wei.w;
+
+			if (N != nullptr)
+			{
+				*N = XMLoadFloat3(&mesh.vertex_normals[index]);
+				skinnedN += XMVector3TransformNormal(*N, M[0]) * wei.x;
+				skinnedN += XMVector3TransformNormal(*N, M[1]) * wei.y;
+				skinnedN += XMVector3TransformNormal(*N, M[2]) * wei.z;
+				skinnedN += XMVector3TransformNormal(*N, M[3]) * wei.w;
+			}
+		}
+
+		P = skinnedP;
 
 		if (N != nullptr)
 		{
-			*N = XMLoadFloat3(&mesh.vertex_normals[index]);
-			skinned =  XMVector3TransformNormal(*N, M[0]) * wei.x;
-			skinned += XMVector3TransformNormal(*N, M[1]) * wei.y;
-			skinned += XMVector3TransformNormal(*N, M[2]) * wei.z;
-			skinned += XMVector3TransformNormal(*N, M[3]) * wei.w;
-			*N = XMVector3Normalize(skinned);
+			*N = XMVector3Normalize(skinnedN);
 		}
 
 		return P;
+	}
+	XMVECTOR SkinVertex(const MeshComponent& mesh, const ArmatureComponent& armature, uint32_t index, XMVECTOR* N)
+	{
+		return SkinVertex(mesh, armature.boneData, index, N);
+	}
+	XMVECTOR SkinVertex(const MeshComponent& mesh, const SoftBodyPhysicsComponent& softbody, uint32_t index, XMVECTOR* N)
+	{
+		return SkinVertex(mesh, softbody.boneData, index, N);
 	}
 
 
@@ -6390,7 +7059,7 @@ namespace wi::scene
 	void LoadModel2(const std::string& fileName, const XMMATRIX& transformMatrix, Entity rootEntity)
 	{
 		Scene scene;
-		LoadModel(scene, fileName, transformMatrix, rootEntity);
+		LoadModel2(scene, fileName, transformMatrix, rootEntity);
 		GetScene().Merge(scene);
 	}
 
@@ -6657,22 +7326,29 @@ namespace wi::scene
 
 	float Scene::GetHumanoidDefaultFacing(const HumanoidComponent& humanoid, Entity humanoidEntity) const
 	{
-		Entity left_shoulder = humanoid.bones[(size_t)HumanoidComponent::HumanoidBone::LeftUpperArm];
-		Entity right_shoulder = humanoid.bones[(size_t)HumanoidComponent::HumanoidBone::RightUpperArm];
-		XMVECTOR left_shoulder_pos = GetRestPose(left_shoulder).r[3];
-		XMVECTOR right_shoulder_pos = GetRestPose(right_shoulder).r[3];
-		const TransformComponent* transform = transforms.GetComponent(humanoidEntity);
-		if (transform != nullptr)
+		if (humanoid.default_facing == 0)
 		{
-			XMVECTOR S = transform->GetScaleV();
-			left_shoulder_pos *= S;
-			right_shoulder_pos *= S;
+			Entity left_shoulder = humanoid.bones[(size_t)HumanoidComponent::HumanoidBone::LeftUpperArm];
+			Entity right_shoulder = humanoid.bones[(size_t)HumanoidComponent::HumanoidBone::RightUpperArm];
+			XMVECTOR left_shoulder_pos = GetRestPose(left_shoulder).r[3];
+			XMVECTOR right_shoulder_pos = GetRestPose(right_shoulder).r[3];
+			const TransformComponent* transform = transforms.GetComponent(humanoidEntity);
+			if (transform != nullptr)
+			{
+				XMVECTOR S = transform->GetScaleV();
+				left_shoulder_pos *= S;
+				right_shoulder_pos *= S;
+			}
+			if (XMVectorGetX(right_shoulder_pos) < XMVectorGetX(left_shoulder_pos))
+			{
+				humanoid.default_facing = -1;
+			}
+			else
+			{
+				humanoid.default_facing = 1;
+			}
 		}
-		if (XMVectorGetX(right_shoulder_pos) < XMVectorGetX(left_shoulder_pos))
-		{
-			return -1;
-		}
-		return 1;
+		return humanoid.default_facing;
 	}
 
 	void Scene::ScanAnimationDependencies()

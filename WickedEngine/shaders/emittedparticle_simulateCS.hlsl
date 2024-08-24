@@ -86,9 +86,9 @@ void main(uint3 DTid : SV_DispatchThreadID, uint Gid : SV_GroupIndex)
 		const bool colliders_disabled = xEmitterOptions & EMITTER_OPTION_BIT_COLLIDERS_DISABLED;
 
 		// process forces and colliders:
-		for (uint i = 0; i < GetFrame().forcefieldarray_count; ++i)
+		for (uint i = 0; i < forces().item_count(); ++i)
 		{
-			ShaderEntity entity = load_entity(GetFrame().forcefieldarray_offset + i);
+			ShaderEntity entity = load_entity(forces().first_item() + i);
 
 			[branch]
 			if (entity.layerMask & xEmitterLayerMask)
@@ -271,7 +271,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint Gid : SV_GroupIndex)
 		// Write out render buffers:
 		//	These must be persistent, not culled (raytracing, surfels...)
 
-		float opacity = saturate(lerp(1, 0, lifeLerp) * EmitterGetMaterial().baseColor.a);
+		float opacity = saturate(lerp(1, 0, lifeLerp) * EmitterGetMaterial().GetBaseColor().a);
 		float4 particleColor = unpack_rgba(particle.color);
 		particleColor.a *= opacity;
 

@@ -8,7 +8,7 @@ void VoxelGridWindow::Create(EditorComponent* _editor)
 {
 	editor = _editor;
 	wi::gui::Window::Create(ICON_VOXELGRID " VoxelGrid", wi::gui::Window::WindowControls::COLLAPSE | wi::gui::Window::WindowControls::CLOSE);
-	SetSize(XMFLOAT2(520, 400));
+	SetSize(XMFLOAT2(520, 480));
 
 	closeButton.SetTooltip("Delete VoxelGrid");
 	OnClose([=](wi::gui::EventArgs args) {
@@ -117,6 +117,22 @@ void VoxelGridWindow::Create(EditorComponent* _editor)
 		});
 	AddWidget(&voxelizeCollidersButton);
 
+	floodfillButton.Create("Flood fill " ICON_VOXELFILL);
+	floodfillButton.SetTooltip("Fill enclosed empty voxel areas to solid.\nThis can take long if there are large enclosed empty areas.");
+	floodfillButton.SetSize(XMFLOAT2(100, hei));
+	floodfillButton.OnClick([=](wi::gui::EventArgs args) {
+		Scene& scene = editor->GetCurrentScene();
+		wi::VoxelGrid* voxelgrid = scene.voxel_grids.GetComponent(entity);
+		if (voxelgrid == nullptr)
+			return;
+		wi::Timer tim;
+		voxelgrid->flood_fill();
+		char text[256] = {};
+		snprintf(text, arraysize(text), "Flood filling took %.2f seconds.", tim.elapsed_seconds());
+		wi::backlog::post(text);
+		});
+	AddWidget(&floodfillButton);
+
 	fitToSceneButton.Create("Fit bounds to scene " ICON_VOXELBOUNDS);
 	fitToSceneButton.SetTooltip("Fit the bounds of the voxel grid onto the whole scene.");
 	fitToSceneButton.SetSize(XMFLOAT2(100, hei));
@@ -138,6 +154,46 @@ void VoxelGridWindow::Create(EditorComponent* _editor)
 		}
 	});
 	AddWidget(&fitToSceneButton);
+
+	generateMeshButton.Create("Generate Mesh " ICON_MESH);
+	generateMeshButton.SetTooltip("Generate a mesh from the voxels.");
+	generateMeshButton.SetSize(XMFLOAT2(100, hei));
+	generateMeshButton.OnClick([=](wi::gui::EventArgs args) {
+		Scene& scene = editor->GetCurrentScene();
+		wi::VoxelGrid* voxelgrid = scene.voxel_grids.GetComponent(entity);
+		if (voxelgrid == nullptr)
+			return;
+		wi::vector<uint32_t> indices;
+		wi::vector<XMFLOAT3> vertices;
+		voxelgrid->create_mesh(indices, vertices, false);
+		if (vertices.empty())
+		{
+			wi::backlog::post("VoxelGrid.create_mesh() : no voxels were found, so mesh creation is aborted.", wi::backlog::LogLevel::Warning);
+			return;
+		}
+		scene.Entity_CreateMeshFromData("voxelgrid_to_mesh", indices.size(), indices.data(), vertices.size(), vertices.data());
+	});
+	AddWidget(&generateMeshButton);
+
+	generateSimplifiedMeshButton.Create("Generate Simplified Mesh " ICON_MESH);
+	generateSimplifiedMeshButton.SetTooltip("Generate a simplified mesh from the voxels.");
+	generateSimplifiedMeshButton.SetSize(XMFLOAT2(100, hei));
+	generateSimplifiedMeshButton.OnClick([=](wi::gui::EventArgs args) {
+		Scene& scene = editor->GetCurrentScene();
+		wi::VoxelGrid* voxelgrid = scene.voxel_grids.GetComponent(entity);
+		if (voxelgrid == nullptr)
+			return;
+		wi::vector<uint32_t> indices;
+		wi::vector<XMFLOAT3> vertices;
+		voxelgrid->create_mesh(indices, vertices, true);
+		if (vertices.empty())
+		{
+			wi::backlog::post("VoxelGrid.create_mesh() : no voxels were found, so mesh creation is aborted.", wi::backlog::LogLevel::Warning);
+			return;
+		}
+		scene.Entity_CreateMeshFromData("voxelgrid_to_mesh", indices.size(), indices.data(), vertices.size(), vertices.data());
+	});
+	AddWidget(&generateSimplifiedMeshButton);
 
 	subtractCheckBox.Create("Subtraction mode: ");
 	subtractCheckBox.SetTooltip("If enabled, voxelization will be subtractive, so it will remove voxels instead of add.");
@@ -233,7 +289,10 @@ void VoxelGridWindow::ResizeLayout()
 	add_fullwidth(voxelizeObjectsButton);
 	add_fullwidth(voxelizeCollidersButton);
 	add_fullwidth(voxelizeNavigationButton);
+	add_fullwidth(floodfillButton);
 	add_fullwidth(fitToSceneButton);
+	add_fullwidth(generateMeshButton);
+	add_fullwidth(generateSimplifiedMeshButton);
 	add_right(subtractCheckBox);
 	add_right(debugAllCheckBox);
 }

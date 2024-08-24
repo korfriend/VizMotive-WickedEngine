@@ -31,6 +31,14 @@ constexpr T saturate(T x)
 }
 
 template <typename T>
+constexpr T frac(T x)
+{
+	T f = x - T(int(x));
+	f = f < 0 ? (1 + f) : f;
+	return f;
+}
+
+template <typename T>
 constexpr float lerp(T x, T y, T a)
 {
 	return x * (1 - a) + y * a;
@@ -47,6 +55,14 @@ constexpr T smoothstep(T edge0, T edge1, T x)
 {
 	const T t = saturate((x - edge0) / (edge1 - edge0));
 	return t * t * (T(3) - T(2) * t);
+}
+
+template <typename float4, typename float2>
+constexpr float bilinear(float4 gather, float2 pixel_frac)
+{
+	const float top_row = lerp(gather.w, gather.z, pixel_frac.x);
+	const float bottom_row = lerp(gather.x, gather.y, pixel_frac.x);
+	return lerp(top_row, bottom_row, pixel_frac.y);
 }
 
 // CPU intrinsics:
@@ -224,6 +240,15 @@ inline unsigned long firstbitlow(unsigned long long value)
 	return __builtin_ctzll(value);
 }
 #endif // _WIN32
+
+inline long AtomicLoad(const volatile long* ptr)
+{
+	return AtomicOr((volatile long*)ptr, 0);
+}
+inline long long AtomicLoad(const volatile long long* ptr)
+{
+	return AtomicOr((volatile long long*)ptr, 0);
+}
 
 // Enable enum flags:
 //	https://www.justsoftwaresolutions.co.uk/cplusplus/using-enum-classes-as-bitfields.html

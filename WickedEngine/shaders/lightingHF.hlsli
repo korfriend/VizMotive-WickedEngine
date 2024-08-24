@@ -10,10 +10,26 @@
 #define DISABLE_SOFT_SHADOWMAP
 #endif // CARTOON
 
+#ifdef WATER
+#define LIGHTING_SCATTER
+#endif // WATER
+
+template<typename T>
+inline void QuadBlur(inout T value)
+{
+#if __SHADER_TARGET_STAGE == __SHADER_STAGE_PIXEL && defined(SHADOW_SAMPLING_DISK) && !defined(__spirv__) // Note: Vulkan is disabled because AMD doesn't handle it correctly
+// Average shadow within quad, this smooths out the dithering a bit:
+//	Note that I don't implement this in shadowHF.hlsli because we need to
+//	make sure that when averaging, all lanes in the quad are coherent
+//	It wouldn't be good if some waves are not sampling shadows or sampling different slices
+	value = (value + QuadReadAcrossX(value) + QuadReadAcrossY(value) + QuadReadAcrossDiagonal(value)) * 0.25;
+#endif // __SHADER_STAGE_PIXEL
+}
+
 struct LightingPart
 {
-	float3 diffuse;
-	float3 specular;
+	half3 diffuse;
+	half3 specular;
 };
 struct Lighting
 {
@@ -21,10 +37,10 @@ struct Lighting
 	LightingPart indirect;
 
 	inline void create(
-		in float3 diffuse_direct,
-		in float3 specular_direct,
-		in float3 diffuse_indirect,
-		in float3 specular_indirect
+		in half3 diffuse_direct,
+		in half3 specular_direct,
+		in half3 diffuse_indirect,
+		in half3 specular_indirect
 	)
 	{
 		direct.diffuse = diffuse_direct;
@@ -34,127 +50,127 @@ struct Lighting
 	}
 };
 
-inline void ApplyLighting(in Surface surface, in Lighting lighting, inout float4 color)
+inline void ApplyLighting(in Surface surface, in Lighting lighting, inout half4 color)
 {
-	float3 diffuse = lighting.direct.diffuse / PI + lighting.indirect.diffuse * GetFrame().gi_boost * (1 - surface.F) * surface.occlusion + surface.ssgi;
-	float3 specular = lighting.direct.specular + lighting.indirect.specular * surface.occlusion; // reminder: cannot apply surface.F for whole indirect specular, because multiple layers have separate fresnels (sheen, clearcoat)
+	half3 diffuse = lighting.direct.diffuse / PI + lighting.indirect.diffuse * GetFrame().gi_boost * (1 - surface.F) * surface.occlusion + surface.ssgi;
+	half3 specular = lighting.direct.specular + lighting.indirect.specular * surface.occlusion; // reminder: cannot apply surface.F for whole indirect specular, because multiple layers have separate fresnels (sheen, clearcoat)
 	color.rgb = lerp(surface.albedo * diffuse, surface.refraction.rgb, surface.refraction.a);
 	color.rgb += specular;
 	color.rgb += surface.emissiveColor;
 }
 
-inline void light_directional(in ShaderEntity light, in Surface surface, inout Lighting lighting, in float shadow_mask = 1)
+inline void light_directional(in ShaderEntity light, in Surface surface, inout Lighting lighting, in half shadow_mask = 1)
 {
-	float3 L = light.GetDirection();
-
+	if ((light.layerMask & surface.layerMask) == 0)
+		return; // early exit: layer mismatch
+		
+	half3 L = light.GetDirection();
 	SurfaceToLight surface_to_light;
 	surface_to_light.create(surface, L);
+	
+	if (!any(surface_to_light.NdotL_sss))
+		return; // early exit: facing away from light
+		
+	half3 light_color = light.GetColor().rgb * shadow_mask;
 
 	[branch]
-	if (any(surface_to_light.NdotL_sss))
+	if (light.IsCastingShadow() && surface.IsReceiveShadow())
 	{
-		float3 shadow = shadow_mask;
-
-		[branch]
-		if (light.IsCastingShadow() && surface.IsReceiveShadow())
+		if (GetFrame().options & OPTION_BIT_VOLUMETRICCLOUDS_CAST_SHADOW)
 		{
-			if (GetFrame().options & OPTION_BIT_VOLUMETRICCLOUDS_CAST_SHADOW)
-			{
-				shadow *= shadow_2D_volumetricclouds(surface.P);
-			}
+			light_color *= shadow_2D_volumetricclouds(surface.P);
+		}
 
 #if defined(SHADOW_MASK_ENABLED) && !defined(TRANSPARENT)
-			[branch]
-			if ((GetFrame().options & OPTION_BIT_RAYTRACED_SHADOWS) == 0 || GetCamera().texture_rtshadow_index < 0 || (GetCamera().options & SHADERCAMERA_OPTION_USE_SHADOW_MASK) == 0)
+		[branch]
+		if ((GetFrame().options & OPTION_BIT_RAYTRACED_SHADOWS) == 0 || GetCamera().texture_rtshadow_index < 0 || (GetCamera().options & SHADERCAMERA_OPTION_USE_SHADOW_MASK) == 0)
 #endif // SHADOW_MASK_ENABLED
+		{
+			// Loop through cascades from closest (smallest) to furthest (largest)
+			[loop]
+			for (uint cascade = 0; cascade < light.GetShadowCascadeCount(); ++cascade)
 			{
-				// Loop through cascades from closest (smallest) to furthest (largest)
-				[loop]
-				for (uint cascade = 0; cascade < light.GetShadowCascadeCount(); ++cascade)
+				// Project into shadow map space (no need to divide by .w because ortho projection!):
+				const float4x4 cascade_projection = load_entitymatrix(light.GetMatrixIndex() + cascade);
+				const float3 shadow_pos = mul(cascade_projection, float4(surface.P, 1)).xyz;
+				const float3 shadow_uv = clipspace_to_uv(shadow_pos);
+
+				// Determine if pixel is inside current cascade bounds and compute shadow if it is:
+				[branch]
+				if (is_saturated(shadow_uv))
 				{
-					// Project into shadow map space (no need to divide by .w because ortho projection!):
-					float3 shadow_pos = mul(load_entitymatrix(light.GetMatrixIndex() + cascade), float4(surface.P, 1)).xyz;
-					float3 shadow_uv = clipspace_to_uv(shadow_pos);
-
-					// Determine if pixel is inside current cascade bounds and compute shadow if it is:
+					const half2 cascade_edgefactor = saturate(saturate(abs(shadow_pos.xy)) - 0.8) * 5.0; // fade will be on edge and inwards 10%
+					const half cascade_fade = max(cascade_edgefactor.x, cascade_edgefactor.y);
+						
+					// If we are on cascade edge threshold and not the last cascade, then fallback to a larger cascade:
 					[branch]
-					if (is_saturated(shadow_uv))
-					{
-						const float3 shadow_main = shadow_2D(light, shadow_pos, shadow_uv.xy, cascade);
-						const float3 cascade_edgefactor = saturate(saturate(abs(shadow_pos)) - 0.8) * 5.0; // fade will be on edge and inwards 20%
-						const float cascade_fade = max(cascade_edgefactor.x, max(cascade_edgefactor.y, cascade_edgefactor.z));
-
-						// If we are on cascade edge threshold and not the last cascade, then fallback to a larger cascade:
-						[branch]
-						if (cascade_fade > 0 && cascade < light.GetShadowCascadeCount() - 1)
-						{
-							// Project into next shadow cascade (no need to divide by .w because ortho projection!):
-							cascade += 1;
-							shadow_pos = mul(load_entitymatrix(light.GetMatrixIndex() + cascade), float4(surface.P, 1)).xyz;
-							shadow_uv = clipspace_to_uv(shadow_pos);
-							const float3 shadow_fallback = shadow_2D(light, shadow_pos, shadow_uv.xy, cascade);
-
-							shadow *= lerp(shadow_main, shadow_fallback, cascade_fade);
-						}
-						else
-						{
-							shadow *= shadow_main;
-						}
-						break;
-					}
+					if (cascade_fade > 0 && dither(surface.pixel + GetTemporalAASampleRotation()) < cascade_fade)
+						continue;
+						
+					light_color *= shadow_2D(light, shadow_pos, shadow_uv.xy, cascade, surface.pixel);
+					break;
 				}
 			}
 		}
+		
+		QuadBlur(light_color);
+	}
 
-		[branch]
-		if (any(shadow))
-		{
-			float3 light_color = light.GetColor().rgb * shadow;
+	[branch]
+	if (GetFrame().options & OPTION_BIT_REALISTIC_SKY)
+	{
+		light_color *= GetAtmosphericLightTransmittance(GetWeather().atmosphere, surface.P, L, texture_transmittancelut);
+	}
 
-			[branch]
-			if (GetFrame().options & OPTION_BIT_REALISTIC_SKY)
-			{
-				light_color *= GetAtmosphericLightTransmittance(GetWeather().atmosphere, surface.P, L, texture_transmittancelut);
-			}
+	lighting.direct.diffuse = mad(light_color, BRDF_GetDiffuse(surface, surface_to_light), lighting.direct.diffuse);
+	lighting.direct.specular = mad(light_color, BRDF_GetSpecular(surface, surface_to_light), lighting.direct.specular);
 
-			lighting.direct.diffuse = mad(light_color, BRDF_GetDiffuse(surface, surface_to_light), lighting.direct.diffuse);
-			lighting.direct.specular = mad(light_color, BRDF_GetSpecular(surface, surface_to_light), lighting.direct.specular);
-
+#ifdef LIGHTING_SCATTER
+	const half scattering = ComputeScattering(saturate(dot(L, -surface.V)));
+	lighting.indirect.specular += scattering * light_color * (1 - surface.extinction) * (1 - sqr(1 - saturate(1 - surface.N.y)));
+#endif // LIGHTING_SCATTER
+			
 #ifndef WATER
-			const ShaderOcean ocean = GetWeather().ocean;
-			if (ocean.texture_displacementmap >= 0)
-			{
-				Texture2D displacementmap = bindless_textures[ocean.texture_displacementmap];
-				float2 ocean_uv = surface.P.xz * ocean.patch_size_rcp;
-				float3 displacement = displacementmap.SampleLevel(sampler_linear_wrap, ocean_uv, 0).xzy;
-				float water_height = ocean.water_height + displacement.y;
-				if (surface.P.y < water_height)
-				{
-					float3 caustic = caustic_pattern(ocean_uv * 20, GetFrame().time);
-					caustic *= sqr(saturate((water_height - surface.P.y) * 0.5)); // fade out at shoreline
-					caustic *= light_color;
-					lighting.indirect.diffuse += caustic;
-				}
-			}
-#endif // WATER
+	// On non-water surfaces there can be procedural caustic if it's under ocean:
+	const ShaderOcean ocean = GetWeather().ocean;
+	if (ocean.texture_displacementmap >= 0)
+	{
+		Texture2D displacementmap = bindless_textures[ocean.texture_displacementmap];
+		float2 ocean_uv = surface.P.xz * ocean.patch_size_rcp;
+		float3 displacement = displacementmap.SampleLevel(sampler_linear_wrap, ocean_uv, 0).xzy;
+		float water_height = ocean.water_height + displacement.y;
+		if (surface.P.y < water_height)
+		{
+			half3 caustic = texture_caustics.SampleLevel(sampler_linear_mirror, ocean_uv, 0).rgb;
+			caustic *= sqr(saturate((water_height - surface.P.y) * 0.5)); // fade out at shoreline
+			caustic *= light_color;
+			lighting.indirect.diffuse += caustic;
 
+			// fade out specular at depth, it looks weird when specular appears under ocean from wetmap
+			half water_depth = water_height - surface.P.y;
+			lighting.direct.specular *= saturate(exp(-water_depth * 10));
 		}
 	}
+#endif // WATER
 }
 
-inline float attenuation_pointlight(in float dist, in float dist2, in float range, in float range2)
+inline half attenuation_pointlight(in half dist2, in half range, in half range2)
 {
 	// GLTF recommendation: https://github.com/KhronosGroup/glTF/tree/main/extensions/2.0/Khronos/KHR_lights_punctual#range-property
 	//return saturate(1 - pow(dist / range, 4)) / dist2;
 
-	// Removed pow(x, 4), and avoid zero divisions:
-	float dist_per_range = dist2 / max(0.0001, range2); // pow2
+	// Removed pow(x, 4):
+	half dist_per_range = dist2 / range2; // pow2 (note: range cannot be 0, in that case light is not uploaded to GPU, so here will not be zero-division)
 	dist_per_range *= dist_per_range; // pow4
 	return saturate(1 - dist_per_range) / max(0.0001, dist2);
 }
-inline void light_point(in ShaderEntity light, in Surface surface, inout Lighting lighting, in float shadow_mask = 1)
+inline void light_point(in ShaderEntity light, in Surface surface, inout Lighting lighting, in half shadow_mask = 1)
 {
-	float3 L = light.position - surface.P;
+	if ((light.layerMask & surface.layerMask) == 0)
+		return; // early exit: layer mismatch
+	
+	float3 Lunnormalized = light.position - surface.P;
+	const float3 LunnormalizedShadow = Lunnormalized;
 
 #ifndef DISABLE_AREA_LIGHTS
 	if (light.GetLength() > 0)
@@ -165,178 +181,178 @@ inline void light_point(in ShaderEntity light, in Surface surface, inout Lightin
 			light.position + light.GetDirection() * light.GetLength() * 0.5,
 			surface.P
 		);
-		L = line_point - surface.P;
+		Lunnormalized = line_point - surface.P;
 	}
 #endif // DISABLE_AREA_LIGHTS
 
-	const float dist2 = dot(L, L);
-	const float range = light.GetRange();
-	const float range2 = range * range;
+	const half dist2 = dot(Lunnormalized, Lunnormalized);
+	const half range = light.GetRange();
+	const half range2 = range * range;
+	
+	if (dist2 > range2)
+		return; // early exit: outside range
+		
+	const half dist_rcp = rsqrt(dist2);
+	half3 L = Lunnormalized * dist_rcp;
+
+	SurfaceToLight surface_to_light;
+	surface_to_light.create(surface, L);
+		
+	if (!any(surface_to_light.NdotL_sss))
+		return; // early exit: facing away from light
+		
+	half3 light_color = light.GetColor().rgb * shadow_mask;
 
 	[branch]
-	if (dist2 < range2)
+	if (light.IsCastingShadow() && surface.IsReceiveShadow())
 	{
-		const float dist = sqrt(dist2);
-		L /= dist;
-
-		SurfaceToLight surface_to_light;
-		surface_to_light.create(surface, L);
-
-		[branch]
-		if (any(surface_to_light.NdotL_sss))
-		{
-			float3 shadow = shadow_mask;
-
-			[branch]
-			if (light.IsCastingShadow() && surface.IsReceiveShadow())
-			{
 #if defined(SHADOW_MASK_ENABLED) && !defined(TRANSPARENT)
-				[branch]
-				if ((GetFrame().options & OPTION_BIT_RAYTRACED_SHADOWS) == 0 || GetCamera().texture_rtshadow_index < 0 || (GetCamera().options & SHADERCAMERA_OPTION_USE_SHADOW_MASK) == 0)
+		[branch]
+		if ((GetFrame().options & OPTION_BIT_RAYTRACED_SHADOWS) == 0 || GetCamera().texture_rtshadow_index < 0 || (GetCamera().options & SHADERCAMERA_OPTION_USE_SHADOW_MASK) == 0)
 #endif // SHADOW_MASK_ENABLED
-				{
-					shadow *= shadow_cube(light, light.position - surface.P);
-				}
-			}
+		{
+			light_color *= shadow_cube(light, LunnormalizedShadow, surface.pixel);
+		}
+		
+		QuadBlur(light_color);
+	}
 
-			[branch]
-			if (any(shadow))
-			{
-				float3 light_color = light.GetColor().rgb * shadow;
-				light_color *= attenuation_pointlight(dist, dist2, range, range2);
+	light_color *= attenuation_pointlight(dist2, range, range2);
 
-				lighting.direct.diffuse = mad(light_color, BRDF_GetDiffuse(surface, surface_to_light), lighting.direct.diffuse);
+	lighting.direct.diffuse = mad(light_color, BRDF_GetDiffuse(surface, surface_to_light), lighting.direct.diffuse);
 
 #ifndef DISABLE_AREA_LIGHTS
-				if (light.GetLength() > 0)
-				{
-					// Specular representative point on line:
-					float3 P0 = light.position - light.GetDirection() * light.GetLength() * 0.5;
-					float3 P1 = light.position + light.GetDirection() * light.GetLength() * 0.5;
-					float3 L0 = P0 - surface.P;
-					float3 L1 = P1 - surface.P;
-					float3 Ld = L1 - L0;
-					float RdotLd = dot(surface.R, Ld);
-					float t = dot(surface.R, L0) * RdotLd - dot(L0, Ld);
-					t /= dot(Ld, Ld) - RdotLd * RdotLd;
-					L = (L0 + saturate(t) * Ld);
-				}
-				else
-				{
-					L = light.position - surface.P;
-				}
-				if(light.GetRadius() > 0)
-				{
-					// Specular representative point on sphere:
-					float3 centerToRay = mad(dot(L, surface.R), surface.R, -L);
-					L = mad(centerToRay, saturate(light.GetRadius() / length(centerToRay)), L);
-					// Energy conservation for radius:
-					light_color /= max(1, sphere_volume(light.GetRadius()));
-				}
-				if (light.GetLength() > 0 || light.GetRadius() > 0)
-				{
-					L = normalize(L);
-					surface_to_light.create(surface, L); // recompute all surface-light vectors
-				}
+	if (light.GetLength() > 0)
+	{
+		// Specular representative point on line:
+		float3 P0 = light.position - light.GetDirection() * light.GetLength() * 0.5;
+		float3 P1 = light.position + light.GetDirection() * light.GetLength() * 0.5;
+		float3 L0 = P0 - surface.P;
+		float3 L1 = P1 - surface.P;
+		float3 Ld = L1 - L0;
+		float RdotLd = dot(surface.R, Ld);
+		float t = dot(surface.R, L0) * RdotLd - dot(L0, Ld);
+		t /= dot(Ld, Ld) - RdotLd * RdotLd;
+		Lunnormalized = (L0 + saturate(t) * Ld);
+	}
+	else
+	{
+		Lunnormalized = light.position - surface.P;
+	}
+	if(light.GetRadius() > 0)
+	{
+		// Specular representative point on sphere:
+		float3 centerToRay = mad(dot(Lunnormalized, surface.R), surface.R, -Lunnormalized);
+		Lunnormalized = mad(centerToRay, saturate(light.GetRadius() / length(centerToRay)), Lunnormalized);
+		// Energy conservation for radius:
+		light_color /= max(1, sphere_volume(light.GetRadius()));
+	}
+	if (light.GetLength() > 0 || light.GetRadius() > 0)
+	{
+		L = normalize(Lunnormalized);
+		surface_to_light.create(surface, L); // recompute all surface-light vectors
+	}
 #endif // DISABLE_AREA_LIGHTS
 
-				lighting.direct.specular = mad(light_color, BRDF_GetSpecular(surface, surface_to_light), lighting.direct.specular);
-
-			}
-		}
-	}
+	lighting.direct.specular = mad(light_color, BRDF_GetSpecular(surface, surface_to_light), lighting.direct.specular);
+				
+#ifdef LIGHTING_SCATTER
+	const half scattering = ComputeScattering(saturate(dot(L, -surface.V)));
+	lighting.indirect.specular += scattering * light_color * (1 - surface.extinction) * (1 - sqr(1 - saturate(1 - surface.N.y)));
+#endif // LIGHTING_SCATTER
 }
 
-inline float attenuation_spotlight(in float dist, in float dist2, in float range, in float range2, in float spot_factor, in float angle_scale, in float angle_offset)
+inline half attenuation_spotlight(in half dist2, in half range, in half range2, in half spot_factor, in half angle_scale, in half angle_offset)
 {
-	float attenuation = attenuation_pointlight(dist, dist2, range, range2);
-	float angularAttenuation = saturate(mad(spot_factor, angle_scale, angle_offset));
+	half attenuation = attenuation_pointlight(dist2, range, range2);
+	half angularAttenuation = saturate(mad(spot_factor, angle_scale, angle_offset));
 	angularAttenuation *= angularAttenuation;
 	attenuation *= angularAttenuation;
 	return attenuation;
 }
-inline void light_spot(in ShaderEntity light, in Surface surface, inout Lighting lighting, in float shadow_mask = 1)
+inline void light_spot(in ShaderEntity light, in Surface surface, inout Lighting lighting, in half shadow_mask = 1)
 {
-	float3 L = light.position - surface.P;
-	const float dist2 = dot(L, L);
-	const float range = light.GetRange();
-	const float range2 = range * range;
+	if ((light.layerMask & surface.layerMask) == 0)
+		return; // early exit: layer mismatch
+	
+	float3 Lunnormalized = light.position - surface.P;
+	const half dist2 = dot(Lunnormalized, Lunnormalized);
+	const half range = light.GetRange();
+	const half range2 = range * range;
+	
+	if (dist2 > range2)
+		return; // early exit: outside range
+		
+	const half dist_rcp = rsqrt(dist2);
+	half3 L = Lunnormalized * dist_rcp;
+
+	SurfaceToLight surface_to_light;
+	surface_to_light.create(surface, L);
+		
+	if (!any(surface_to_light.NdotL_sss))
+		return; // early exit: facing away from light
+			
+	const half spot_factor = dot(L, light.GetDirection());
+	const half spot_cutoff = light.GetConeAngleCos();
+			
+	if (spot_factor < spot_cutoff)
+		return; // early exit: outside spotlight cone
+
+	half3 light_color = light.GetColor().rgb * shadow_mask;
 
 	[branch]
-	if (dist2 < range2)
+	if (light.IsCastingShadow() && surface.IsReceiveShadow())
 	{
-		const float dist = sqrt(dist2);
-		L /= dist;
-
-		SurfaceToLight surface_to_light;
-		surface_to_light.create(surface, L);
-
-		[branch]
-		if (any(surface_to_light.NdotL_sss))
-		{
-			const float spot_factor = dot(L, light.GetDirection());
-			const float spot_cutoff = light.GetConeAngleCos();
-
-			[branch]
-			if (spot_factor > spot_cutoff)
-			{
-				float3 shadow = shadow_mask;
-
-				[branch]
-				if (light.IsCastingShadow() && surface.IsReceiveShadow())
-				{
 #if defined(SHADOW_MASK_ENABLED) && !defined(TRANSPARENT)
-					[branch]
-					if ((GetFrame().options & OPTION_BIT_RAYTRACED_SHADOWS) == 0 || GetCamera().texture_rtshadow_index < 0 || (GetCamera().options & SHADERCAMERA_OPTION_USE_SHADOW_MASK) == 0)
+		[branch]
+		if ((GetFrame().options & OPTION_BIT_RAYTRACED_SHADOWS) == 0 || GetCamera().texture_rtshadow_index < 0 || (GetCamera().options & SHADERCAMERA_OPTION_USE_SHADOW_MASK) == 0)
 #endif // SHADOW_MASK_ENABLED
-					{
-						float4 shadow_pos = mul(load_entitymatrix(light.GetMatrixIndex() + 0), float4(surface.P, 1));
-						shadow_pos.xyz /= shadow_pos.w;
-						float2 shadow_uv = clipspace_to_uv(shadow_pos.xy);
-						[branch]
-						if (is_saturated(shadow_uv))
-						{
-							shadow *= shadow_2D(light, shadow_pos.xyz, shadow_uv.xy, 0);
-						}
-					}
-				}
-
-				[branch]
-				if (any(shadow))
-				{
-					float3 light_color = light.GetColor().rgb * shadow;
-					light_color *= attenuation_spotlight(dist, dist2, range, range2, spot_factor, light.GetAngleScale(), light.GetAngleOffset());
-
-					lighting.direct.diffuse = mad(light_color, BRDF_GetDiffuse(surface, surface_to_light), lighting.direct.diffuse);
-
-#ifndef DISABLE_AREA_LIGHTS
-					if (light.GetRadius() > 0)
-					{
-						// Specular representative point on sphere:
-						L = light.position - surface.P;
-						float3 centerToRay = mad(dot(L, surface.R), surface.R, -L);
-						L = mad(centerToRay, saturate(light.GetRadius() / length(centerToRay)), L);
-						L = normalize(L);
-						surface_to_light.create(surface, L); // recompute all surface-light vectors
-						// Energy conservation for radius:
-						light_color /= max(1, sphere_volume(light.GetRadius()));
-					}
-#endif // DISABLE_AREA_LIGHTS
-
-					lighting.direct.specular = mad(light_color, BRDF_GetSpecular(surface, surface_to_light), lighting.direct.specular);
-				}
+		{
+			float4 shadow_pos = mul(load_entitymatrix(light.GetMatrixIndex() + 0), float4(surface.P, 1));
+			shadow_pos.xyz /= shadow_pos.w;
+			float2 shadow_uv = clipspace_to_uv(shadow_pos.xy);
+			[branch]
+			if (is_saturated(shadow_uv))
+			{
+				light_color *= shadow_2D(light, shadow_pos.xyz, shadow_uv.xy, 0, surface.pixel);
 			}
 		}
+		
+		QuadBlur(light_color);
 	}
-}
 
+	light_color *= attenuation_spotlight(dist2, range, range2, spot_factor, light.GetAngleScale(), light.GetAngleOffset());
+
+	lighting.direct.diffuse = mad(light_color, BRDF_GetDiffuse(surface, surface_to_light), lighting.direct.diffuse);
+
+#ifndef DISABLE_AREA_LIGHTS
+	if (light.GetRadius() > 0)
+	{
+		// Specular representative point on sphere:
+		Lunnormalized = light.position - surface.P;
+		float3 centerToRay = mad(dot(Lunnormalized, surface.R), surface.R, -Lunnormalized);
+		Lunnormalized = mad(centerToRay, saturate(light.GetRadius() / length(centerToRay)), Lunnormalized);
+		L = normalize(Lunnormalized);
+		surface_to_light.create(surface, L); // recompute all surface-light vectors
+		// Energy conservation for radius:
+		light_color /= max(1, sphere_volume(light.GetRadius()));
+	}
+#endif // DISABLE_AREA_LIGHTS
+
+	lighting.direct.specular = mad(light_color, BRDF_GetSpecular(surface, surface_to_light), lighting.direct.specular);
+					
+#ifdef LIGHTING_SCATTER
+	const half scattering = ComputeScattering(saturate(dot(L, -surface.V)));
+	lighting.indirect.specular += scattering * light_color * (1 - surface.extinction) * (1 - sqr(1 - saturate(1 - surface.N.y)));
+#endif // LIGHTING_SCATTER
+}
 
 // ENVIRONMENT MAPS
 
 
-inline float3 GetAmbient(in float3 N)
+inline half3 GetAmbient(in float3 N)
 {
-	float3 ambient;
+	half3 ambient;
 
 #ifdef ENVMAPRENDERING
 
@@ -355,7 +371,7 @@ inline float3 GetAmbient(in float3 N)
 		uint2 dim;
 		uint mips;
 		cubemap.GetDimensions(0, dim.x, dim.y, mips);
-		ambient = cubemap.SampleLevel(sampler_linear_clamp, N, mips).rgb;
+		ambient = (half3)cubemap.SampleLevel(sampler_linear_clamp, N, mips).rgb;
 	}
 	
 #endif // ENVMAPRENDERING
@@ -373,9 +389,9 @@ inline float3 GetAmbient(in float3 N)
 // surface:				surface descriptor
 // MIP:					mip level to sample
 // return:				color of the environment color (rgb)
-inline float3 EnvironmentReflection_Global(in Surface surface)
+inline half3 EnvironmentReflection_Global(in Surface surface)
 {
-	float3 envColor;
+	half3 envColor;
 
 #ifdef ENVMAPRENDERING
 
@@ -400,19 +416,19 @@ inline float3 EnvironmentReflection_Global(in Surface surface)
 	uint mips;
 	cubemap.GetDimensions(0, dim.x, dim.y, mips);
 
-	float MIP = surface.roughness * mips;
-	envColor = cubemap.SampleLevel(sampler_linear_clamp, surface.R, MIP).rgb * surface.F;
+	half MIP = surface.roughness * mips;
+	envColor = (half3)cubemap.SampleLevel(sampler_linear_clamp, surface.R, MIP).rgb * surface.F;
 
 #ifdef SHEEN
 	envColor *= surface.sheen.albedoScaling;
 	MIP = surface.sheen.roughness * mips;
-	envColor += cubemap.SampleLevel(sampler_linear_clamp, surface.R, MIP).rgb * surface.sheen.color * surface.sheen.DFG;
+	envColor += (half3)cubemap.SampleLevel(sampler_linear_clamp, surface.R, MIP).rgb * surface.sheen.color * surface.sheen.DFG;
 #endif // SHEEN
 
 #ifdef CLEARCOAT
 	envColor *= 1 - surface.clearcoat.F;
 	MIP = surface.clearcoat.roughness * mips;
-	envColor += cubemap.SampleLevel(sampler_linear_clamp, surface.clearcoat.R, MIP).rgb * surface.clearcoat.F;
+	envColor += (half3)cubemap.SampleLevel(sampler_linear_clamp, surface.clearcoat.R, MIP).rgb * surface.clearcoat.F;
 #endif // CLEARCOAT
 
 #endif // ENVMAPRENDERING
@@ -426,29 +442,32 @@ inline float3 EnvironmentReflection_Global(in Surface surface)
 // clipSpacePos:		world space pixel position transformed into OBB space by probeProjection matrix
 // MIP:					mip level to sample
 // return:				color of the environment map (rgb), blend factor of the environment map (a)
-inline float4 EnvironmentReflection_Local(in TextureCube cubemap, in Surface surface, in ShaderEntity probe, in float4x4 probeProjection, in float3 clipSpacePos)
+inline half4 EnvironmentReflection_Local(in TextureCube cubemap, in Surface surface, in ShaderEntity probe, in float4x4 probeProjection, in float3 clipSpacePos)
 {
+	if ((probe.layerMask & surface.layerMask) == 0)
+		return 0; // early exit: layer mismatch
+		
 	// Perform parallax correction of reflection ray (R) into OBB:
-	float3 RayLS = mul((float3x3)probeProjection, surface.R);
-	float3 FirstPlaneIntersect = (float3(1, 1, 1) - clipSpacePos) / RayLS;
-	float3 SecondPlaneIntersect = (-float3(1, 1, 1) - clipSpacePos) / RayLS;
-	float3 FurthestPlane = max(FirstPlaneIntersect, SecondPlaneIntersect);
-	float Distance = min(FurthestPlane.x, min(FurthestPlane.y, FurthestPlane.z));
-	float3 IntersectPositionWS = surface.P + surface.R * Distance;
-	float3 R_parallaxCorrected = IntersectPositionWS - probe.position;
+	half3 RayLS = mul((half3x3)probeProjection, surface.R);
+	half3 FirstPlaneIntersect = (half3(1, 1, 1) - clipSpacePos) / RayLS;
+	half3 SecondPlaneIntersect = (-half3(1, 1, 1) - clipSpacePos) / RayLS;
+	half3 FurthestPlane = max(FirstPlaneIntersect, SecondPlaneIntersect);
+	half Distance = min(FurthestPlane.x, min(FurthestPlane.y, FurthestPlane.z));
+	half3 IntersectPositionWS = surface.P + surface.R * Distance;
+	half3 R_parallaxCorrected = IntersectPositionWS - probe.position;
 
 	uint2 dim;
 	uint mips;
 	cubemap.GetDimensions(0, dim.x, dim.y, mips);
 
 	// Sample cubemap texture:
-	float MIP = surface.roughness * mips;
-	float3 envColor = cubemap.SampleLevel(sampler_linear_clamp, R_parallaxCorrected, MIP).rgb * surface.F;
+	half MIP = surface.roughness * mips;
+	half3 envColor = (half3)cubemap.SampleLevel(sampler_linear_clamp, R_parallaxCorrected, MIP).rgb * surface.F;
 
 #ifdef SHEEN
 	envColor *= surface.sheen.albedoScaling;
 	MIP = surface.sheen.roughness * mips;
-	envColor += cubemap.SampleLevel(sampler_linear_clamp, R_parallaxCorrected, MIP).rgb * surface.sheen.color * surface.sheen.DFG;
+	envColor += (half3)cubemap.SampleLevel(sampler_linear_clamp, R_parallaxCorrected, MIP).rgb * surface.sheen.color * surface.sheen.DFG;
 #endif // SHEEN
 
 #ifdef CLEARCOAT
@@ -462,13 +481,13 @@ inline float4 EnvironmentReflection_Local(in TextureCube cubemap, in Surface sur
 
 	envColor *= 1 - surface.clearcoat.F;
 	MIP = surface.clearcoat.roughness * mips;
-	envColor += cubemap.SampleLevel(sampler_linear_clamp, R_parallaxCorrected, MIP).rgb * surface.clearcoat.F;
+	envColor += (half3)cubemap.SampleLevel(sampler_linear_clamp, R_parallaxCorrected, MIP).rgb * surface.clearcoat.F;
 #endif // CLEARCOAT
 
 	// blend out if close to any cube edge:
-	float edgeBlend = 1 - pow(saturate(max(abs(clipSpacePos.x), max(abs(clipSpacePos.y), abs(clipSpacePos.z)))), 8);
+	half edgeBlend = 1 - pow(saturate(max(abs(clipSpacePos.x), max(abs(clipSpacePos.y), abs(clipSpacePos.z)))), 8);
 
-	return float4(envColor, edgeBlend);
+	return half4(envColor, edgeBlend);
 }
 
 
@@ -480,18 +499,18 @@ inline void VoxelGI(inout Surface surface, inout Lighting lighting)
 	[branch]
 	if (GetFrame().vxgi.resolution != 0 && GetFrame().vxgi.texture_radiance >= 0)
 	{
-		Texture3D<float4> voxels = bindless_textures3D[GetFrame().vxgi.texture_radiance];
+		Texture3D voxels = bindless_textures3D[GetFrame().vxgi.texture_radiance];
 
 		// diffuse:
-		float4 trace = ConeTraceDiffuse(voxels, surface.P, surface.N);
+		half4 trace = ConeTraceDiffuse(voxels, surface.P, surface.N);
 		lighting.indirect.diffuse = mad(lighting.indirect.diffuse, 1 - trace.a, trace.rgb);
 
 		// specular:
 		[branch]
 		if (GetFrame().options & OPTION_BIT_VXGI_REFLECTIONS_ENABLED)
 		{
-			float roughnessBRDF = sqr(clamp(surface.roughness, 0.045, 1));
-			float4 trace = ConeTraceSpecular(voxels, surface.P, surface.N, surface.V, roughnessBRDF, surface.pixel);
+			half roughnessBRDF = sqr(clamp(surface.roughness, min_roughness, 1));
+			half4 trace = ConeTraceSpecular(voxels, surface.P, surface.N, surface.V, roughnessBRDF, surface.pixel);
 			lighting.indirect.specular = mad(lighting.indirect.specular, 1 - trace.a, trace.rgb * surface.F);
 		}
 	}

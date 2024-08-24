@@ -19,6 +19,8 @@ namespace wi::lua
 		int IsEnabled(lua_State* L);
 		int SetSimulationEnabled(lua_State* L);
 		int IsSimulationEnabled(lua_State* L);
+		int SetInterpolationEnabled(lua_State* L);
+		int IsInterpolationEnabled(lua_State* L);
 		int SetDebugDrawEnabled(lua_State* L);
 		int IsDebugDrawEnabled(lua_State* L);
 		int SetAccuracy(lua_State* L);
@@ -33,8 +35,8 @@ namespace wi::lua
 		int ApplyImpulse(lua_State* L);
 		int ApplyImpulseAt(lua_State* L);
 		int ApplyTorque(lua_State* L);
-		int ApplyTorqueImpulse(lua_State* L);
 		int SetActivationState(lua_State* L);
+		int ActivateAllRigidBodies(lua_State* L);
 
 		int Intersects(lua_State* L);
 		int PickDrag(lua_State* L);

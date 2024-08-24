@@ -2,7 +2,7 @@
 #define WI_SHADERINTEROP_VOXELGRID_H
 #include "ShaderInterop.h"
 
-struct ShaderVoxelGrid
+struct alignas(16) ShaderVoxelGrid
 {
 	uint3 resolution;
 	int buffer;
@@ -56,8 +56,8 @@ struct ShaderVoxelGrid
 		sub_coord.y = coord.y % 4u;
 		sub_coord.z = coord.z % 4u;
 		const uint bit = flatten3D(sub_coord, uint3(4, 4, 4));
-		const uint64_t mask = 1ull << bit;
-		return (voxels_4x4_block & mask) != 0ull;
+		const uint64_t mask = uint64_t(1) << bit;
+		return (voxels_4x4_block & mask) != uint64_t(0);
 	}
 	bool check_voxel(float3 worldpos)
 	{

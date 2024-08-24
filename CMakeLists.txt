@@ -1,4 +1,13 @@
-cmake_minimum_required(VERSION 3.8)
+cmake_minimum_required(VERSION 3.12)
+
+if (${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
+    message(FATAL_ERROR
+        "In-source builds are not supported!\n"
+        "Run `git clean -d -f` to clean up the files CMake has created (stash "
+        "your changes first, if you have made any), then run `cmake -B build "
+        "<other_options>` followed by `cmake --build build --parallel`"
+    )
+endif()
 
 set(WICKED_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -10,7 +19,12 @@ option(WICKED_TESTS "Build WickedEngine tests" ON)
 option(WICKED_IMGUI_EXAMPLE "Build WickedEngine imgui example" ON)
 
 include(CMakeDependentOption)
-cmake_dependent_option(WICKED_LINUX_TEMPLATE "Build WickedEngine Linux template" ON "UNIX" OFF)
+
+if(UNIX)
+    option(WICKED_LINUX_TEMPLATE "Build WickedEngine Linux template" ON)
+elseif(WIN32)
+    option(WICKED_WINDOWS_TEMPLATE "Build WickedEngine Windows template" ON)
+endif()
 
 # Configure CMake global variables
 set(CMAKE_CXX_STANDARD 17)
@@ -47,6 +61,7 @@ endif()
 
 
 add_subdirectory(WickedEngine)
+add_subdirectory(Content)
 
 if (WICKED_EDITOR)
     add_subdirectory(Editor)
@@ -63,4 +78,8 @@ endif()
 
 if (WICKED_LINUX_TEMPLATE)
     add_subdirectory(Template_Linux)
+endif()
+
+if (WICKED_WINDOWS_TEMPLATE)
+    add_subdirectory(Template_Windows)
 endif()

@@ -52,6 +52,11 @@ namespace wi
 		wi::initializer::InitializeComponentsAsync();
 
 		alwaysactive = wi::arguments::HasArgument("alwaysactive");
+
+		// Note: lua is always initialized immediately on main thread by wi::initializer, so this is safe to do:
+		assert(wi::initializer::IsInitializeFinished(wi::initializer::INITIALIZED_SYSTEM_LUA));
+		Luna<wi::lua::Application_BindLua>::push_global(wi::lua::GetLuaState(), "main", this);
+		Luna<wi::lua::Application_BindLua>::push_global(wi::lua::GetLuaState(), "application", this);
 	}
 
 	void Application::ActivatePath(RenderPath* component, float fadeSeconds, wi::Color fadeColor)
@@ -91,12 +96,45 @@ namespace wi
 		wi::font::UpdateAtlas(canvas.GetDPIScaling());
 
 		ColorSpace colorspace = graphicsDevice->GetSwapChainColorSpace(&swapChain);
+		bool colorspace_conversion_required = colorspace == ColorSpace::HDR10_ST2084;
+		if (colorspace_conversion_required)
+		{
+			// In HDR10, we perform the compositing in a custom linear color space render target
+			if (!rendertarget.IsValid())
+			{
+				TextureDesc desc;
+				desc.width = swapChain.desc.width;
+				desc.height = swapChain.desc.height;
+				desc.format = Format::R11G11B10_FLOAT;
+				desc.bind_flags = BindFlag::RENDER_TARGET | BindFlag::SHADER_RESOURCE;
+				bool success = graphicsDevice->CreateTexture(&desc, nullptr, &rendertarget);
+				assert(success);
+				graphicsDevice->SetName(&rendertarget, "Application::rendertarget");
+			}
+		}
+		else
+		{
+			// If swapchain is SRGB or Linear HDR, it can be used for blending
+			//	- If it is SRGB, the render path will ensure tonemapping to SDR
+			//	- If it is Linear HDR, we can blend trivially in linear space
+			rendertarget = {};
+		}
 
 		if (!wi::initializer::IsInitializeFinished())
 		{
 			// Until engine is not loaded, present initialization screen...
 			CommandList cmd = graphicsDevice->BeginCommandList();
-			graphicsDevice->RenderPassBegin(&swapChain, cmd);
+			if (colorspace_conversion_required)
+			{
+				RenderPassImage rp[] = {
+					RenderPassImage::RenderTarget(&rendertarget, RenderPassImage::LoadOp::CLEAR),
+				};
+				graphicsDevice->RenderPassBegin(rp, arraysize(rp), cmd);
+			}
+			else
+			{
+				graphicsDevice->RenderPassBegin(&swapChain, cmd);
+			}
 			Viewport viewport;
 			viewport.width = (float)swapChain.desc.width;
 			viewport.height = (float)swapChain.desc.height;
@@ -106,6 +144,17 @@ namespace wi
 				wi::backlog::DrawOutputText(canvas, cmd, colorspace);
 			}
 			graphicsDevice->RenderPassEnd(cmd);
+
+			if (colorspace_conversion_required)
+			{
+				// In HDR10, we perform a final mapping from linear to HDR10, into the swapchain
+				graphicsDevice->RenderPassBegin(&swapChain, cmd);
+				wi::image::Params fx;
+				fx.enableFullScreen();
+				fx.enableHDR10OutputMapping();
+				wi::image::Draw(&rendertarget, fx, cmd);
+				graphicsDevice->RenderPassEnd(cmd);
+			}
 			graphicsDevice->SubmitCommandLists();
 			return;
 		}
@@ -114,8 +163,6 @@ namespace wi
 		if (!startup_script)
 		{
 			startup_script = true;
-			Luna<wi::lua::Application_BindLua>::push_global(wi::lua::GetLuaState(), "main", this);
-			Luna<wi::lua::Application_BindLua>::push_global(wi::lua::GetLuaState(), "application", this);
 			std::string startup_lua_filename = wi::helper::GetCurrentPath() + "/startup.lua";
 			if (wi::helper::FileExists(startup_lua_filename))
 			{
@@ -139,19 +186,24 @@ namespace wi
 			// If the application is not active, disable Update loops:
 			deltaTimeAccumulator = 0;
 			wi::helper::Sleep(10);
+			wi::input::Update(window, canvas); // update input while inactive, this solves a problem with past inputs processed immediately after activation
+			timer.record_elapsed_seconds(); // after application becomes active, delta time shouldn't spike, could blow up gameplay or physics
 			return;
 		}
 
 		wi::profiler::BeginFrame();
 
-		deltaTime = float(std::max(0.0, timer.record_elapsed_seconds()));
+		deltaTime = float(timer.record_elapsed_seconds());
 
 		const float target_deltaTime = 1.0f / targetFrameRate;
 		if (framerate_lock && deltaTime < target_deltaTime)
 		{
 			wi::helper::QuickSleep((target_deltaTime - deltaTime) * 1000);
-			deltaTime += float(std::max(0.0, timer.record_elapsed_seconds()));
+			deltaTime += float(timer.record_elapsed_seconds());
 		}
+
+		// avoid instability caused by large delta time
+		deltaTime = clamp(deltaTime, 0.0f, 0.5f);
 
 		wi::input::Update(window, canvas);
 
@@ -207,21 +259,8 @@ namespace wi
 		viewport.height = (float)swapChain.desc.height;
 		graphicsDevice->BindViewports(1, &viewport, cmd);
 
-		bool colorspace_conversion_required = colorspace == ColorSpace::HDR10_ST2084;
 		if (colorspace_conversion_required)
 		{
-			// In HDR10, we perform the compositing in a custom linear color space render target
-			if (!rendertarget.IsValid())
-			{
-				TextureDesc desc;
-				desc.width = swapChain.desc.width;
-				desc.height = swapChain.desc.height;
-				desc.format = Format::R11G11B10_FLOAT;
-				desc.bind_flags = BindFlag::RENDER_TARGET | BindFlag::SHADER_RESOURCE;
-				bool success = graphicsDevice->CreateTexture(&desc, nullptr, &rendertarget);
-				assert(success);
-				graphicsDevice->SetName(&rendertarget, "Application::rendertarget");
-			}
 			RenderPassImage rp[] = {
 				RenderPassImage::RenderTarget(&rendertarget, RenderPassImage::LoadOp::CLEAR),
 			};
@@ -229,10 +268,6 @@ namespace wi
 		}
 		else
 		{
-			// If swapchain is SRGB or Linear HDR, it can be used for blending
-			//	- If it is SRGB, the render path will ensure tonemapping to SDR
-			//	- If it is Linear HDR, we can blend trivially in linear space
-			rendertarget = {};
 			graphicsDevice->RenderPassBegin(&swapChain, cmd);
 		}
 		Compose(cmd);
@@ -450,6 +485,10 @@ namespace wi
 				infodisplay_str += std::to_string(graphicsDevice->GetActivePipelineCount());
 				infodisplay_str += "\n";
 			}
+			if (infoDisplay.pipeline_creation && wi::renderer::IsPipelineCreationActive())
+			{
+				infodisplay_str += "Shader pipeline creation is running...\n";
+			}
 
 			wi::font::Params params = wi::font::Params(
 				4 + canvas.PhysicalToLogical((uint32_t)infoDisplay.rect.left),
@@ -511,6 +550,10 @@ namespace wi
 			if (wi::renderer::GetShaderErrorCount() > 0)
 			{
 				params.cursor = wi::font::Draw(std::to_string(wi::renderer::GetShaderErrorCount()) + " shader compilation errors! Check the backlog for more information!\n", params, cmd);
+			}
+			if (wi::backlog::GetUnseenLogLevelMax() >= wi::backlog::LogLevel::Error)
+			{
+				params.cursor = wi::font::Draw("Errors found, check the backlog for more information!", params, cmd);
 			}
 
 			if (infoDisplay.colorgrading_helper)

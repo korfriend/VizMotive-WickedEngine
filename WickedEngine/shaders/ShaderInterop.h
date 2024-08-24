@@ -30,6 +30,8 @@ using int4 = XMINT4;
 
 // Shader - side types:
 
+#define alignas(x)
+
 #define PASTE1(a, b) a##b
 #define PASTE(a, b) PASTE1(a, b)
 #define CBUFFER(name, slot) cbuffer name : register(PASTE(b, slot))
@@ -105,9 +107,7 @@ static const uint IndirectDispatchArgsAlignment = 4u;
 #define CBSLOT_OTHER_EMITTEDPARTICLE			4
 #define CBSLOT_OTHER_HAIRPARTICLE				4
 #define CBSLOT_OTHER_FFTGENERATOR				3
-#define CBSLOT_OTHER_OCEAN_SIMULATION_IMMUTABLE	3
-#define CBSLOT_OTHER_OCEAN_SIMULATION_PERFRAME	4
-#define CBSLOT_OTHER_OCEAN_RENDER				3
+#define CBSLOT_OTHER_OCEAN						3
 #define CBSLOT_OTHER_CLOUDGENERATOR				3
 #define CBSLOT_OTHER_GPUSORTLIB					4
 #define CBSLOT_MSAO								4
@@ -134,13 +134,12 @@ static const uint IndirectDispatchArgsAlignment = 4u;
 #define CBSLOT_OTHER_EMITTEDPARTICLE			4
 #define CBSLOT_OTHER_HAIRPARTICLE				4
 #define CBSLOT_OTHER_FFTGENERATOR				4
-#define CBSLOT_OTHER_OCEAN_SIMULATION_IMMUTABLE	4
-#define CBSLOT_OTHER_OCEAN_SIMULATION_PERFRAME	5
-#define CBSLOT_OTHER_OCEAN_RENDER				7
+#define CBSLOT_OTHER_OCEAN						4
 #define CBSLOT_OTHER_CLOUDGENERATOR				4
 #define CBSLOT_OTHER_GPUSORTLIB					4
 #define CBSLOT_MSAO								4
 #define CBSLOT_FSR								4
+#define CBSLOT_TRAILRENDERER					4
 #endif // !__PSSL__ && !__SCE__
 
 #endif // WI_SHADERINTEROP_H

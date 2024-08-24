@@ -3,27 +3,36 @@
 #include "ShaderInterop_EmittedParticle.h"
 #include "shadowHF.hlsli"
 
+struct PushEmit
+{
+	uint offset;
+};
+PUSHCONSTANT(push, PushEmit);
+
+ByteAddressBuffer emitBuffer : register(t0);
+
 RWStructuredBuffer<Particle> particleBuffer : register(u0);
 RWStructuredBuffer<uint> aliveBuffer_CURRENT : register(u1);
 RWStructuredBuffer<uint> aliveBuffer_NEW : register(u2);
 RWStructuredBuffer<uint> deadBuffer : register(u3);
 RWByteAddressBuffer counterBuffer : register(u4);
 
-[numthreads(THREADCOUNT_EMIT, 1, 1)]
+[numthreads(64, 1, 1)]
 void main(uint3 DTid : SV_DispatchThreadID)
 {
-	uint emitCount = counterBuffer.Load(PARTICLECOUNTER_OFFSET_REALEMITCOUNT);
-	if (DTid.x >= emitCount)
+	EmitLocation location = emitBuffer.Load<EmitLocation>(push.offset);
+	
+	if (DTid.x >= location.count)
 		return;
 	
 	RNG rng;
 	rng.init(uint2(xEmitterRandomness, DTid.x), GetFrame().frame_count);
 
-	const float4x4 worldMatrix = xEmitterTransform.GetMatrix();
+	const float4x4 worldMatrix = location.transform.GetMatrix();
 	float3 emitPos = 0;
 	float3 nor = 0;
 	float3 velocity = xParticleVelocity;
-	float4 baseColor = EmitterGetMaterial().baseColor;
+	float4 baseColor = EmitterGetMaterial().GetBaseColor() * unpack_rgba(location.color);
 		
 #ifdef EMIT_FROM_MESH
 	// random subset of emitter mesh:
@@ -105,7 +114,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
 	if(xEmitterOptions & EMITTER_OPTION_BIT_TAKE_COLOR_FROM_MESH)
 	{
 		ShaderMaterial material = load_material(geometry.materialIndex);
-		baseColor *= material.baseColor;
+		baseColor *= material.GetBaseColor();
 		
 		[branch]
 		if (geometry.vb_col >= 0 && material.IsUsingVertexColors())
@@ -177,8 +186,11 @@ void main(uint3 DTid : SV_DispatchThreadID)
 	particle.color = pack_rgba(baseColor);
 	
 	// new particle index retrieved from dead list (pop):
-	uint deadCount;
+	int deadCount;
 	counterBuffer.InterlockedAdd(PARTICLECOUNTER_OFFSET_DEADCOUNT, -1, deadCount);
+	if(deadCount < 1)
+		return;
+
 	uint newParticleIndex = deadBuffer[deadCount - 1];
 
 	// write out the new particle:
@@ -186,6 +198,6 @@ void main(uint3 DTid : SV_DispatchThreadID)
 
 	// and add index to the alive list (push):
 	uint aliveCount;
-	counterBuffer.InterlockedAdd(PARTICLECOUNTER_OFFSET_ALIVECOUNT, 1, aliveCount);
+	counterBuffer.InterlockedAdd(PARTICLECOUNTER_OFFSET_ALIVECOUNT_AFTERSIMULATION, 1, aliveCount);
 	aliveBuffer_CURRENT[aliveCount] = newParticleIndex;
 }

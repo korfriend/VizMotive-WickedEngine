@@ -47,6 +47,8 @@ This is a reference and explanation of Lua scripting features in Wicked Engine.
 		19. [ExpressionComponent](#expressioncomponent)
 		19. [HumanoidComponent](#humanoidcomponent)
 		19. [DecalComponent](#decalcomponent)
+		19. [MetadataComponent](#metadatacomponent)
+		19. [CharacterComponent](#charactercomponent)
 	10. [Canvas](#canvas)
 	11. [High Level Interface](#high-level-interface)
 		1. [Application](#application)
@@ -138,7 +140,7 @@ You can use the Renderer with the following functions, all of which are in the g
 - SetShadowPropsCube(int resolution)
 - SetDebugPartitionTreeEnabled(bool enabled)
 - SetDebugBonesEnabled(bool enabled)
-- SetDebugEittersEnabled(bool enabled)
+- SetDebugEmittersEnabled(bool enabled)
 - SetDebugEnvProbesEnabled(bool enabled)
 - SetDebugForceFieldsEnabled(bool enabled)
 - SetDebugCamerasEnabled(bool value)
@@ -148,6 +150,8 @@ You can use the Renderer with the following functions, all of which are in the g
 - SetDebugCamerasEnabled(bool value)
 - SetVSyncEnabled(opt bool enabled)
 - SetOcclusionCullingEnabled(bool enabled)
+- SetMeshShaderAllowed(bool enabled)
+- SetMeshletOcclusionCullingEnabled(bool value)
 - DrawLine(Vector origin,end, opt Vector color, opt bool depth = false)
 - DrawPoint(Vector origin, opt float size, opt Vector color, opt bool depth = false)
 - DrawBox(Matrix boxMatrix, opt Vector color, opt bool depth = true)
@@ -229,6 +233,7 @@ Specify Sprite properties, like position, size, etc.
 - GetMipLevel() : float result
 - GetTexOffset() : Vector result
 - GetTexOffset2() : Vector result
+- GetBorderSoften() : float result
 - GetDrawRect() : Vector result
 - GetDrawRect2() : Vector result
 - IsDrawRectEnabled() : bool result
@@ -251,6 +256,7 @@ Specify Sprite properties, like position, size, etc.
 - SetMipLevel(float mipLevel)
 - SetTexOffset()
 - SetTexOffset2()
+- SetBorderSoften(float alpha)
 - EnableDrawRect(Vector value)
 - EnableDrawRect2(Vector value)
 - DisableDrawRect()
@@ -399,6 +405,8 @@ Gives you the ability to render text with a custom font.
 - SetShadowOffset(Vector value)
 - SetHorizontalWrapping(float value)
 - SetHidden(bool value)
+- SetFlippedHorizontally(bool value) -- enable flipping the letters horizontally
+- SetFlippedVertically(bool value) -- enable flipping the letters vertically
 - GetText() : string result
 - GetSize() : int result
 - GetPos() : Vector result
@@ -413,6 +421,8 @@ Gives you the ability to render text with a custom font.
 - GetShadowOffset() : Vector result
 - GetHorizontalWrapping() : float result
 - IsHidden() : bool result
+- IsFlippedHorizontally() : bool
+- IsFlippedVertically() : bool
 - TextSize() : Vector result -- returns text width and height in a Vector's X and Y components
 - SetTypewriterTime(float value) -- time to fully type the text in seconds (0: disable)
 - SetTypewriterLooped(bool value)) -- if true, typing starts over when finished
@@ -600,6 +610,10 @@ A four component floating point vector. Provides efficient calculations with SIM
 - SetW(float value)
 - Length() : float result	-- old syntax with operation on current object
 - Length(Vector v) : float result
+- LengthSquared() : float result	-- old syntax with operation on current object
+- LengthSquared(Vector v) : float result
+- Distance(Vector v1, v2)
+- DistanceSquared(Vector v1, v2)
 - Normalize() : Vector result	-- old syntax with operation on current object
 - Normalize(Vector v) : Vector result
 - QuaternionNormalize() : Vector result	-- old syntax with operation on current object
@@ -728,6 +742,7 @@ The scene holds components. Entity handles can be used to retrieve associated co
 - Component_CreateSprite(Entity entity) : Sprite result  -- attach a Sprite to an entity. The returned component is associated with the entity and can be manipulated
 - Component_CreateFont(Entity entity) : SpriteFont result  -- attach a SpriteFont to an entity. The returned component is associated with the entity and can be manipulated
 - Component_CreateVoxelGrid(Entity entity) : VoxelGrid result  -- attach a VoxelGrid to an entity. The returned component is associated with the entity and can be manipulated
+- Component_CreateMetadata(Entity entity) : MetadataComponent result  -- attach a MetadataComponent to an entity. The returned component is associated with the entity and can be manipulated
 
 - Component_GetName(Entity entity) : NameComponent? result  -- query the name component of the entity (if exists)
 - Component_GetLayer(Entity entity) : LayerComponent? result  -- query the layer component of the entity (if exists)
@@ -751,7 +766,8 @@ The scene holds components. Entity handles can be used to retrieve associated co
 - Component_GetHumanoid(Entity entity) : HumanoidComponent? result  -- query the HumanoidComponent of the entity (if exists)
 - Component_GetDecal(Entity entity) : DecalComponent? result  -- query the DecalComponent of the entity (if exists)
 - Component_GetSprite(Entity entity) : Sprite? result  -- query the Sprite of the entity (if exists)
-- Component_GetVoxexlGrid(Entity entity) : VoxelGrid? result  -- query the VoxelGrid of the entity (if exists)
+- Component_GetVoxelGrid(Entity entity) : VoxelGrid? result  -- query the VoxelGrid of the entity (if exists)
+- Component_GetMetadata(Entity entity) : MetadataComponent? result  -- query the MetadataComponent of the entity (if exists)
 
 - Component_GetNameArray() : NameComponent[] result  -- returns the array of all components of this type
 - Component_GetLayerArray() : LayerComponent[] result  -- returns the array of all components of this type
@@ -778,6 +794,7 @@ The scene holds components. Entity handles can be used to retrieve associated co
 - Component_GetSpriteArray() : Sprite[] result  -- returns the array of all components of this type
 - Component_GetFontArray() : SpriteFont[] result  -- returns the array of all components of this type
 - Component_GetVoxelGridArray() : VoxelGrid[] result  -- returns the array of all components of this type
+- Component_GetMetadataArray() : MetadataComponent[] result  -- returns the array of all components of this type
 
 - Entity_GetNameArray() : Entity[] result  -- returns the array of all entities that have this component type
 - Entity_GetLayerArray() : Entity[] result  -- returns the array of all entities that have this component type
@@ -805,6 +822,7 @@ The scene holds components. Entity handles can be used to retrieve associated co
 - Entity_GetSpriteArray() : Entity[] result  -- returns the array of all entities that have this component type
 - Entity_GetFontArray() : Entity[] result  -- returns the array of all entities that have this component type
 - Entity_GetVoxelGridArray() : Entity[] result  -- returns the array of all entities that have this component type
+- Entity_GetMetadataArray() : Entity[] result  -- returns the array of all entities that have this component type
 
 - Component_RemoveName(Entity entity)  -- remove the name component of the entity (if exists)
 - Component_RemoveLayer(Entity entity)  -- remove the layer component of the entity (if exists)
@@ -831,6 +849,7 @@ The scene holds components. Entity handles can be used to retrieve associated co
 - Component_RemoveSprite(Entity entity)  -- remove the Sprite of the entity (if exists)
 - Component_RemoveFont(Entity entity)  -- remove the SpriteFont of the entity (if exists)
 - Component_RemoveVoxelGrid(Entity entity)  -- remove the VoxelGrid of the entity (if exists)
+- Component_RemoveMetadata(Entity entity)  -- remove the MetadataComponent of the entity (if exists)
 
 - Component_Attach(Entity entity,parent, opt bool child_already_in_local_space = false)  -- attaches entity to parent (adds a hierarchy component to entity). From now on, entity will inherit certain properties from parent, such as transform (entity will move with parent) or layer (entity's layer will be a sublayer of parent's layer). If child_already_in_local_space is false, then child will be transformed into parent's local space, if true, it will be used as-is.
 - Component_Detach(Entity entity)  -- detaches entity from parent (if hierarchycomponent exists for it). Restores entity's original layer, and applies current transformation to entity
@@ -841,6 +860,10 @@ The scene holds components. Entity handles can be used to retrieve associated co
 - SetWeather(WeatherComponent weather)
 
 - RetargetAnimation(Entity dst, src, bool bake_data) : Entity entity	-- Retargets an animation from a Humanoid to an other Humanoid such that the new animation will play back on the destination humanoid. dst : destination humanoid that the animation will be fit onto src : the animation to copy, it should already target humanoid bones. bake_data : if true, the retargeted data will be baked into a new animation data. If false, it will reuse the source animation data without creating a new one and retargeting will be applied at runtime on every Update. Returns entity ID of the new animation or INVALID_ENTITY if retargeting was not successful
+
+- ResetPose(Entity entity)	-- resets the pose of the specified entity to bind pose. The bind pose is taken from the bind matrices of bones of an ArmatureComponent. If the entity does not have an armature, then it will find the child armatures of the entity.
+
+- GetOceanPosAt(Vector worldPosition)	-- returns the approximate position on the ocean surface seen from a position in world space. If current weather doesn't have ocean enabled, returns the world position itself. The result position is approximate because it involves reading back from GPU to the CPU, so the result can be delayed compared to the current GPU simulation. Note that the input position to this function will be taken on the XZ plane and modified by the displacement map's XZ value, and the Y (vertical) position will be taken from the ocean water height and displacement map only.
 
 - VoxelizeObject(int objectIndex, VoxelGrid voxelgrid, opt bool subtract = false, opt int lod = 0) -- voxelizes a single object into the voxel grid. Subtract parameter controls whether the voxels are added (true) or removed (false). Lod argument selects object's level of detail
 - VoxelizeScene(VoxelGrid voxelgrid, opt bool subtract = false, opt uint filterMask = ~0u, opt uint layerMask = ~0u, opt uint lod = 0) -- voxelizes all entities in the scene which intersect the voxel grid volume and match the filterMask and layerMask. Subtract parameter controls whether the voxels are added (true) or removed (false). Lod argument selects object's level of detail
@@ -936,8 +959,8 @@ Describes an orientation in 3D space.
 - Play()
 - Stop()
 - Pause()
-- SetLooped(bool value)
-- IsLooped() : bool result
+- SetLooped(bool value) -- Sets the animation to repeat continuously.
+- IsLooped() : bool -- Returns true if the animation is set to repeat continuously.
 - IsPlaying() : bool result
 - SetTimer(float value)
 - GetTimer() : float result
@@ -947,6 +970,12 @@ Describes an orientation in 3D space.
 - SetStart(float value)
 - GetEnd() : float result
 - SetEnd(float value)
+- SetPingPong(bool value) -- Sets the animation to play forward and then backwards repeatedly.
+- IsPingPong() : bool -- Returns true if the animation is set to play forward and then backwards repeatedly.
+- SetPlayOnce() -- Sets the animation to play once.
+- IsPlayingOnce() : bool -- Returns true if the animation is set to play once.
+
+
 
 #### MaterialComponent
 - _flags : int
@@ -967,6 +996,8 @@ Describes an orientation in 3D space.
 - DisplacementMapping : float
 - Refraction : float
 - Transmission : float
+- Cloak : float
+- ChromaticAberration : float
 - AlphaRef : float
 - SheenColor : Vector
 - SheenRoughness : float
@@ -1057,6 +1088,8 @@ TextureSlot = {
 </br>
 
 - Burst(int value)  -- spawns a specific amount of particles immediately
+- Burst(int value, Vector position, opt Vector color = Vector(1,1,1,1))  -- spawns a specific amount of particles immediately at specified location and color multiplier
+- Burst(int value, Matrix transform, opt Vector color = Vector(1,1,1,1))  -- spawns a specific amount of particles immediately at specified location and color multiplier
 - SetEmitCount(float value)  -- set the emitted particle count per second
 - SetSize(float value)  -- set particle starting size
 - SetLife(float value)  -- set particle lifetime
@@ -1151,6 +1184,8 @@ TextureSlot = {
 - IsNotVisibleInMainCamera() : bool
 - SetNotVisibleInReflections(bool value) -- you can set the object to not be visible in main camera, but it will remain visible in reflections and shadows, useful for vampires
 - IsNotVisibleInReflections() : bool
+- SetWetmapEnabled(bool value) -- enable wet map for the object, this will automatically track the wetness
+- IsWetmapEnabled() : bool
 
 #### InverseKinematicsComponent
 Describes an Inverse Kinematics effector.
@@ -1199,11 +1234,12 @@ A lua script bound to an entity
 #### RigidBodyPhysicsComponent
 Describes a Rigid Body Physics object.
 - Shape : int
-- Mass : float
+- Mass : float	-- Set mass to 0 to have completely static rigid body (if you want to move it, it's better to use `SetKinematic(true)` as it will be moved continuously with the physics update rate)
 - Friction : float
 - Restitution : float
 - LinearDamping : float
 - AngularDamping : float
+- Buoyancy : float
 - BoxParams_HalfExtents : Vector
 - SphereParams_Radius : float
 - CapsuleParams_Radius : float
@@ -1214,14 +1250,25 @@ Describes a Rigid Body Physics object.
 
 - IsDisableDeactivation() : bool return -- Check if the rigidbody is able to deactivate after inactivity
 - IsKinematic() : bool return -- Check if the rigidbody is movable or just static
-- SetDisableDeactivation(bool value = true) -- Sets if the rigidbody is able to deactivate after inactivity
-- SetKinematic(bool value = true) -- Sets if the rigidbody is movable or just static
+- IsStartDeactivated() : bool return -- Checks whether rigid body is set to be deactivated when added to simulation
+- SetDisableDeactivation(bool value) -- Sets if the rigidbody is able to deactivate after inactivity
+- SetKinematic(bool value) -- Set the rigid body to be kinematic (which means it is optimized for being moved by the system or user logic, not the physics engine)
+- SetStartDeactivated(bool value) -- If true, rigid body will be deactivated when added to the simulation (if it's dynamic, it won't fall)
 
 #### SoftBodyPhysicsComponent
 Describes a Soft Body Physics object.
 - Mass : float
 - Friction : float
 - Restitution : float
+- VertexRadius : float -- how much distance vertices keep from other physics bodies
+
+- SetDetail(float value) -- Set how much detail the soft body simulation has compared to the graphics mesh. Setting this will rebuild the soft body, so individual physics vertex settings will be lost.
+- GetDetail() : float
+- SetDisableDeactivation(bool value)
+- IsDisableDeactivation() : bool
+- SetWindEnabled(bool value)
+- IsWindEnabled() : bool
+- CreateFromMesh(MeshComponent mesh)
 
 #### ForceFieldComponent
 Describes a Force Field effector.
@@ -1430,6 +1477,96 @@ The decal component is a textured sticker that can be put down onto meshes. Most
 - SetSlopeBlendPower(float value)
 - GetSlopeBlendPower() : float
 
+#### MetadataComponent
+The metadata component can store and retrieve an arbitrary amount of named user values for an entity. It is possible to use the same name for multiple of different value types, but one value can not have multiple entries with the same name. 
+
+- HasBool(string name) : bool
+- HasInt(string name) : bool
+- HasFloat(string name) : bool
+- HasString(string name) : bool
+
+- GetPreset() : int
+- GetBool(string name) : bool
+- GetInt(string name) : int
+- GetFloat(string name) : float
+- GetString(string name) : string
+
+- SetPreset(int preset)
+- SetBool(string name, bool value)
+- SetInt(string name, int value)
+- SetFloat(string name, float value)
+- SetString(string name, string value)
+
+[outer] MetadataPreset = {
+	Custom = 0,
+	Waypoint = 1,
+	Player = 2,
+	Enemy = 3,
+	NPC = 4,
+	Pickup = 5,
+}
+
+#### CharacterComponent
+Implementation of basic character controller features such as movement in the scene, inverse kinematics for legs, swimming, water ripples, etc.
+
+- SetActive(bool value)	-- Enable/disable character processing (enabled by default)
+- IsActive() : bool	-- Returns whether the character processing is active or not
+
+- Move(Vector value)	-- Move the character in a direction continuously. The given vector doesn't need to be normalized, the length of it corresponds to the movement amount. The character will be moved the next time the scene is updated. The movement will be blocked by objects tagged as navigation mesh and CPU colliders. If this entity has a layer component, the layer will be used to ensure that the character doesn't collide with that layer.
+- Strafe(Vector value)	-- Similar to Move, but relative to the facing direction.
+- Jump(float amount)	-- Jump upwards by an amount. The jump will be executed in the next scene update, with collisions.
+- Turn(Vector value)	-- Turn towards a direction continuously.
+- Lean(float value)	-- Lean sideways, negative values mean left, positive values mean right
+
+- AddAnimation(Entity entity)	-- Adds animation for tracking blending state. The simple animation blending will perform blend-out for each animation except the currenttly active one
+- PlayAnimation(Entity entity)	-- Play the animation. This will be blended in as primary animation, others will be belnded out.
+- StopAnimation()	-- stops current animation
+- SetAnimationAmount(float value)	-- Set target blend amount of current animation
+- GetAnimatioNAmount() : float	-- returns target blend amount of current animation
+- IsAnimationEnded() : bool	--returns true if the current animation is ended, false otherwise
+
+- SetGroundFriction(float value)	-- velocity multiplier when moving on ground, default: 0.92
+- SetWaterFriction(float value)		-- velocity multiplier when swimming in water, default: 0.9
+- SetSlopeThreshold(float value)	-- Slope detection threshold, default: 0.2
+- SetLeaningLimit(float value)		-- Leaning min/max clamping, default: 0.12
+- SetFixedUpdateFPS(float value)	-- Frame rate of simulation, default: 120
+- SetGravity(float value)			-- Gravity value, default: -30
+- SetWaterVerticalOffset(float value)	-- vertical offset to keep from water. Useful if character is too submerged in the swimming state
+
+- SetHealth(int value)	-- Set health of the character
+- SetWidth(float value)	-- Set the horizontal size of the character capsule (same as capsule radius)
+- SetHeight(float value)	-- Set the vertical size of the character capsule (same as capsule height)
+- SetScale(float value)	-- Apply an overall scale on the character
+- SetPosition(Vector value)	-- Set current position immediately (teleport)
+- SetVelocity(Vector value)	-- Set current velocity immediately
+- SetFacing(Vector value)	-- Set the facing direction of the character
+- SetRelativeOffset(Vector value)	-- Apply a relative offset (relative to facing direction)
+- SetFootPlacementEnabled(bool value)	--Enable/disable foot placement with inverse kinematics
+- SetCharacterToCharacterCollisionDisabled(bool value)	-- Set whether character collision with other characters is disabled or not for this character (default: false)
+
+- GetHealth() : int	-- Get the current health
+- GetWidth() : float	-- Get the horizontal size of the character capsule (same as capsule radius)
+- GetHeight() : float	-- Get the vertical size of the character capsule (same as capsule height)
+- GetScale() : float	-- Get the overall scale of the character
+- GetPosition() : Vector	-- Retrieve the current position without interpolation (this is the raw value from fixed timestep update)
+- GetPositionInterpolated() : Vector	-- Retrieve the current position with interpolation (this is the position that is rendered)
+- GetVelocity() : Vector	-- Get current velocity
+- GetMovement() : Vector	-- Get current movement direction
+- IsGrounded() : bool	-- returns whether the character is currently standing on ground or not
+- IsWallIntersect() : bool	-- returns whether the character is currently intersecting a wall or not
+- IsSwimming() : bool	-- returns whether the character is currently swimming or not
+- IsFootPlacementEnabled() : bool	-- Returns whether foot placement with inverse kinematics is currently enabled or not
+- IsCharacterToCharacterCollisionDisabled()	-- returns whether character collision with other characters is disabled or not for this character (default: false)
+- GetCapsule() : Capsule	-- returns the capsule representing the character
+- GetFacing() : Vector	-- returns the immediate facing of the character
+- GetFacingSmoothed() : Vector	-- returns the smoothed facing of the character
+- GetRelativeOffset() : Vector	-- returns the relative offset (relative to facing direction)
+- GetLeaning() : float	-- returns immediate leaning amount
+- GetLeaningSmoothed() : float -- returns smoothed leaning amount
+
+- SetPathGoal(Vector goal, VoxelGrid voxelgrid)	-- Set the goal for path finding, it will be processed the next time the scene is updated. You can get the results by accessing the pathquery object of the character with GetPathQuery().
+- GetPathQuery() : PathQuery	-- returns the PathQuery object of this character
+
 
 ## Canvas
 This is used to describe a drawable area
@@ -1547,6 +1684,7 @@ It inherits functions from RenderPath2D, so it can render a 2D overlay.
 - SetCropRight(float value) -- Sets cropping from right of the screen in logical units
 - SetCropBottom(float value) -- Sets cropping from bottom of the screen in logical units
 - GetLastPostProcessRT() : Texture -- returns the last post process render texture
+- SetDistortionOverlay(Texture texture) -- Set a normal map texture as full screen distortion mask
 
 ```lua
 FSR2_Preset = {
@@ -1566,8 +1704,8 @@ Tonemap = {
 It is a RenderPath2D but one that internally manages resource loading and can display information about the process.
 It inherits functions from RenderPath2D.
 - [constructor]LoadingScreen()
-- AddLoadModelTask(string fileName, Matrix matrix) : Entity -- Adds a scene loading task into the global scene and returns the root entity handle immediately. The loading task will be started asynchronously when the LoadingScreen is activated by the Application.
-- AddLoadModelTask(Scene scene, string fileName, Matrix matrix) : Entity -- Adds a scene loading task into the specified scene and returns the root entity handle immediately. The loading task will be started asynchronously when the LoadingScreen is activated by the Application.
+- AddLoadModelTask(string fileName, opt Matrix matrix) : Entity -- Adds a scene loading task into the global scene and returns the root entity handle immediately. The loading task will be started asynchronously when the LoadingScreen is activated by the Application.
+- AddLoadModelTask(Scene scene, string fileName, opt Matrix matrix) : Entity -- Adds a scene loading task into the specified scene and returns the root entity handle immediately. The loading task will be started asynchronously when the LoadingScreen is activated by the Application.
 - AddRenderPathActivationTask(RenderPath path, opt float fadeSeconds = 0, opt int fadeR = 0,fadeG = 0,fadeB = 0) -- loads resources of a RenderPath and activates it after all loading tasks have finished
 - IsFinished() : bool -- returns true when all loading tasks have finished
 - GetProgress() : int -- returns percentage of loading complete (0% - 100%)
@@ -1803,7 +1941,9 @@ Playstation button codes:
 - SetEnabled(bool value)	-- Enable/disable the physics engine all together
 - IsEnabled() : bool
 - SetSimulationEnabled(bool value)	-- Enable/disable the physics simulation. Physics engine state will be updated but not simulated
-- IsSimulationEnabeld() : bool
+- IsSimulationEnabled() : bool
+- SetInterpolationEnabled(bool value)	-- Enable/disable the physics interpolation. When enabled, simulation's fixed frame rate will be interpolated to match the variable frame rate of rendering
+- IsInterpolationEnabled() : bool
 - SetDebugDrawEnabled(bool value)	-- Enable/disable debug drawing of physics objects
 - IsDebugDrawEnabled() : bool
 - SetAccuracy(int value)	-- Set the accuracy of the simulation. This value corresponds to maximum simulation step count. Higher values will be slower but more accurate.
@@ -1819,7 +1959,7 @@ Playstation button codes:
 - ApplyImpulseAt(RigidBodyPhysicsComponent component, Vector impulse, Vector at)	-- Apply impulse at body local position
 - ApplyImpulseAt(HumanoidComponent humanoid, HumanoidBone bone, Vector impulse, Vector at)	-- Apply impulse at body local position of ragdoll bone
 - ApplyTorque(RigidBodyPhysicsComponent component, Vector torque)	-- Apply torque at body center
-- ApplyTorqueImpulse(RigidBodyPhysicsComponent component, Vector torque)	-- Apply torque impulse at body center
+- ActivateAllRigidBodies(Scene scene)	-- Activate all rigid bodies in the scene
 - SetActivationState(RigidBodyPhysicsComponent component, int state)	-- Force set activation state to rigid body. Use a value ACTIVATION_STATE_ACTIVE or ACTIVATION_STATE_INACTIVE
 - SetActivationState(SoftBodyPhysicsComponent component, int state)	-- Force set activation state to soft body. Use a value ACTIVATION_STATE_ACTIVE or ACTIVATION_STATE_INACTIVE
 - [outer]ACTIVATION_STATE_ACTIVE : int
@@ -1866,6 +2006,7 @@ Path finding operations can be made by using a voxel grid and path queries. The 
 - IsVisible(int observer_x,observer_y,observer_z, subject_x,subject_y,subject_z) : bool -- performs line of sight occlusion test from observer to subject voxel coordinates. Returns false if occlusion was found, true otherwise.
 - IsVisible(AABB observer, subject) : bool -- performs line of sight occlusion test from observer to subject world space points. Returns false if occlusion was found, true otherwise.
 - IsVisible(AABB observer, AABB subject) : bool -- performs line of sight occlusion test from observer world space point to subject AABB. Returns true if any of the AABB's touched voxels is visible, false otherwise.
+- FloodFill()	-- Sets every empty voxel which is enclosed to solid.
 
 #### PathQuery
 - [constructor] PathQuery()

@@ -197,6 +197,7 @@ namespace wi::terrain
 		weights.w *= norm;
 	};
 
+
 	void VirtualTextureAtlas::Residency::init(uint32_t resolution)
 	{
 		this->resolution = resolution;
@@ -224,12 +225,18 @@ namespace wi::terrain
 			td.format = Format::R8G8B8A8_UINT;
 			td.bind_flags = BindFlag::SHADER_RESOURCE | BindFlag::UNORDERED_ACCESS;
 			td.usage = Usage::DEFAULT;
-			td.layout = ResourceState::SHADER_RESOURCE_COMPUTE;
+			td.layout = ResourceState::UNORDERED_ACCESS;
 			td.mip_levels = lod_count;
-			bool success = device->CreateTexture(&td, nullptr, &residencyMap);
+			wi::vector<uint32_t> default_data(td.width * td.height);
+			wi::vector<SubresourceData> initdata(lod_count);
+			for (uint32_t lod = 0; lod < lod_count; ++lod)
+			{
+				initdata[lod].data_ptr = default_data.data();
+				initdata[lod].row_pitch = sizeof(uint32_t) * std::max(1u, td.width >> lod);
+			}
+			bool success = device->CreateTexture(&td, initdata.data(), &residencyMap);
 			assert(success);
 			device->SetName(&residencyMap, "VirtualTexture::residencyMap");
-			residency_cleared = false;
 
 			for (uint32_t i = 0; i < lod_count; ++i)
 			{
@@ -240,9 +247,10 @@ namespace wi::terrain
 			td.format = Format::R32_UINT; // shader atomic support needed
 			td.bind_flags = BindFlag::UNORDERED_ACCESS | BindFlag::SHADER_RESOURCE;
 			td.usage = Usage::DEFAULT;
-			td.layout = ResourceState::SHADER_RESOURCE_COMPUTE;
+			td.layout = ResourceState::UNORDERED_ACCESS;
 			td.mip_levels = 1;
-			success = device->CreateTexture(&td, nullptr, &feedbackMap);
+			std::fill(default_data.begin(), default_data.end(), 0xFF);
+			success = device->CreateTexture(&td, initdata.data(), &feedbackMap);
 			assert(success);
 			device->SetName(&feedbackMap, "VirtualTexture::feedbackMap");
 
@@ -252,7 +260,9 @@ namespace wi::terrain
 				bd.usage = Usage::DEFAULT;
 				bd.bind_flags = BindFlag::UNORDERED_ACCESS;
 				bd.size = sizeof(uint32_t) * tile_count;
-				success = device->CreateBuffer(&bd, nullptr, &requestBuffer);
+				wi::vector<uint32_t> data(tile_count);
+				std::fill(data.begin(), data.end(), 0xFF);
+				success = device->CreateBuffer(&bd, data.data(), &requestBuffer);
 				assert(success);
 				device->SetName(&requestBuffer, "VirtualTexture::requestBuffer");
 			}
@@ -262,7 +272,8 @@ namespace wi::terrain
 				bd.usage = Usage::DEFAULT;
 				bd.bind_flags = BindFlag::UNORDERED_ACCESS;
 				bd.size = sizeof(uint32_t) * (tile_count + 1); // +1: atomic global counter
-				success = device->CreateBuffer(&bd, nullptr, &allocationBuffer);
+				wi::vector<uint32_t> data(tile_count + 1);
+				success = device->CreateBuffer(&bd, data.data(), &allocationBuffer);
 				assert(success);
 				device->SetName(&allocationBuffer, "VirtualTexture::allocationBuffer");
 
@@ -305,7 +316,6 @@ namespace wi::terrain
 			data_available_CPU[i] = false;
 		}
 		cpu_resource_id = 0;
-		residency_cleared = false;
 	}
 
 	void VirtualTexture::init(VirtualTextureAtlas& atlas, uint resolution)
@@ -390,8 +400,9 @@ namespace wi::terrain
 		weather.volumetricCloudParameters.layerFirst.windSpeed = 20.0f;
 		weather.volumetricCloudParameters.layerFirst.coverageWindSpeed = 35.0f;
 		weather.volumetricCloudParameters.layerSecond.coverageAmount = 0.0f;
-		weather.oceanParameters.waterHeight = -40;
-		weather.oceanParameters.wave_amplitude = 120;
+		weather.oceanParameters.waterHeight = -10;
+		weather.oceanParameters.wave_amplitude = 1000;
+		weather.oceanParameters.patch_length = 20;
 		weather.fogStart = 0;
 		weather.fogDensity = 0.001f;
 		weather.SetHeightFog(true);
@@ -634,7 +645,7 @@ namespace wi::terrain
 		}
 
 		// What was generated, will be merged in to the main scene
-		scene->Merge(generator->scene);
+		scene->MergeFastInternal(generator->scene);
 
 		const float chunk_scale_rcp = 1.0f / chunk_scale;
 
@@ -732,23 +743,16 @@ namespace wi::terrain
 				{
 					chunk_mesh->SetBVHEnabled(true);
 				}
-
-#if 0
-				// Test: remove off screen chunks
-				//	But the problem is that shadow casters shouldn't be removed outside view
-				if (chunk_visible && !chunk_mesh->generalBuffer.IsValid())
-				{
-					chunk_mesh->CreateRenderData();
-				}
-				else if (!chunk_visible && chunk_mesh->generalBuffer.IsValid())
-				{
-					chunk_mesh->DeleteRenderData();
-				}
-#endif
 			}
 			else
 			{
 				chunk_data.mesh_vertex_positions = nullptr;
+			}
+
+			ObjectComponent* chunk_object = scene->objects.GetComponent(chunk_data.entity);
+			if (chunk_object != nullptr)
+			{
+				chunk_object->SetWetmapEnabled(scene->IsWetmapProcessingRequired());
 			}
 
 			// chunk removal:
@@ -808,18 +812,6 @@ namespace wi::terrain
 						rigidbody->mesh_lod = lod_required;
 						rigidbody->physicsobject = {}; // will be recreated
 					}
-					else
-					{
-						if (dist < physics_generation)
-						{
-							wi::physics::SetActivationState(*rigidbody, wi::physics::ActivationState::Active);
-						}
-						else
-						{
-							//scene->rigidbodies.Remove(chunk_data.entity);
-							wi::physics::SetActivationState(*rigidbody, wi::physics::ActivationState::Inactive);
-						}
-					}
 				}
 				else
 				{
@@ -827,8 +819,8 @@ namespace wi::terrain
 					{
 						RigidBodyPhysicsComponent& newrigidbody = scene->rigidbodies.Create(chunk_data.entity);
 						newrigidbody.shape = RigidBodyPhysicsComponent::TRIANGLE_MESH;
-						//newrigidbody.SetDisableDeactivation(true);
-						newrigidbody.SetKinematic(true);
+						newrigidbody.mass = 0; // terrain chunks are static
+						newrigidbody.friction = 0.8f;
 						newrigidbody.mesh_lod = lod_required;
 					}
 				}
@@ -974,10 +966,13 @@ namespace wi::terrain
 						if (slope_amount > 0.1f)
 							slope_cast_shadow.store(true);
 
-						const float region_base = 1;
-						const float region_slope = std::pow(slope_amount, region1);
-						const float region_low_altitude = bottomLevel == 0 ? 0 : std::pow(saturate(wi::math::InverseLerp(0, bottomLevel, height)), region2);
-						const float region_high_altitude = topLevel == 0 ? 0 : std::pow(saturate(wi::math::InverseLerp(0, topLevel, height)), region3);
+						float region_base = 1;
+						float region_slope = region1 == 0 ? 1 : smoothstep(0.0f, region1, slope_amount);
+						float region_low_altitude = region2 == 0 ? 1 : smoothstep(0.0f, region2, wi::math::InverseLerp(0, bottomLevel, height));
+						float region_high_altitude = region3 == 0 ? 1 : smoothstep(0.0f, region3, wi::math::InverseLerp(0, topLevel, height));
+
+						region_low_altitude = saturate(region_low_altitude - region_slope);
+						region_high_altitude = saturate(region_high_altitude - region_slope);
 
 						XMFLOAT4 materialBlendWeights(region_base, region_slope, region_low_altitude, region_high_altitude);
 
@@ -1275,10 +1270,6 @@ namespace wi::terrain
 	{
 		GraphicsDevice* device = GetDevice();
 		virtual_textures_in_use.clear();
-		virtual_texture_barriers_before_update.clear();
-		virtual_texture_barriers_after_update.clear();
-		virtual_texture_barriers_before_allocation.clear();
-		virtual_texture_barriers_after_allocation.clear();
 
 		if (!sampler.IsValid())
 		{
@@ -1417,7 +1408,7 @@ namespace wi::terrain
 					commands[0].range_tile_counts = &count;
 					commands[1] = commands[0];
 					commands[1].sparse_resource = &atlas.maps[map_type].texture_raw_block;
-					device->SparseUpdate(QUEUE_COPY, commands, arraysize(commands));
+					device->SparseUpdate(QUEUE_COMPUTE, commands, arraysize(commands));
 					offset += count;
 				}
 			}
@@ -1481,13 +1472,6 @@ namespace wi::terrain
 
 			if (vt.residency == nullptr)
 				continue;
-
-			virtual_texture_barriers_before_update.push_back(GPUBarrier::Buffer(&vt.residency->pageBuffer, ResourceState::COPY_DST, ResourceState::SHADER_RESOURCE_COMPUTE));
-			virtual_texture_barriers_before_update.push_back(GPUBarrier::Image(&vt.residency->feedbackMap, vt.residency->feedbackMap.desc.layout, ResourceState::UNORDERED_ACCESS));
-			virtual_texture_barriers_before_update.push_back(GPUBarrier::Image(&vt.residency->residencyMap, vt.residency->residencyMap.desc.layout, ResourceState::UNORDERED_ACCESS));
-			virtual_texture_barriers_after_update.push_back(GPUBarrier::Image(&vt.residency->residencyMap, ResourceState::UNORDERED_ACCESS, vt.residency->residencyMap.desc.layout));
-			virtual_texture_barriers_before_allocation.push_back(GPUBarrier::Image(&vt.residency->feedbackMap, ResourceState::UNORDERED_ACCESS, vt.residency->feedbackMap.desc.layout));
-			virtual_texture_barriers_after_allocation.push_back(GPUBarrier::Buffer(&vt.residency->allocationBuffer, ResourceState::UNORDERED_ACCESS, ResourceState::COPY_SRC));
 		}
 
 		wi::jobsystem::Execute(virtual_texture_ctx, [this](wi::jobsystem::JobArgs args) {
@@ -1637,57 +1621,6 @@ namespace wi::terrain
 		device->EventBegin("Terrain - UpdateVirtualTexturesGPU", cmd);
 		auto range = wi::profiler::BeginRangeGPU("Terrain - UpdateVirtualTexturesGPU", cmd);
 
-		if (chunk_buffer.IsValid())
-		{
-			device->EventBegin("Update chunk buffer", cmd);
-			auto mem = device->AllocateGPU(chunk_buffer.desc.size, cmd);
-			ShaderTerrainChunk* shader_chunks = (ShaderTerrainChunk*)mem.data;
-			for (int y = -chunk_buffer_range; y <= chunk_buffer_range; ++y)
-			{
-				for (int x = -chunk_buffer_range; x <= chunk_buffer_range; ++x)
-				{
-					ShaderTerrainChunk shader_chunk;
-					shader_chunk.init();
-
-					auto chunk = center_chunk;
-					chunk.x += x;
-					chunk.z += y;
-					auto it = chunks.find(chunk);
-					if (it != chunks.end())
-					{
-						const auto& chunk_data = it->second;
-						shader_chunk.heightmap = device->GetDescriptorIndex(&chunk_data.heightmap, SubresourceType::SRV);
-						shader_chunk.materialID = (uint)scene->materials.GetIndex(chunk_data.entity);
-					}
-
-					const uint idx = (x + chunk_buffer_range) + (y + chunk_buffer_range) * (chunk_buffer_range * 2 + 1);
-					std::memcpy(shader_chunks + idx, &shader_chunk, sizeof(shader_chunk));
-				}
-			}
-			device->CopyBuffer(&chunk_buffer, 0, &mem.buffer, mem.offset, chunk_buffer.desc.size, cmd);
-			device->EventEnd(cmd);
-		}
-
-		device->Barrier(virtual_texture_barriers_before_update.data(), (uint32_t)virtual_texture_barriers_before_update.size(), cmd);
-
-		device->EventBegin("Clear Metadata", cmd);
-		for (const VirtualTexture* vt : virtual_textures_in_use)
-		{
-			if (vt->residency == nullptr)
-				continue;
-			device->ClearUAV(&vt->residency->feedbackMap, 0xFF, cmd);
-			device->ClearUAV(&vt->residency->requestBuffer, 0xFF, cmd);
-			device->ClearUAV(&vt->residency->allocationBuffer, 0, cmd);
-			if (!vt->residency->residency_cleared)
-			{
-				vt->residency->residency_cleared = true;
-				device->ClearUAV(&vt->residency->residencyMap, 0, cmd);
-			}
-		}
-		device->EventEnd(cmd);
-
-		device->Barrier(GPUBarrier::Memory(), cmd);
-
 		device->EventBegin("Update Residency Maps", cmd);
 		device->BindComputeShader(wi::renderer::GetShader(wi::enums::CSTYPE_VIRTUALTEXTURE_RESIDENCYUPDATE), cmd);
 		for (const VirtualTexture* vt : virtual_textures_in_use)
@@ -1723,7 +1656,6 @@ namespace wi::terrain
 
 		device->EventBegin("Render Tile Regions", cmd);
 		wi::renderer::BindCommonResources(cmd);
-
 		for (const VirtualTexture* vt : virtual_textures_in_use)
 		{
 			if (vt->update_requests.empty())
@@ -1830,9 +1762,8 @@ namespace wi::terrain
 			}
 			vt->update_requests.clear();
 		}
+		device->Barrier(GPUBarrier::Memory(), cmd);
 		device->EventEnd(cmd);
-
-		device->Barrier(virtual_texture_barriers_after_update.data(), (uint32_t)virtual_texture_barriers_after_update.size(), cmd);
 
 		wi::profiler::EndRange(range);
 		device->EventEnd(cmd);
@@ -1850,6 +1781,37 @@ namespace wi::terrain
 			device->CopyResource(&vt->residency->pageBuffer, &vt->residency->pageBuffer_CPU_upload[vt->residency->cpu_resource_id], cmd);
 		}
 		device->EventEnd(cmd);
+
+		if (chunk_buffer.IsValid())
+		{
+			device->EventBegin("Update chunk buffer", cmd);
+			auto mem = device->AllocateGPU(chunk_buffer.desc.size, cmd);
+			ShaderTerrainChunk* shader_chunks = (ShaderTerrainChunk*)mem.data;
+			for (int y = -chunk_buffer_range; y <= chunk_buffer_range; ++y)
+			{
+				for (int x = -chunk_buffer_range; x <= chunk_buffer_range; ++x)
+				{
+					ShaderTerrainChunk shader_chunk;
+					shader_chunk.init();
+
+					auto chunk = center_chunk;
+					chunk.x += x;
+					chunk.z += y;
+					auto it = chunks.find(chunk);
+					if (it != chunks.end())
+					{
+						const auto& chunk_data = it->second;
+						shader_chunk.heightmap = device->GetDescriptorIndex(&chunk_data.heightmap, SubresourceType::SRV);
+						shader_chunk.materialID = (uint)scene->materials.GetIndex(chunk_data.entity);
+					}
+
+					const uint idx = (x + chunk_buffer_range) + (y + chunk_buffer_range) * (chunk_buffer_range * 2 + 1);
+					std::memcpy(shader_chunks + idx, &shader_chunk, sizeof(shader_chunk));
+				}
+			}
+			device->CopyBuffer(&chunk_buffer, 0, &mem.buffer, mem.offset, chunk_buffer.desc.size, cmd);
+			device->EventEnd(cmd);
+		}
 	}
 
 	void Terrain::AllocateVirtualTextureTileRequestsGPU(CommandList cmd) const
@@ -1858,7 +1820,6 @@ namespace wi::terrain
 		GraphicsDevice* device = GetDevice();
 
 		device->EventBegin("Terrain - AllocateVirtualTextureTileRequestsGPU", cmd);
-		device->Barrier(virtual_texture_barriers_before_allocation.data(), (uint32_t)virtual_texture_barriers_before_allocation.size(), cmd);
 
 		{
 			device->EventBegin("Tile Requests", cmd);
@@ -1871,7 +1832,7 @@ namespace wi::terrain
 				push.lodCount = vt->lod_count;
 				push.width = vt->residency->feedbackMap.desc.width;
 				push.height = vt->residency->feedbackMap.desc.height;
-				push.feedbackTextureRO = device->GetDescriptorIndex(&vt->residency->feedbackMap, SubresourceType::SRV);
+				push.feedbackTextureRW = device->GetDescriptorIndex(&vt->residency->feedbackMap, SubresourceType::UAV);
 				push.requestBufferRW = device->GetDescriptorIndex(&vt->residency->requestBuffer, SubresourceType::UAV);
 				device->PushConstants(&push, sizeof(push), cmd);
 
@@ -1914,8 +1875,6 @@ namespace wi::terrain
 			device->EventEnd(cmd);
 		}
 
-		device->Barrier(virtual_texture_barriers_after_allocation.data(), (uint32_t)virtual_texture_barriers_after_allocation.size(), cmd);
-
 		device->EventEnd(cmd);
 	}
 
@@ -1931,8 +1890,35 @@ namespace wi::terrain
 			if (vt->residency == nullptr)
 				continue;
 			device->CopyResource(&vt->residency->allocationBuffer_CPU_readback[vt->residency->cpu_resource_id], &vt->residency->allocationBuffer, cmd);
+			wi::renderer::PushBarrier(GPUBarrier::Buffer(&vt->residency->allocationBuffer, ResourceState::COPY_SRC, ResourceState::COPY_DST));
 		}
 
+		wi::renderer::FlushBarriers(cmd);
+
+		device->EventEnd(cmd);
+
+		device->EventBegin("Clear Metadata", cmd);
+		for (const VirtualTexture* vt : virtual_textures_in_use)
+		{
+			if (vt->residency == nullptr)
+				continue;
+
+			// Note: instead of ClearUAV, we use copies from default initialized resources
+			//	With this it can be put on the async copy queue
+			//	Also, using the ClearUAV was having a very bad performance especially with DX12
+			static wi::unordered_map<uint32_t, VirtualTextureAtlas::Residency> clear_residencies;
+			VirtualTextureAtlas::Residency& clear = clear_residencies[vt->resolution];
+			if (clear.resolution != vt->resolution)
+			{
+				clear.init(vt->resolution);
+			}
+			device->CopyResource(&vt->residency->feedbackMap, &clear.feedbackMap, cmd);
+			device->CopyResource(&vt->residency->requestBuffer, &clear.requestBuffer, cmd);
+			device->CopyResource(&vt->residency->allocationBuffer, &clear.allocationBuffer, cmd);
+
+			wi::renderer::PushBarrier(GPUBarrier::Image(&vt->residency->residencyMap, ResourceState::COPY_DST, ResourceState::COPY_SRC));
+		}
+		wi::renderer::FlushBarriers(cmd);
 		device->EventEnd(cmd);
 	}
 

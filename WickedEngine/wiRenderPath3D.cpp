@@ -52,6 +52,7 @@ namespace wi
 		depthBuffer_Copy1 = {};
 		depthBuffer_Reflection = {};
 		rtLinearDepth = {};
+		reprojectedDepth = {};
 
 		debugUAV = {};
 		tiledLightResources = {};
@@ -81,6 +82,7 @@ namespace wi
 
 	void RenderPath3D::ResizeBuffers()
 	{
+		first_frame = true;
 		DeleteGPUResources();
 
 		GraphicsDevice* device = wi::graphics::GetDevice();
@@ -175,7 +177,7 @@ namespace wi
 			device->CreateTexture(&desc, nullptr, &rtSceneCopy);
 			device->SetName(&rtSceneCopy, "rtSceneCopy");
 			desc.bind_flags = BindFlag::SHADER_RESOURCE | BindFlag::UNORDERED_ACCESS | BindFlag::RENDER_TARGET; // render target for aliasing
-			device->CreateTexture(&desc, nullptr, &rtSceneCopy_tmp, &rtParticleDistortion); // aliased!
+			device->CreateTexture(&desc, nullptr, &rtSceneCopy_tmp, &rtPrimitiveID);
 			device->SetName(&rtSceneCopy_tmp, "rtSceneCopy_tmp");
 
 			for (uint32_t i = 0; i < rtSceneCopy.GetDesc().mip_levels; ++i)
@@ -351,6 +353,8 @@ namespace wi
 		}
 
 		RenderPath2D::Update(dt);
+
+		wi::renderer::SetShadowsEnabled(getShadowsEnabled());
 
 		float update_speed = 0;
 
@@ -564,6 +568,33 @@ namespace wi
 			vxgiResources = {};
 		}
 
+		// Check whether reprojected depth is required:
+		if (!first_frame && wi::renderer::IsMeshShaderAllowed() && wi::renderer::IsMeshletOcclusionCullingEnabled())
+		{
+			TextureDesc desc;
+			desc.bind_flags = BindFlag::SHADER_RESOURCE | BindFlag::UNORDERED_ACCESS;
+			desc.format = Format::R16_UNORM;
+			desc.width = internalResolution.x;
+			desc.height = internalResolution.y;
+			desc.mip_levels = GetMipCount(desc.width, desc.height, 1, 4);
+			desc.layout = ResourceState::SHADER_RESOURCE_COMPUTE;
+			device->CreateTexture(&desc, nullptr, &reprojectedDepth);
+			device->SetName(&reprojectedDepth, "reprojectedDepth");
+
+			for (uint32_t i = 0; i < reprojectedDepth.desc.mip_levels; ++i)
+			{
+				int subresource_index;
+				subresource_index = device->CreateSubresource(&reprojectedDepth, SubresourceType::SRV, 0, 1, i, 1);
+				assert(subresource_index == i);
+				subresource_index = device->CreateSubresource(&reprojectedDepth, SubresourceType::UAV, 0, 1, i, 1);
+				assert(subresource_index == i);
+			}
+		}
+		else
+		{
+			reprojectedDepth = {};
+		}
+
 		// Check whether velocity buffer is required:
 		if (
 			getMotionBlurEnabled() ||
@@ -575,7 +606,8 @@ namespace wi
 			wi::renderer::GetRaytracedShadowsEnabled() ||
 			getAO() == AO::AO_RTAO ||
 			wi::renderer::GetVariableRateShadingClassification() ||
-			getFSR2Enabled()
+			getFSR2Enabled() ||
+			reprojectedDepth.IsValid()
 			)
 		{
 			if (!rtVelocity.IsValid())
@@ -741,6 +773,7 @@ namespace wi
 		{
 			camera->texture_vxgi_specular_index = -1;
 		}
+		camera->texture_reprojected_depth_index = device->GetDescriptorIndex(&reprojectedDepth, SubresourceType::SRV);
 
 		camera_reflection.canvas.init(*this);
 		camera_reflection.width = (float)depthBuffer_Reflection.desc.width;
@@ -770,6 +803,7 @@ namespace wi
 		camera_reflection.texture_surfelgi_index = -1;
 		camera_reflection.texture_vxgi_diffuse_index = -1;
 		camera_reflection.texture_vxgi_specular_index = -1;
+		camera_reflection.texture_reprojected_depth_index = -1;
 
 		video_cmd = {};
 		if (getSceneUpdateEnabled() && scene->videos.GetCount() > 0)
@@ -805,13 +839,14 @@ namespace wi
 				{
 					scene->terrains[i].CopyVirtualTexturePageStatusGPU(cmd_copypages);
 				}
-				});
+			});
 		}
 
 		// Preparing the frame:
 		CommandList cmd = device->BeginCommandList();
-		CommandList cmd_prepareframe = cmd;
+		device->WaitQueue(cmd, QUEUE_COMPUTE); // sync to prev frame compute (disallow prev frame overlapping a compute task into updating global scene resources for this frame)
 		wi::renderer::ProcessDeferredTextureRequests(cmd); // Execute it first thing in the frame here, on main thread, to not allow other thread steal it and execute on different command list!
+		CommandList cmd_prepareframe = cmd;
 		wi::jobsystem::Execute(ctx, [this, cmd](wi::jobsystem::JobArgs args) {
 			GraphicsDevice* device = wi::graphics::GetDevice();
 
@@ -837,7 +872,7 @@ namespace wi
 
 		});
 
-		//	async compute parallel with depth prepass
+		// async compute parallel with depth prepass
 		cmd = device->BeginCommandList(QUEUE_COMPUTE);
 		CommandList cmd_prepareframe_async = cmd;
 		device->WaitCommandList(cmd, cmd_prepareframe);
@@ -883,7 +918,7 @@ namespace wi
 				);
 			}
 
-			});
+		});
 
 		static const uint32_t drawscene_flags =
 			wi::renderer::DRAWSCENE_OPAQUE |
@@ -914,6 +949,16 @@ namespace wi
 			}
 
 			wi::renderer::RefreshImpostors(*scene, cmd);
+
+			if (reprojectedDepth.IsValid())
+			{
+				wi::renderer::ComputeReprojectedDepthPyramid(
+					depthBuffer_Copy,
+					rtVelocity,
+					reprojectedDepth,
+					cmd
+				);
+			}
 
 			RenderPassImage rp[] = {
 				RenderPassImage::DepthStencil(
@@ -1111,13 +1156,26 @@ namespace wi
 
 		});
 
+		CommandList cmd_ocean;
+		if (scene->weather.IsOceanEnabled() && scene->ocean.IsValid())
+		{
+			// Ocean simulation can be updated async to opaque passes:
+			cmd_ocean = device->BeginCommandList(QUEUE_COMPUTE);
+			wi::renderer::UpdateOcean(visibility_main, cmd_ocean);
+
+			// Copying to readback is done on copy queue to use DMA instead of compute warps:
+			CommandList cmd_oceancopy = device->BeginCommandList(QUEUE_COPY);
+			device->WaitCommandList(cmd_oceancopy, cmd_ocean);
+			wi::renderer::ReadbackOcean(visibility_main, cmd_oceancopy);
+		}
+
 		// Shadow maps:
 		if (getShadowsEnabled())
 		{
 			cmd = device->BeginCommandList();
 			wi::jobsystem::Execute(ctx, [this, cmd](wi::jobsystem::JobArgs args) {
 				wi::renderer::DrawShadowmaps(visibility_main, cmd);
-				});
+			});
 		}
 
 		if (wi::renderer::GetVXGIEnabled() && getSceneUpdateEnabled())
@@ -1146,7 +1204,7 @@ namespace wi
 			});
 		}
 
-		if (visibility_main.IsRequestedPlanarReflections())
+		if (getReflectionsEnabled() && visibility_main.IsRequestedPlanarReflections())
 		{
 			// Planar reflections depth prepass:
 			cmd = device->BeginCommandList();
@@ -1331,6 +1389,51 @@ namespace wi
 			});
 		}
 
+		// Main camera weather compute effects depending on shadow maps, envmaps, etc, but don't depend on async surface pass:
+		if (scene->weather.IsRealisticSky() || scene->weather.IsVolumetricClouds())
+		{
+			cmd = device->BeginCommandList();
+			wi::jobsystem::Execute(ctx, [this, cmd](wi::jobsystem::JobArgs args) {
+
+				wi::renderer::BindCameraCB(
+					*camera,
+					camera_previous,
+					camera_reflection,
+					cmd
+				);
+
+				if (scene->weather.IsRealisticSky())
+				{
+					wi::renderer::ComputeSkyAtmosphereSkyViewLut(cmd);
+
+					if (scene->weather.IsRealisticSkyAerialPerspective())
+					{
+						wi::renderer::ComputeSkyAtmosphereCameraVolumeLut(cmd);
+					}
+				}
+				if (scene->weather.IsRealisticSky() && scene->weather.IsRealisticSkyAerialPerspective())
+				{
+					wi::renderer::Postprocess_AerialPerspective(
+						aerialperspectiveResources,
+						cmd
+					);
+				}
+				if (scene->weather.IsVolumetricClouds())
+				{
+					wi::renderer::Postprocess_VolumetricClouds(
+						volumetriccloudResources,
+						cmd,
+						*camera,
+						camera_previous,
+						camera_reflection,
+						wi::renderer::GetTemporalAAEnabled() || getFSR2Enabled(),
+						scene->weather.volumetricCloudsWeatherMapFirst.IsValid() ? &scene->weather.volumetricCloudsWeatherMapFirst.GetTexture() : nullptr,
+						scene->weather.volumetricCloudsWeatherMapSecond.IsValid() ? &scene->weather.volumetricCloudsWeatherMapSecond.GetTexture() : nullptr
+					);
+				}
+			});
+		}
+
 		// Main camera opaque color pass:
 		cmd = device->BeginCommandList();
 		device->WaitCommandList(cmd, cmd_maincamera_compute_effects);
@@ -1346,17 +1449,6 @@ namespace wi
 				cmd
 			);
 
-			// This can't run in "main camera compute effects" async compute,
-			//	because it depends on shadow maps, and envmaps
-			if (scene->weather.IsRealisticSky())
-			{
-				wi::renderer::ComputeSkyAtmosphereSkyViewLut(cmd);
-
-				if (scene->weather.IsRealisticSkyAerialPerspective())
-				{
-					wi::renderer::ComputeSkyAtmosphereCameraVolumeLut(cmd);
-				}
-			}
 			if (getRaytracedReflectionEnabled())
 			{
 				wi::renderer::Postprocess_RTReflection(
@@ -1385,26 +1477,6 @@ namespace wi
 					*scene,
 					rtLinearDepth,
 					cmd
-				);
-			}
-			if (scene->weather.IsRealisticSky() && scene->weather.IsRealisticSkyAerialPerspective())
-			{
-				wi::renderer::Postprocess_AerialPerspective(
-					aerialperspectiveResources,
-					cmd
-				);
-			}
-			if (scene->weather.IsVolumetricClouds())
-			{
-				wi::renderer::Postprocess_VolumetricClouds(
-					volumetriccloudResources,
-					cmd,
-					*camera,
-					camera_previous,
-					camera_reflection,
-					wi::renderer::GetTemporalAAEnabled() || getFSR2Enabled(),
-					scene->weather.volumetricCloudsWeatherMapFirst.IsValid() ? &scene->weather.volumetricCloudsWeatherMapFirst.GetTexture() : nullptr,
-					scene->weather.volumetricCloudsWeatherMapSecond.IsValid() ? &scene->weather.volumetricCloudsWeatherMapSecond.GetTexture() : nullptr
 				);
 			}
 
@@ -1527,8 +1599,6 @@ namespace wi
 				wi::profiler::EndRange(range); // Opaque Scene
 			}
 
-			RenderOutline(cmd);
-
 			// Blend Aerial Perspective on top:
 			if (scene->weather.IsRealisticSky() && scene->weather.IsRealisticSkyAerialPerspective())
 			{
@@ -1545,6 +1615,8 @@ namespace wi
 			{
 				wi::renderer::Postprocess_VolumetricClouds_Upsample(volumetriccloudResources, cmd);
 			}
+
+			RenderOutline(cmd);
 
 			device->RenderPassEnd(cmd);
 
@@ -1585,6 +1657,10 @@ namespace wi
 
 		// Transparents, post processes, etc:
 		cmd = device->BeginCommandList();
+		if (cmd_ocean.IsValid())
+		{
+			device->WaitCommandList(cmd, cmd_ocean);
+		}
 		wi::jobsystem::Execute(ctx, [this, cmd](wi::jobsystem::JobArgs args) {
 
 			GraphicsDevice* device = wi::graphics::GetDevice();
@@ -1601,11 +1677,7 @@ namespace wi
 
 			RenderVolumetrics(cmd);
 
-			RenderSceneMIPChain(cmd);
-
 			RenderTransparents(cmd);
-
-			RenderPostprocessChain(cmd);
 
 			// Depth buffers expect a non-pixel shader resource state as they are generated on compute queue:
 			{
@@ -1616,13 +1688,29 @@ namespace wi
 				};
 				device->Barrier(barriers, arraysize(barriers), cmd);
 			}
+		});
 
+		if (scene->IsWetmapProcessingRequired())
+		{
+			CommandList wetmap_cmd = device->BeginCommandList(QUEUE_COMPUTE);
+			device->WaitCommandList(wetmap_cmd, cmd); // wait for transparents, it will be scheduled with late frame (GUI, etc)
+			// Note: GPU processing of this compute task can overlap with beginning of the next frame because no one is waiting for it
+			wi::jobsystem::Execute(ctx, [this, wetmap_cmd](wi::jobsystem::JobArgs args) {
+				wi::renderer::RefreshWetmaps(visibility_main, wetmap_cmd);
+			});
+		}
+
+		cmd = device->BeginCommandList();
+		wi::jobsystem::Execute(ctx, [this, cmd](wi::jobsystem::JobArgs args) {
+			RenderPostprocessChain(cmd);
 			wi::renderer::TextureStreamingReadbackCopy(*scene, cmd);
 		});
 
 		RenderPath2D::Render();
 
 		wi::jobsystem::Wait(ctx);
+
+		first_frame = false;
 	}
 
 	void RenderPath3D::Compose(CommandList cmd) const
@@ -1881,7 +1969,7 @@ namespace wi
 
 		{
 			GPUBarrier barriers[] = {
-				GPUBarrier::Aliasing(&rtParticleDistortion, &rtSceneCopy_tmp),
+				GPUBarrier::Aliasing(&rtPrimitiveID, &rtSceneCopy_tmp),
 				GPUBarrier::Image(&rtSceneCopy_tmp, rtSceneCopy_tmp.desc.layout, ResourceState::UNORDERED_ACCESS),
 			};
 			device->Barrier(barriers, arraysize(barriers), cmd);
@@ -1896,7 +1984,7 @@ namespace wi
 		mipopt.gaussian_temp = &rtSceneCopy_tmp;
 		wi::renderer::GenerateMipChain(rtSceneCopy, wi::renderer::MIPGENFILTER_GAUSSIAN, cmd, mipopt);
 
-		device->Barrier(GPUBarrier::Aliasing(&rtSceneCopy_tmp, &rtParticleDistortion), cmd);
+		device->Barrier(GPUBarrier::Aliasing(&rtSceneCopy_tmp, &rtPrimitiveID), cmd);
 
 		device->EventEnd(cmd);
 		wi::profiler::EndRange(range);
@@ -1904,6 +1992,10 @@ namespace wi
 	void RenderPath3D::RenderTransparents(CommandList cmd) const
 	{
 		GraphicsDevice* device = wi::graphics::GetDevice();
+
+		device->EventBegin("Copy scene tex only mip0 for ocean", cmd);
+		wi::renderer::Postprocess_Downsample4x(rtMain, rtSceneCopy, cmd);
+		device->EventEnd(cmd);
 
 		// Water ripple rendering:
 		if (!scene->waterRipples.empty())
@@ -1961,53 +2053,29 @@ namespace wi
 		Rect scissor = GetScissorInternalResolution();
 		device->BindScissorRects(1, &scissor, cmd);
 
-		// Transparent scene
-		{
-			auto range = wi::profiler::BeginRangeGPU("Transparent Scene", cmd);
-			device->EventBegin("Transparent Scene", cmd);
+		Viewport vp;
+		vp.width = (float)depthBuffer_Main.GetDesc().width;
+		vp.height = (float)depthBuffer_Main.GetDesc().height;
+		vp.min_depth = 0;
+		vp.max_depth = 1;
+		device->BindViewports(1, &vp, cmd);
 
-			Viewport vp;
-			vp.width = (float)depthBuffer_Main.GetDesc().width;
-			vp.height = (float)depthBuffer_Main.GetDesc().height;
+		// Draw only the ocean first, fog and lightshafts will be blended on top:
+		wi::renderer::DrawScene(
+			visibility_main,
+			RENDERPASS_MAIN,
+			cmd,
+			wi::renderer::DRAWSCENE_OCEAN
+		);
 
-			// Foreground:
-			vp.min_depth = 1 - foreground_depth_range;
-			vp.max_depth = 1;
-			device->BindViewports(1, &vp, cmd);
-			wi::renderer::DrawScene(
-				visibility_main,
-				RENDERPASS_MAIN,
-				cmd,
-				wi::renderer::DRAWSCENE_TRANSPARENT |
-				wi::renderer::DRAWSCENE_FOREGROUND_ONLY |
-				wi::renderer::DRAWSCENE_MAINCAMERA
-			);
+		device->RenderPassEnd(cmd);
 
-			// Regular:
-			vp.min_depth = 0;
-			vp.max_depth = 1;
-			device->BindViewports(1, &vp, cmd);
-			wi::renderer::DrawScene(
-				visibility_main,
-				RENDERPASS_MAIN,
-				cmd,
-				wi::renderer::DRAWSCENE_TRANSPARENT |
-				wi::renderer::DRAWSCENE_TESSELLATION |
-				wi::renderer::DRAWSCENE_OCCLUSIONCULLING |
-				wi::renderer::DRAWSCENE_OCEAN |
-				wi::renderer::DRAWSCENE_MAINCAMERA
-			);
+		RenderSceneMIPChain(cmd);
 
-			device->EventEnd(cmd);
-			wi::profiler::EndRange(range); // Transparent Scene
-		}
+		device->RenderPassBegin(rp, getMSAASampleCount() > 1 ? 3 : 2, cmd);
 
-		wi::renderer::DrawDebugWorld(*scene, *camera, *this, cmd);
-
-		wi::renderer::DrawLightVisualizers(visibility_main, cmd);
-
-		wi::renderer::DrawSoftParticles(visibility_main, false, cmd);
-		wi::renderer::DrawSpritesAndFonts(*scene, *camera, false, cmd);
+		// Note: volumetrics and light shafts are blended before transparent scene, because they used depth of the opaques
+		//	But the ocean is special, because it does have depth for them implicitly computed from ocean plane
 
 		if (getVolumeLightsEnabled() && visibility_main.IsRequestedVolumetricLights())
 		{
@@ -2033,6 +2101,54 @@ namespace wi
 			wi::image::Draw(&rtSun[1], fx, cmd);
 			device->EventEnd(cmd);
 		}
+
+		// Transparent scene
+		{
+			auto range = wi::profiler::BeginRangeGPU("Transparent Scene", cmd);
+			device->EventBegin("Transparent Scene", cmd);
+
+			// Regular:
+			vp.min_depth = 0;
+			vp.max_depth = 1;
+			device->BindViewports(1, &vp, cmd);
+			wi::renderer::DrawScene(
+				visibility_main,
+				RENDERPASS_MAIN,
+				cmd,
+				wi::renderer::DRAWSCENE_TRANSPARENT |
+				wi::renderer::DRAWSCENE_TESSELLATION |
+				wi::renderer::DRAWSCENE_OCCLUSIONCULLING |
+				wi::renderer::DRAWSCENE_MAINCAMERA
+			);
+
+			// Foreground:
+			vp.min_depth = 1 - foreground_depth_range;
+			vp.max_depth = 1;
+			device->BindViewports(1, &vp, cmd);
+			wi::renderer::DrawScene(
+				visibility_main,
+				RENDERPASS_MAIN,
+				cmd,
+				wi::renderer::DRAWSCENE_TRANSPARENT |
+				wi::renderer::DRAWSCENE_FOREGROUND_ONLY |
+				wi::renderer::DRAWSCENE_MAINCAMERA
+			);
+
+			// Reset normal viewport:
+			vp.min_depth = 0;
+			vp.max_depth = 1;
+			device->BindViewports(1, &vp, cmd);
+
+			device->EventEnd(cmd);
+			wi::profiler::EndRange(range); // Transparent Scene
+		}
+
+		wi::renderer::DrawDebugWorld(*scene, *camera, *this, cmd);
+
+		wi::renderer::DrawLightVisualizers(visibility_main, cmd);
+
+		wi::renderer::DrawSoftParticles(visibility_main, false, cmd);
+		wi::renderer::DrawSpritesAndFonts(*scene, *camera, false, cmd);
 
 		if (getLensFlareEnabled())
 		{
@@ -2100,6 +2216,9 @@ namespace wi
 	void RenderPath3D::RenderPostprocessChain(CommandList cmd) const
 	{
 		GraphicsDevice* device = wi::graphics::GetDevice();
+
+		wi::renderer::BindCommonResources(cmd);
+		wi::renderer::BindCameraCB(*camera, camera_previous, camera_reflection, cmd);
 
 		const Texture* rt_first = nullptr; // not ping-ponged with read / write
 		const Texture* rt_read = &rtMain;
@@ -2255,7 +2374,8 @@ namespace wi
 				getEyeAdaptionEnabled() ? &luminanceResources.luminance : nullptr,
 				getBloomEnabled() ? &bloomResources.texture_bloom : nullptr,
 				colorspace,
-				getTonemap()
+				getTonemap(),
+				&distortion_overlay
 			);
 
 			rt_first = nullptr;

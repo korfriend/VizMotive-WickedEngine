@@ -14,6 +14,7 @@
 #include "wiRectPacker.h"
 #include "wiUnorderedSet.h"
 #include "wiBVH.h"
+#include "wiPathQuery.h"
 
 namespace wi::scene
 {
@@ -173,6 +174,7 @@ namespace wi::scene
 		XMFLOAT4 specularColor = XMFLOAT4(1, 1, 1, 1);
 		XMFLOAT4 emissiveColor = XMFLOAT4(1, 1, 1, 0);
 		XMFLOAT4 subsurfaceScattering = XMFLOAT4(1, 1, 1, 0);
+		XMFLOAT4 extinctionColor = XMFLOAT4(0, 0.9f, 1, 1);
 		XMFLOAT4 texMulAdd = XMFLOAT4(1, 1, 0, 0);
 		float roughness = 0.2f;
 		float reflectance = 0.02f;
@@ -186,6 +188,8 @@ namespace wi::scene
 		float anisotropy_strength = 0;
 		float anisotropy_rotation = 0; //radians, counter-clockwise
 		float blend_with_terrain_height = 0;
+		float cloak = 0;
+		float chromatic_aberration = 0;
 
 		XMFLOAT4 sheenColor = XMFLOAT4(1, 1, 1, 1);
 		float sheenRoughness = 0;
@@ -290,6 +294,8 @@ namespace wi::scene
 		inline void SetMetalness(float value) { SetDirty(); metalness = value; }
 		inline void SetEmissiveStrength(float value) { SetDirty(); emissiveColor.w = value; }
 		inline void SetTransmissionAmount(float value) { SetDirty(); transmission = value; }
+		inline void SetCloakAmount(float value) { SetDirty(); cloak = value; }
+		inline void SetChromaticAberrationAmount(float value) { SetDirty(); chromatic_aberration = value; }
 		inline void SetRefractionAmount(float value) { SetDirty(); refraction = value; }
 		inline void SetNormalMapStrength(float value) { SetDirty(); normalMapStrength = value; }
 		inline void SetParallaxOcclusionMapping(float value) { SetDirty(); parallaxOcclusionMapping = value; }
@@ -310,6 +316,11 @@ namespace wi::scene
 		inline void SetSheenColor(const XMFLOAT3& value)
 		{
 			sheenColor = XMFLOAT4(value.x, value.y, value.z, sheenColor.w);
+			SetDirty();
+		}
+		inline void SetExtinctionColor(const XMFLOAT4& value)
+		{
+			extinctionColor = XMFLOAT4(value.x, value.y, value.z, value.w);
 			SetDirty();
 		}
 		inline void SetSheenRoughness(float value) { sheenRoughness = value; SetDirty(); }
@@ -366,6 +377,8 @@ namespace wi::scene
 		wi::vector<XMFLOAT2> vertex_uvset_1;
 		wi::vector<XMUINT4> vertex_boneindices;
 		wi::vector<XMFLOAT4> vertex_boneweights;
+		wi::vector<XMUINT4> vertex_boneindices2;
+		wi::vector<XMFLOAT4> vertex_boneweights2;
 		wi::vector<XMFLOAT2> vertex_atlas;
 		wi::vector<uint32_t> vertex_colors;
 		wi::vector<uint8_t> vertex_windweights;
@@ -428,6 +441,8 @@ namespace wi::scene
 		BufferView vb_col;
 		BufferView vb_bon;
 		BufferView vb_mor;
+		BufferView vb_clu;
+		BufferView vb_bou;
 		BufferView so_pos;
 		BufferView so_nor;
 		BufferView so_tan;
@@ -450,6 +465,13 @@ namespace wi::scene
 
 		wi::vector<wi::primitive::AABB> bvh_leaf_aabbs;
 		wi::BVH bvh;
+
+		struct SubsetClusterRange
+		{
+			uint32_t clusterOffset = 0;
+			uint32_t clusterCount = 0;
+		};
+		wi::vector<SubsetClusterRange> cluster_ranges;
 
 		inline void SetRenderable(bool value) { if (value) { _flags |= RENDERABLE; } else { _flags &= ~RENDERABLE; } }
 		inline void SetDoubleSided(bool value) { if (value) { _flags |= DOUBLE_SIDED; } else { _flags &= ~DOUBLE_SIDED; } }
@@ -489,6 +511,11 @@ namespace wi::scene
 			}
 		}
 
+		size_t GetClusterCount() const;
+
+		// Creates a new subset as a combination of the subsets of the first LOD, returns its index. This works if there are multiple LODs which are also contained in subsets array
+		size_t CreateSubset();
+
 		// Deletes all GPU resources
 		void DeleteRenderData();
 
@@ -517,43 +544,22 @@ namespace wi::scene
 		void RecenterToBottom();
 		wi::primitive::Sphere GetBoundingSphere() const;
 
+		uint32_t GetBoneInfluenceDiv4() const
+		{
+			uint32_t influence_div4 = 0;
+			if (!vertex_boneindices.empty())
+			{
+				influence_div4++;
+			}
+			if (!vertex_boneindices2.empty())
+			{
+				influence_div4++;
+			}
+			return influence_div4;
+		}
+
 		void Serialize(wi::Archive& archive, wi::ecs::EntitySerializer& seri);
 
-		struct Vertex_POS10
-		{
-			uint32_t x : 10;
-			uint32_t y : 10;
-			uint32_t z : 10;
-			uint32_t w : 2;
-
-			constexpr void FromFULL(const wi::primitive::AABB& aabb, XMFLOAT3 pos, uint8_t wind)
-			{
-				pos = wi::math::InverseLerp(aabb._min, aabb._max, pos); // UNORM remap
-				x = uint32_t(saturate(pos.x) * 1023.0f);
-				y = uint32_t(saturate(pos.y) * 1023.0f);
-				z = uint32_t(saturate(pos.z) * 1023.0f);
-				w = uint32_t((float(wind) / 255.0f) * 3);
-			}
-			inline XMVECTOR LoadPOS(const wi::primitive::AABB& aabb) const
-			{
-				XMFLOAT3 v = GetPOS(aabb);
-				return XMLoadFloat3(&v);
-			}
-			constexpr XMFLOAT3 GetPOS(const wi::primitive::AABB& aabb) const
-			{
-				XMFLOAT3 v = XMFLOAT3(
-					float(x) / 1023.0f,
-					float(y) / 1023.0f,
-					float(z) / 1023.0f
-				);
-				return wi::math::Lerp(aabb._min, aabb._max, v);
-			}
-			constexpr uint8_t GetWind() const
-			{
-				return uint8_t((float(w) / 3.0f) * 255);
-			}
-			static constexpr wi::graphics::Format FORMAT = wi::graphics::Format::R10G10B10A2_UNORM;
-		};
 		struct Vertex_POS16
 		{
 			uint16_t x = 0;
@@ -661,39 +667,30 @@ namespace wi::scene
 		};
 		struct Vertex_BON
 		{
-			uint16_t ind0 = 0;
-			uint16_t ind1 = 0;
-			uint16_t ind2 = 0;
-			uint16_t ind3 = 0;
-
-			uint16_t wei0 = 0;
-			uint16_t wei1 = 1;
-			uint16_t wei2 = 2;
-			uint16_t wei3 = 3;
+			XMUINT4 packed = XMUINT4(0, 0, 0, 0);
 
 			constexpr void FromFULL(const XMUINT4& boneIndices, const XMFLOAT4& boneWeights)
 			{
-				ind0 = uint16_t(boneIndices.x);
-				ind1 = uint16_t(boneIndices.y);
-				ind2 = uint16_t(boneIndices.z);
-				ind3 = uint16_t(boneIndices.w);
-
-				wei0 = uint16_t(boneWeights.x * 65535.0f);
-				wei1 = uint16_t(boneWeights.y * 65535.0f);
-				wei2 = uint16_t(boneWeights.z * 65535.0f);
-				wei3 = uint16_t(boneWeights.w * 65535.0f);
+				// Note:
+				//	- Indices are packed at 20 bits which allow indexing >1 million bones per mesh
+				//	- Weights are packed at 12 bits which allow 4096 distinct values, this was tweaked to
+				//		retain good precision with a high bone count stanford bunny soft body simulation where regular 8 bit weights was not enough
+				packed.x = (boneIndices.x & 0xFFFFF) | ((uint32_t(boneWeights.x * 4095) & 0xFFF) << 20u);
+				packed.y = (boneIndices.y & 0xFFFFF) | ((uint32_t(boneWeights.y * 4095) & 0xFFF) << 20u);
+				packed.z = (boneIndices.z & 0xFFFFF) | ((uint32_t(boneWeights.z * 4095) & 0xFFF) << 20u);
+				packed.w = (boneIndices.w & 0xFFFFF) | ((uint32_t(boneWeights.w * 4095) & 0xFFF) << 20u);
 			}
 			constexpr XMUINT4 GetInd_FULL() const
 			{
-				return XMUINT4(ind0, ind1, ind2, ind3);
+				return XMUINT4(packed.x & 0xFFFFF, packed.y & 0xFFFFF, packed.z & 0xFFFFF, packed.w & 0xFFFFF);
 			}
 			constexpr XMFLOAT4 GetWei_FULL() const
 			{
 				return XMFLOAT4(
-					float(wei0) / 65535.0f,
-					float(wei1) / 65535.0f,
-					float(wei2) / 65535.0f,
-					float(wei3) / 65535.0f
+					float(packed.x >> 20u) / 4095.0f,
+					float(packed.y >> 20u) / 4095.0f,
+					float(packed.z >> 20u) / 4095.0f,
+					float(packed.w >> 20u) / 4095.0f
 				);
 			}
 		};
@@ -810,6 +807,7 @@ namespace wi::scene
 			FOREGROUND = 1 << 7,
 			NOT_VISIBLE_IN_MAIN_CAMERA = 1 << 8,
 			NOT_VISIBLE_IN_REFLECTIONS = 1 << 9,
+			WETMAP_ENABLED = 1 << 10,
 		};
 		uint32_t _flags = RENDERABLE | CAST_SHADOW;
 
@@ -835,6 +833,8 @@ namespace wi::scene
 		mutable uint32_t lightmapIterationCount = 0;
 		wi::graphics::GPUBuffer vb_ao;
 		int vb_ao_srv = -1;
+		wi::graphics::GPUBuffer wetmap;
+		mutable bool wetmap_cleared = false;
 
 		XMFLOAT3 center = XMFLOAT3(0, 0, 0);
 		float radius = 0;
@@ -858,6 +858,7 @@ namespace wi::scene
 		inline void SetNotVisibleInMainCamera(bool value) { if (value) { _flags |= NOT_VISIBLE_IN_MAIN_CAMERA; } else { _flags &= ~NOT_VISIBLE_IN_MAIN_CAMERA; } }
 		// With this you can disable object rendering for reflections
 		inline void SetNotVisibleInReflections(bool value) { if (value) { _flags |= NOT_VISIBLE_IN_REFLECTIONS; } else { _flags &= ~NOT_VISIBLE_IN_REFLECTIONS; } }
+		inline void SetWetmapEnabled(bool value) { if (value) { _flags |= WETMAP_ENABLED; } else { _flags &= ~WETMAP_ENABLED; } }
 
 		inline bool IsRenderable() const { return (_flags & RENDERABLE) && (GetTransparency() < 0.99f); }
 		inline bool IsCastingShadow() const { return _flags & CAST_SHADOW; }
@@ -868,6 +869,7 @@ namespace wi::scene
 		inline bool IsForeground() const { return _flags & FOREGROUND; }
 		inline bool IsNotVisibleInMainCamera() const { return _flags & NOT_VISIBLE_IN_MAIN_CAMERA; }
 		inline bool IsNotVisibleInReflections() const { return _flags & NOT_VISIBLE_IN_REFLECTIONS; }
+		inline bool IsWetmapEnabled() const { return _flags & WETMAP_ENABLED; }
 
 		inline float GetTransparency() const { return 1 - color.w; }
 		inline uint32_t GetFilterMask() const { return filterMask | filterMaskDynamic; }
@@ -902,6 +904,7 @@ namespace wi::scene
 			EMPTY = 0,
 			DISABLE_DEACTIVATION = 1 << 0,
 			KINEMATIC = 1 << 1,
+			START_DEACTIVATED = 1 << 2,
 		};
 		uint32_t _flags = EMPTY;
 
@@ -916,17 +919,18 @@ namespace wi::scene
 			ENUM_FORCE_UINT32 = 0xFFFFFFFF
 		};
 		CollisionShape shape;
-		float mass = 1.0f;
-		float friction = 0.5f;
-		float restitution = 0.0f;
-		float damping_linear = 0.0f;
-		float damping_angular = 0.0f;
+		float mass = 1.0f; // Set to 0 to make body static
+		float friction = 0.2f;
+		float restitution = 0.1f;
+		float damping_linear = 0.05f;
+		float damping_angular = 0.05f;
+		float buoyancy = 1.2f;
 		XMFLOAT3 local_offset = XMFLOAT3(0, 0, 0);
 
 		struct BoxParams
 		{
 			XMFLOAT3 halfextents = XMFLOAT3(1, 1, 1);
-		} box; // also cylinder params
+		} box;
 		struct SphereParams
 		{
 			float radius = 1;
@@ -935,7 +939,7 @@ namespace wi::scene
 		{
 			float radius = 1;
 			float height = 1;
-		} capsule;
+		} capsule; // also cylinder params
 
 		// This will force LOD level for rigid body if it is a TRIANGLE_MESH shape:
 		//	The geometry for LOD level will be taken from MeshComponent.
@@ -947,9 +951,11 @@ namespace wi::scene
 
 		inline void SetDisableDeactivation(bool value) { if (value) { _flags |= DISABLE_DEACTIVATION; } else { _flags &= ~DISABLE_DEACTIVATION; } }
 		inline void SetKinematic(bool value) { if (value) { _flags |= KINEMATIC; } else { _flags &= ~KINEMATIC; } }
+		inline void SetStartDeactivated(bool value) { if (value) { _flags |= START_DEACTIVATED; } else { _flags &= ~START_DEACTIVATED; } }
 
 		inline bool IsDisableDeactivation() const { return _flags & DISABLE_DEACTIVATION; }
 		inline bool IsKinematic() const { return _flags & KINEMATIC; }
+		inline bool IsStartDeactivated() const { return _flags & START_DEACTIVATED; }
 
 		void Serialize(wi::Archive& archive, wi::ecs::EntitySerializer& seri);
 	};
@@ -961,37 +967,49 @@ namespace wi::scene
 			EMPTY = 0,
 			SAFE_TO_REGISTER = 1 << 0,
 			DISABLE_DEACTIVATION = 1 << 1,
-			FORCE_RESET = 1 << 2,
+			_DEPRECATED_FORCE_RESET = 1 << 2,
+			WIND = 1 << 3,
 		};
 		uint32_t _flags = DISABLE_DEACTIVATION;
 
 		float mass = 1.0f;
 		float friction = 0.5f;
 		float restitution = 0.0f;
+		float pressure = 0.0f;
+		float vertex_radius = 0.2f; // how much distance vertices keep from other physics bodies
+		float detail = 1; // LOD target detail [0,1]
+		wi::vector<uint32_t> physicsIndices; // physics vertex connectivity
 		wi::vector<uint32_t> physicsToGraphicsVertexMapping; // maps graphics vertex index to physics vertex index of the same position
-		wi::vector<uint32_t> graphicsToPhysicsVertexMapping; // maps a physics vertex index to first graphics vertex index of the same position
 		wi::vector<float> weights; // weight per physics vertex controlling the mass. (0: disable weight (no physics, only animation), 1: default weight)
 
 		// Non-serialized attributes:
 		std::shared_ptr<void> physicsobject = nullptr; // You can set to null to recreate the physics object the next time phsyics system will be running.
 		XMFLOAT4X4 worldMatrix = wi::math::IDENTITY_MATRIX;
-		wi::vector<MeshComponent::Vertex_POS32> vertex_positions_simulation; // graphics vertices after simulation (world space)
-		wi::vector<MeshComponent::Vertex_NOR> vertex_normals_simulation;
-		wi::vector<XMFLOAT4>vertex_tangents_tmp;
-		wi::vector<MeshComponent::Vertex_TAN> vertex_tangents_simulation;
+		uint32_t gpuBoneOffset = 0;
+		wi::vector<ShaderTransform> boneData; // simulated soft body nodes as bone matrices that can be fed into skinning
 		wi::primitive::AABB aabb;
 
 		inline void SetDisableDeactivation(bool value) { if (value) { _flags |= DISABLE_DEACTIVATION; } else { _flags &= ~DISABLE_DEACTIVATION; } }
+		inline void SetWindEnabled(bool value) { if (value) { _flags |= WIND; } else { _flags &= ~WIND; } }
 
 		inline bool IsDisableDeactivation() const { return _flags & DISABLE_DEACTIVATION; }
+		inline bool IsWindEnabled() const { return _flags & WIND; }
 
-		inline bool HasVertices() const
+		void Reset()
 		{
-			return !vertex_positions_simulation.empty();
+			physicsIndices.clear();
+			physicsToGraphicsVertexMapping.clear();
+			physicsobject = {};
+		}
+
+		void SetDetail(float loddetail)
+		{
+			detail = loddetail;
+			Reset();
 		}
 
 		// Create physics represenation of graphics mesh
-		void CreateFromMesh(const MeshComponent& mesh);
+		void CreateFromMesh(MeshComponent& mesh);
 
 		void Serialize(wi::Archive& archive, wi::ecs::EntitySerializer& seri);
 	};
@@ -1049,6 +1067,7 @@ namespace wi::scene
 		float innerConeAngle = 0; // default value is 0, means only outer cone angle is used
 		float radius = 0.025f;
 		float length = 0;
+		float volumetric_boost = 0; // increase the strength of volumetric fog only for this light
 
 		wi::vector<float> cascade_distances = { 8,80,800 };
 		wi::vector<std::string> lensFlareNames;
@@ -1075,6 +1094,7 @@ namespace wi::scene
 		inline bool IsVisualizerEnabled() const { return _flags & VISUALIZER; }
 		inline bool IsStatic() const { return _flags & LIGHTMAPONLY_STATIC; }
 		inline bool IsVolumetricCloudsEnabled() const { return _flags & VOLUMETRICCLOUDS; }
+		inline bool IsInactive() const { return intensity == 0 || range == 0; }
 
 		inline float GetRange() const
 		{
@@ -1158,6 +1178,7 @@ namespace wi::scene
 		int buffer_entitytiles_index = -1;
 		int texture_vxgi_diffuse_index = -1;
 		int texture_vxgi_specular_index = -1;
+		int texture_reprojected_depth_index = -1;
 		uint shadercamera_options = SHADERCAMERA_OPTION_NONE;
 
 		void CreatePerspective(float newWidth, float newHeight, float newNear, float newFar, float newFOV = XM_PI / 3.0f);
@@ -1309,7 +1330,8 @@ namespace wi::scene
 			EMPTY = 0,
 			PLAYING = 1 << 0,
 			LOOPED = 1 << 1,
-			ROOT_MOTION = 1 << 2
+			ROOT_MOTION = 1 << 2,
+			PING_PONG = 1 << 3,
 		};
 		uint32_t _flags = LOOPED;
 		float start = 0;
@@ -1448,6 +1470,8 @@ namespace wi::scene
 
 		inline bool IsPlaying() const { return _flags & PLAYING; }
 		inline bool IsLooped() const { return _flags & LOOPED; }
+		inline bool IsPingPong() const { return _flags & PING_PONG; }
+		inline bool IsPlayingOnce() const { return (_flags & (LOOPED | PING_PONG)) == 0; }
 		inline float GetLength() const { return end - start; }
 		inline bool IsEnded() const { return timer >= end; }
 		inline bool IsRootMotion() const { return _flags & ROOT_MOTION; }
@@ -1455,7 +1479,9 @@ namespace wi::scene
 		inline void Play() { _flags |= PLAYING; }
 		inline void Pause() { _flags &= ~PLAYING; }
 		inline void Stop() { Pause(); timer = 0.0f; last_update_time = timer; }
-		inline void SetLooped(bool value = true) { if (value) { _flags |= LOOPED; } else { _flags &= ~LOOPED; } }
+		inline void SetLooped(bool value = true) { if (value) { _flags |= LOOPED; _flags &= ~PING_PONG; } else { _flags &= ~LOOPED; } }
+		inline void SetPingPong(bool value = true) { if (value) { _flags |= PING_PONG; _flags &= ~LOOPED; } else { _flags &= ~PING_PONG; } }
+		inline void SetPlayOnce() { _flags &= ~(LOOPED | PING_PONG); }
 
 		inline void RootMotionOn() { _flags |= ROOT_MOTION; }
 		inline void RootMotionOff() { _flags &= ~ROOT_MOTION; }
@@ -1616,6 +1642,10 @@ namespace wi::scene
 		wi::ecs::Entity target = wi::ecs::INVALID_ENTITY; // which entity to follow (must have a transform component)
 		uint32_t chain_length = 0; // recursive depth
 		uint32_t iteration_count = 1; // computation step count. Increase this too for greater chain length
+
+		// Non-serialized attributes:
+		bool use_target_position = false;
+		XMFLOAT3 target_position = XMFLOAT3(0, 0, 0);
 
 		inline void SetDisabled(bool value = true) { if (value) { _flags |= DISABLED; } else { _flags &= ~DISABLED; } }
 		inline bool IsDisabled() const { return _flags & DISABLED; }
@@ -1957,6 +1987,246 @@ namespace wi::scene
 		XMFLOAT4 lookAtDeltaRotationState_LeftEye = XMFLOAT4(0, 0, 0, 1);
 		XMFLOAT4 lookAtDeltaRotationState_RightEye = XMFLOAT4(0, 0, 0, 1);
 		std::shared_ptr<void> ragdoll = nullptr; // physics system implementation-specific object
+		mutable float default_facing = 0; // 0 = not yet computed
+
+		void Serialize(wi::Archive& archive, wi::ecs::EntitySerializer& seri);
+	};
+
+	struct MetadataComponent
+	{
+		enum FLAGS
+		{
+			NONE = 0,
+		};
+		uint32_t _flags = NONE;
+
+		enum class Preset
+		{
+			Custom,
+			Waypoint,
+			Player,
+			Enemy,
+			NPC,
+			Pickup,
+		};
+		Preset preset = Preset::Custom;
+
+		// Ordered collection of values, but also accelerated lookup by string
+		template<typename T>
+		struct OrderedNamedValues
+		{
+			wi::unordered_map<std::string, size_t> lookup; // name -> value hash lookup
+			wi::vector<std::string> names; // ordered names
+			wi::vector<T> values; // ordered values
+
+			void reserve(size_t capacity)
+			{
+				lookup.reserve(capacity);
+				names.reserve(capacity);
+				values.reserve(capacity);
+			}
+			size_t size() const
+			{
+				return lookup.size();
+			}
+			bool has(const std::string& name) const
+			{
+				return lookup.count(name) > 0;
+			}
+			T get(size_t index) const
+			{
+				if (index < values.size())
+					return values[index];
+				return T();
+			}
+			T get_name(size_t index) const
+			{
+				if (index < names.size())
+					return names[index];
+				return T();
+			}
+			T get(const std::string& name) const
+			{
+				if (has(name))
+					return values[lookup.find(name)->second];
+				return T();
+			}
+			void set(const std::string& name, const T& value)
+			{
+				if (has(name))
+				{
+					// modify existing entry:
+					values[lookup[name]] = value;
+					names[lookup[name]] = name;
+				}
+				else
+				{
+					// register new entry:
+					lookup[name] = values.size();
+					values.push_back(value);
+					names.push_back(name);
+				}
+			}
+			void erase(const std::string& name)
+			{
+				if (has(name))
+				{
+					values.erase(values.begin() + lookup[name]);
+					names.erase(names.begin() + lookup[name]);
+					lookup.erase(name);
+				}
+			}
+		};
+
+		OrderedNamedValues<bool> bool_values;
+		OrderedNamedValues<int> int_values;
+		OrderedNamedValues<float> float_values;
+		OrderedNamedValues<std::string> string_values;
+
+		void Serialize(wi::Archive& archive, wi::ecs::EntitySerializer& seri);
+	};
+
+	struct CharacterComponent
+	{
+		enum FLAGS
+		{
+			NONE = 0,
+			CHARACTER_TO_CHARACTER_COLLISION_DISABLED = 1 << 0
+		};
+		uint32_t _flags = NONE;
+
+		int health = 100;
+		float width = 0.4f; // capsule radius
+		float height = 1.5f; // capsule height
+		float scale = 1.0f; // overall scaling
+
+		// Non-serialized attributes:
+		float ground_friction = 0.92f;
+		float water_friction = 0.9f;
+		float slope_threshold = 0.2f;
+		float leaning_limit = 0.12f;
+		float fixed_update_fps = 120;
+		float gravity = -30;
+		float water_vertical_offset = 0;
+		XMFLOAT3 movement = XMFLOAT3(0, 0, 0);
+		XMFLOAT3 velocity = XMFLOAT3(0, 0, 0);
+		XMFLOAT3 position = XMFLOAT3(0, 0, 0);
+		XMFLOAT3 position_prev = XMFLOAT3(0, 0, 0);
+		XMFLOAT3 relative_offset = XMFLOAT3(0, 0, 0);
+		bool active = true;
+		float accumulator = 0; // fixed timestep accumulation
+		float alpha = 0; // fixed timestep interpolation
+		XMFLOAT3 facing = XMFLOAT3(0, 0, 1); // forward facing direction (smoothed)
+		XMFLOAT3 facing_next = XMFLOAT3(0, 0, 1); // forward facing direction (immediate)
+		float leaning = 0; // sideways leaning (smoothed)
+		float leaning_next = 0; // sideways leaning (immediate)
+		bool ground_intersect = false;
+		bool wall_intersect = false;
+		bool swimming = false;
+		wi::ecs::Entity humanoidEntity = wi::ecs::INVALID_ENTITY;
+		wi::ecs::Entity left_foot = wi::ecs::INVALID_ENTITY;
+		wi::ecs::Entity right_foot = wi::ecs::INVALID_ENTITY;
+		float root_offset = 0;
+		bool foot_placement_enabled = true;
+		wi::PathQuery pathquery; // completed
+		wi::vector<wi::ecs::Entity> animations;
+		wi::ecs::Entity currentAnimation = wi::ecs::INVALID_ENTITY;
+		float anim_amount = 1;
+		bool reset_anim = true;
+		bool anim_ended = true;
+		XMFLOAT3 goal = XMFLOAT3(0, 0, 0);
+		bool process_goal = false;
+		struct PathfindingThreadContext
+		{
+			wi::jobsystem::context ctx;
+			volatile long process_goal_completed = 0;
+			wi::PathQuery pathquery_work; // working
+			~PathfindingThreadContext()
+			{
+				wi::jobsystem::Wait(ctx);
+			}
+		};
+		std::shared_ptr<PathfindingThreadContext> pathfinding_thread; // separate allocation, mustn't be reallocated while path finding thread is running
+		const wi::VoxelGrid* voxelgrid = nullptr;
+
+		// Apply movement to the character in the next update
+		void Move(const XMFLOAT3& direction);
+		// Apply movement relative to the character facing in the next update
+		void Strafe(const XMFLOAT3& direction);
+		// Apply upwards movement immediately
+		void Jump(float amount);
+		// Turn towards the direction smoothly
+		void Turn(const XMFLOAT3& direction);
+		// Lean sideways, negative values mean left, positive values mean right
+		void Lean(float amount);
+
+		void AddAnimation(wi::ecs::Entity entity);
+		void PlayAnimation(wi::ecs::Entity entity);
+		void StopAnimation();
+		void SetAnimationAmount(float amount);
+		float GetAnimationAmount() const;
+		bool IsAnimationEnded() const;
+
+		// Teleport character to position immediately
+		void SetPosition(const XMFLOAT3& position);
+
+		// Retrieve the current position without interpolation (this is the raw value from fixed timestep update)
+		XMFLOAT3 GetPosition() const;
+
+		// Retrieve the current position with interpolation (this is the position that is rendered)
+		XMFLOAT3 GetPositionInterpolated() const;
+
+		// Sets velocity immediately
+		void SetVelocity(const XMFLOAT3& position);
+
+		// Gets the current velocity
+		XMFLOAT3 GetVelocity() const;
+
+		// Returns the capsule representing the character, that is also used in collisions
+		wi::primitive::Capsule GetCapsule() const;
+
+		// Set the facing direction immediately
+		void SetFacing(const XMFLOAT3& value);
+
+		// Get the immediate facing direction
+		XMFLOAT3 GetFacing() const;
+
+		// Get the smoothed facing direction
+		XMFLOAT3 GetFacingSmoothed() const;
+
+		// Get the immediate leaning direction
+		float GetLeaning() const;
+
+		// Get the smoothed leaning direction
+		float GetLeaningSmoothed() const;
+
+		// Returns whether the character is currently stading on ground or not
+		bool IsGrounded() const;
+
+		// Returns whether the character is currently stading on ground or not
+		bool IsWallIntersect() const;
+
+		// Returns whether the character is currently swimming or not
+		bool IsSwimming() const;
+
+		// Enable/disable foot placement with inverse kinematics
+		void SetFootPlacementEnabled(bool value);
+
+		// Returns whether foot placement with inverse kinematics is currently enabled or not
+		bool IsFootPlacementEnabled() const;
+
+		// Set the goal for path finding, it will be processed the next time the scene is updated.
+		//	You can get the results by accessing the pathquery object of the character.
+		void SetPathGoal(const XMFLOAT3& goal, const wi::VoxelGrid* voxelgrid);
+
+		// Enable/disable the character's processing
+		void SetActive(bool value);
+
+		// Returns whether character processing is active or not
+		bool IsActive() const;
+
+		bool IsCharacterToCharacterCollisionDisabled() const { return _flags & CHARACTER_TO_CHARACTER_COLLISION_DISABLED; }
+		void SetCharacterToCharacterCollisionDisabled(bool value = true) { if (value) { _flags |= CHARACTER_TO_CHARACTER_COLLISION_DISABLED; } else { _flags &= ~CHARACTER_TO_CHARACTER_COLLISION_DISABLED; } }
 
 		void Serialize(wi::Archive& archive, wi::ecs::EntitySerializer& seri);
 	};

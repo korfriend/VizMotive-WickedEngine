@@ -1,57 +1,9 @@
+cmake_minimum_required(VERSION 3.12)
 
-set (SOURCE_FILES
-	main_${PLATFORM}.cpp
-	#$<$<STREQUAL:${PLATFORM},Windows>:App_${PLATFORM}.cpp>
-	AnimationWindow.cpp
-	CameraWindow.cpp
-	CameraComponentWindow.cpp
-	DecalWindow.cpp
-	Editor.cpp
-	EmitterWindow.cpp
-	EnvProbeWindow.cpp
-	ForceFieldWindow.cpp
-	HairParticleWindow.cpp
-	IKWindow.cpp
-	LayerWindow.cpp
-	LightWindow.cpp
-	MaterialWindow.cpp
-	MaterialPickerWindow.cpp
-	MeshWindow.cpp
-	ModelImporter_GLTF.cpp
-	ModelImporter_OBJ.cpp
-	ModelImporter_FBX.cpp
-	NameWindow.cpp
-	ObjectWindow.cpp
-	PaintToolWindow.cpp
-	GraphicsWindow.cpp
-	SoundWindow.cpp
-	VideoWindow.cpp
-	SpringWindow.cpp
-	ScriptWindow.cpp
-	stdafx.cpp
-	TransformWindow.cpp
-	Translator.cpp
-	WeatherWindow.cpp
-	RigidBodyWindow.cpp
-	SoftBodyWindow.cpp
-	ColliderWindow.cpp
-	HierarchyWindow.cpp
-	ExpressionWindow.cpp
-	ArmatureWindow.cpp
-	ComponentsWindow.cpp
-	TerrainWindow.cpp
-	HumanoidWindow.cpp
-	GeneralWindow.cpp
-	ProfilerWindow.cpp
-	SpriteWindow.cpp
-	FontWindow.cpp
- 	VoxelGridWindow.cpp
-	ContentBrowserWindow.cpp
-	xatlas.cpp
-	EmbeddedResources.cpp
-)
+file(GLOB SOURCE_FILES CONFIGURE_DEPENDS *.cpp)
+list(FILTER SOURCE_FILES EXCLUDE REGEX ${CMAKE_CURRENT_SOURCE_DIR}/main_.*)
+list(APPEND SOURCE_FILES main_${PLATFORM}.cpp)
 
-add_subdirectory(meshoptimizer)
 
 if (WIN32)
 	list (APPEND SOURCE_FILES
@@ -62,7 +14,6 @@ if (WIN32)
 
 	target_link_libraries(WickedEngineEditor PUBLIC
 		WickedEngine_Windows
-		meshoptimizer
 	)
 
 	set_property(TARGET WickedEngineEditor PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -72,7 +23,6 @@ else ()
 
 	target_link_libraries(WickedEngineEditor PUBLIC
 		WickedEngine
-		meshoptimizer
 	)
 	set(LIB_DXCOMPILER "libdxcompiler.so")
 

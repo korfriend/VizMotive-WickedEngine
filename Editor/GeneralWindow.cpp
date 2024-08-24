@@ -602,6 +602,12 @@ void GeneralWindow::Create(EditorComponent* _editor)
 			editor->physicsButton.sprites[i].params.enableCornerRounding();
 			editor->physicsButton.sprites[i].params.corners_rounding[2].radius = 10;
 			editor->physicsButton.sprites[i].params.corners_rounding[3].radius = 10;
+
+			editor->componentsWnd.metadataWnd.addCombo.sprites[i].params.enableCornerRounding();
+			editor->componentsWnd.metadataWnd.addCombo.sprites[i].params.corners_rounding[0].radius = 10;
+			editor->componentsWnd.metadataWnd.addCombo.sprites[i].params.corners_rounding[1].radius = 10;
+			editor->componentsWnd.metadataWnd.addCombo.sprites[i].params.corners_rounding[2].radius = 10;
+			editor->componentsWnd.metadataWnd.addCombo.sprites[i].params.corners_rounding[3].radius = 10;
 		}
 		editor->componentsWnd.weatherWnd.default_sky_horizon = dark_point;
 		editor->componentsWnd.weatherWnd.default_sky_zenith = theme_color_idle;
@@ -611,6 +617,17 @@ void GeneralWindow::Create(EditorComponent* _editor)
 		{
 			x.removeButton.SetColor(wi::Color::Error(), wi::gui::WIDGETSTATE::FOCUS);
 			for (auto& sprite : x.removeButton.sprites)
+			{
+				sprite.params.enableCornerRounding();
+				sprite.params.corners_rounding[0].radius = 10;
+				sprite.params.corners_rounding[2].radius = 10;
+			}
+		}
+
+		for (auto& x : editor->componentsWnd.metadataWnd.entries)
+		{
+			x.remove.SetColor(wi::Color::Error(), wi::gui::WIDGETSTATE::FOCUS);
+			for (auto& sprite : x.remove.sprites)
 			{
 				sprite.params.enableCornerRounding();
 				sprite.params.corners_rounding[0].radius = 10;
@@ -628,6 +645,14 @@ void GeneralWindow::Create(EditorComponent* _editor)
 
 		editor->componentsWnd.transformWnd.resetScaleButton.SetColor(wi::Color::Error(), wi::gui::WIDGETSTATE::FOCUS);
 		for (auto& sprite : editor->componentsWnd.transformWnd.resetScaleButton.sprites)
+		{
+			sprite.params.enableCornerRounding();
+			sprite.params.corners_rounding[1].radius = 10;
+			sprite.params.corners_rounding[3].radius = 10;
+		}
+
+		editor->componentsWnd.transformWnd.resetScaleUniformButton.SetColor(wi::Color::Error(), wi::gui::WIDGETSTATE::FOCUS);
+		for (auto& sprite : editor->componentsWnd.transformWnd.resetScaleUniformButton.sprites)
 		{
 			sprite.params.enableCornerRounding();
 			sprite.params.corners_rounding[1].radius = 10;

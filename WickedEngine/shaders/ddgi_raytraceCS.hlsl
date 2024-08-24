@@ -112,10 +112,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 Gid : SV_GroupID, uint groupIn
 			prim.instanceIndex = q.CommittedInstanceID();
 			prim.subsetIndex = q.CommittedGeometryIndex();
 
-			if (!q.CommittedTriangleFrontFace())
-			{
-				surface.flags |= SURFACE_FLAG_BACKFACE;
-			}
+			surface.SetBackface(!q.CommittedTriangleFrontFace());
 
 			if (!surface.load(prim, q.CommittedTriangleBarycentrics()))
 				return;
@@ -126,10 +123,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 Gid : SV_GroupID, uint groupIn
 			ray.Origin = ray.Origin + ray.Direction * hit.distance;
 			hit_depth = hit.distance;
 
-			if (hit.is_backface)
-			{
-				surface.flags |= SURFACE_FLAG_BACKFACE;
-			}
+			surface.SetBackface(hit.is_backface);
 
 			if (!surface.load(hit.primitiveID, hit.bary))
 				return;
@@ -143,8 +137,8 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 Gid : SV_GroupID, uint groupIn
 #if 1
 			// Light sampling:
 			{
-				const uint light_count = GetFrame().lightarray_count;
-				const uint light_index = GetFrame().lightarray_offset + rng.next_uint(light_count);
+				const uint light_count = lights().item_count();
+				const uint light_index = lights().first_item() + rng.next_uint(light_count);
 				ShaderEntity light = load_entity(light_index);
 
 				Lighting lighting;
@@ -200,7 +194,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 Gid : SV_GroupID, uint groupIn
 						{
 							const float3 lightColor = light.GetColor().rgb;
 
-							lighting.direct.diffuse = lightColor * attenuation_pointlight(dist, dist2, range, range2);
+							lighting.direct.diffuse = lightColor * attenuation_pointlight(dist2, range, range2);
 						}
 					}
 				}
@@ -232,7 +226,7 @@ void main(uint3 DTid : SV_DispatchThreadID, uint3 Gid : SV_GroupID, uint groupIn
 							{
 								const float3 lightColor = light.GetColor().rgb;
 
-								lighting.direct.diffuse = lightColor * attenuation_spotlight(dist, dist2, range, range2, spot_factor, light.GetAngleScale(), light.GetAngleOffset());
+								lighting.direct.diffuse = lightColor * attenuation_spotlight(dist2, range, range2, spot_factor, light.GetAngleScale(), light.GetAngleOffset());
 							}
 						}
 					}

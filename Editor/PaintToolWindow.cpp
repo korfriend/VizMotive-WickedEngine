@@ -1170,25 +1170,23 @@ void PaintToolWindow::Update(float dt)
 					continue;
 
 				SoftBodyPhysicsComponent* softbody = scene.softbodies.GetComponent(object.meshID);
-				if (softbody == nullptr || !softbody->HasVertices())
+				if (softbody == nullptr || softbody->physicsobject == nullptr)
 					continue;
 
 				// Painting:
 				if (painting)
 				{
-					size_t j = 0;
-					for (auto& ind : softbody->physicsToGraphicsVertexMapping)
+					for (size_t j = 0; j < mesh->vertex_positions.size(); ++j)
 					{
-						XMVECTOR P = softbody->vertex_positions_simulation[ind].LoadPOS();
+						XMVECTOR P = SkinVertex(*mesh, *softbody, (uint32_t)j);
 
 						const float dist = wi::math::Distance(P, CENTER);
 						if (dist <= pressure_radius)
 						{
 							RecordHistory(object.meshID);
 							softbody->weights[j] = (mode == MODE_SOFTBODY_PINNING ? 0.0f : 1.0f);
-							softbody->_flags |= SoftBodyPhysicsComponent::FORCE_RESET;
+							softbody->Reset();
 						}
-						j++;
 					}
 				}
 
@@ -1202,28 +1200,17 @@ void PaintToolWindow::Update(float dt)
 					const MeshComponent::MeshSubset& subset = mesh->subsets[subsetIndex];
 					for (size_t j = 0; j < subset.indexCount; j += 3)
 					{
-						const uint32_t graphicsIndex0 = mesh->indices[j + 0];
-						const uint32_t graphicsIndex1 = mesh->indices[j + 1];
-						const uint32_t graphicsIndex2 = mesh->indices[j + 2];
-						const uint32_t physicsIndex0 = softbody->graphicsToPhysicsVertexMapping[graphicsIndex0];
-						const uint32_t physicsIndex1 = softbody->graphicsToPhysicsVertexMapping[graphicsIndex1];
-						const uint32_t physicsIndex2 = softbody->graphicsToPhysicsVertexMapping[graphicsIndex2];
-						const float weight0 = softbody->weights[physicsIndex0];
-						const float weight1 = softbody->weights[physicsIndex1];
-						const float weight2 = softbody->weights[physicsIndex2];
+						const uint32_t i0 = mesh->indices[j + 0];
+						const uint32_t i1 = mesh->indices[j + 1];
+						const uint32_t i2 = mesh->indices[j + 2];
+						const float weight0 = softbody->weights[i0];
+						const float weight1 = softbody->weights[i1];
+						const float weight2 = softbody->weights[i2];
+						XMVECTOR N0 = XMVectorZero(), N1 = XMVectorZero(), N2 = XMVectorZero();
 						wi::renderer::RenderableTriangle tri;
-						if (softbody->HasVertices())
-						{
-							tri.positionA = softbody->vertex_positions_simulation[graphicsIndex0].GetPOS();
-							tri.positionB = softbody->vertex_positions_simulation[graphicsIndex1].GetPOS();
-							tri.positionC = softbody->vertex_positions_simulation[graphicsIndex2].GetPOS();
-						}
-						else
-						{
-							XMStoreFloat3(&tri.positionA, XMVector3Transform(XMLoadFloat3(&mesh->vertex_positions[graphicsIndex0]), W));
-							XMStoreFloat3(&tri.positionB, XMVector3Transform(XMLoadFloat3(&mesh->vertex_positions[graphicsIndex1]), W));
-							XMStoreFloat3(&tri.positionC, XMVector3Transform(XMLoadFloat3(&mesh->vertex_positions[graphicsIndex2]), W));
-						}
+						XMStoreFloat3(&tri.positionA, SkinVertex(*mesh, *softbody, i0, &N0) + N0 * 0.01f);
+						XMStoreFloat3(&tri.positionB, SkinVertex(*mesh, *softbody, i1, &N1) + N1 * 0.01f);
+						XMStoreFloat3(&tri.positionC, SkinVertex(*mesh, *softbody, i2, &N2) + N2 * 0.01f);
 						if (weight0 == 0)
 							tri.colorA = XMFLOAT4(1, 1, 0, 1);
 						else
@@ -1326,6 +1313,22 @@ void PaintToolWindow::Update(float dt)
 								break;
 							}
 							hair._flags |= wi::HairParticleSystem::REBUILD_BUFFERS;
+						}
+					}
+				}
+
+				if (hair._flags & wi::HairParticleSystem::REBUILD_BUFFERS)
+				{
+					for (size_t i = 0; i < scene.terrains.GetCount(); ++i)
+					{
+						for (auto& it : scene.terrains[i].chunks)
+						{
+							if (scene.Entity_IsDescendant(hairEntity, it.second.entity))
+							{
+								// Save modified grass lengths for chunk:
+								it.second.grass.vertex_lengths = hair.vertex_lengths;
+								break;
+							}
 						}
 					}
 				}
@@ -1812,8 +1815,7 @@ void PaintToolWindow::ConsumeHistoryOperation(wi::Archive& archive, bool undo)
 			archive >> archive_softbody.weights;
 
 			softbody->weights = archive_softbody.weights;
-
-			softbody->_flags |= SoftBodyPhysicsComponent::FORCE_RESET;
+			softbody->Reset();
 		}
 		break;
 		case PaintToolWindow::MODE_HAIRPARTICLE_ADD_TRIANGLE:

@@ -229,6 +229,10 @@ wi::vector<ShaderEntry> shaders = {
 	{"virtualTextureResidencyUpdateCS", wi::graphics::ShaderStage::CS },
 	{"windCS", wi::graphics::ShaderStage::CS },
 	{"yuv_to_rgbCS", wi::graphics::ShaderStage::CS },
+	{"wetmap_updateCS", wi::graphics::ShaderStage::CS },
+	{"causticsCS", wi::graphics::ShaderStage::CS },
+	{"depth_reprojectCS", wi::graphics::ShaderStage::CS },
+	{"depth_pyramidCS", wi::graphics::ShaderStage::CS },
 
 
 	{"emittedparticlePS_soft", wi::graphics::ShaderStage::PS },
@@ -358,6 +362,16 @@ wi::vector<ShaderEntry> shaders = {
 	{"objectHS_simple", wi::graphics::ShaderStage::HS },
 
 	{"emittedparticleMS", wi::graphics::ShaderStage::MS },
+
+	{"objectMS", wi::graphics::ShaderStage::MS },
+	{"objectMS_prepass", wi::graphics::ShaderStage::MS },
+	{"objectMS_prepass_alphatest", wi::graphics::ShaderStage::MS },
+	{"objectMS_simple", wi::graphics::ShaderStage::MS },
+	{"shadowMS", wi::graphics::ShaderStage::MS },
+	{"shadowMS_alphatest", wi::graphics::ShaderStage::MS },
+	{"shadowMS_transparent", wi::graphics::ShaderStage::MS },
+
+	{"objectAS", wi::graphics::ShaderStage::AS },
 
 
 	//{"rtreflectionLIB", wi::graphics::ShaderStage::LIB },
@@ -564,6 +578,11 @@ int main(int argc, char* argv[])
 					if (target.format == ShaderFormat::PS5 && (input.minshadermodel >= ShaderModel::SM_6_5 || input.stage == ShaderStage::MS))
 					{
 						// TODO PS5 raytracing, mesh shader
+						return;
+					}
+					if (target.format == ShaderFormat::HLSL6_XS && input.stage == ShaderStage::MS)
+					{
+						// TODO Xbox mesh shader
 						return;
 					}
 

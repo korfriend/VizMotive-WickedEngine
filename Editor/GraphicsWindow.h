@@ -15,6 +15,8 @@ public:
 	wi::gui::Label pathTraceStatisticsLabel;
 	wi::gui::CheckBox occlusionCullingCheckBox;
 	wi::gui::CheckBox visibilityComputeShadingCheckBox;
+	wi::gui::CheckBox meshShaderCheckBox;
+	wi::gui::CheckBox meshletOcclusionCullingCheckBox;
 	wi::gui::Slider resolutionScaleSlider;
 	wi::gui::Slider streamingSlider;
 	wi::gui::Slider GIBoostSlider;
@@ -35,7 +37,6 @@ public:
 	wi::gui::Slider vxgiRayStepSizeSlider;
 	wi::gui::Slider vxgiMaxDistanceSlider;
 	wi::gui::Slider speedMultiplierSlider;
-	wi::gui::CheckBox transparentShadowsCheckBox;
 	wi::gui::ComboBox shadowTypeComboBox;
 	wi::gui::ComboBox shadowProps2DComboBox;
 	wi::gui::ComboBox shadowPropsCubeComboBox;

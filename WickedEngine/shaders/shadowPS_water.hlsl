@@ -5,14 +5,16 @@
 [earlydepthstencil]
 float4 main(PixelInput input) : SV_TARGET
 {
+	ShaderMaterial material = GetMaterial();
+	
 	float4 uvsets = input.GetUVSets();
 	float2 pixel = input.pos.xy;
 
 	float4 color;
 	[branch]
-	if (GetMaterial().textures[BASECOLORMAP].IsValid())
+	if (material.textures[BASECOLORMAP].IsValid())
 	{
-		color = GetMaterial().textures[BASECOLORMAP].Sample(sampler_objectshader, uvsets);
+		color = material.textures[BASECOLORMAP].Sample(sampler_objectshader, uvsets);
 	}
 	else
 	{
@@ -24,7 +26,7 @@ float4 main(PixelInput input) : SV_TARGET
 
 	color.rgb = 1; // disable water shadow because it has already fog
 
-	color.rgb += caustic_pattern(uvsets.xy * 20, GetFrame().time);
+	color.rgb += texture_caustics.SampleLevel(sampler_linear_mirror, uvsets.xy, 0).rgb;
 
 	color.a = input.pos.z; // secondary depth
 

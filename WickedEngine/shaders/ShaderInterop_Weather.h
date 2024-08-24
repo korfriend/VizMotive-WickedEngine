@@ -2,7 +2,7 @@
 #define WI_SHADERINTEROP_WEATHER_H
 #include "ShaderInterop.h"
 
-struct AtmosphereParameters
+struct alignas(16) AtmosphereParameters
 {
 	float2 padding0;
 	// Radius of the planet (center to ground)
@@ -21,10 +21,12 @@ struct AtmosphereParameters
 	float mieDensityExpScale;
 
 	// Mie scattering coefficients
-	float3 mieScattering;	float padding1;
+	float3 mieScattering;
+	float padding1;
 
 	// Mie extinction coefficients
-	float3 mieExtinction;	float padding2;
+	float3 mieExtinction;
+	float padding2;
 
 	// Mie absorption coefficients
 	float3 mieAbsorption;
@@ -41,10 +43,12 @@ struct AtmosphereParameters
 	float absorptionDensity1LinearTerm;
 
 	// This other medium only absorb light, e.g. useful to represent ozone in the earth atmosphere
-	float3 absorptionExtinction;	float padding4;
+	float3 absorptionExtinction;
+	float padding4;
 
 	// The albedo of the ground.
-	float3 groundAlbedo;	float padding5;
+	float3 groundAlbedo;
+	float padding5;
 
 	// Varying sample count for sky rendering based on the 'distanceSPPMaxInv' with min-max
 	float2 rayMarchMinMaxSPP;
@@ -101,7 +105,7 @@ struct AtmosphereParameters
 };
 
 
-struct VolumetricCloudLayer
+struct alignas(16) VolumetricCloudLayer
 {
 	// Lighting
 	float3 albedo; // Cloud albedo is normally very close to white
@@ -147,36 +151,34 @@ struct VolumetricCloudLayer
 	float windUpAmount;
 	float coverageWindSpeed;
 
-	float coverageWindAngle;
 	float3 padding2;
+	float coverageWindAngle;
 };
 
-struct VolumetricCloudParameters
+struct alignas(16) VolumetricCloudParameters
 {
 	float beerPowder;
 	float beerPowderPower;
-	float2 padding0;
-
 	float ambientGroundMultiplier; // [0; 1] Amount of ambient light to reach the bottom of clouds
 	float phaseG; // [-0.999; 0.999]
+
 	float phaseG2; // [-0.999; 0.999]
 	float phaseBlend; // [0; 1]
-
 	float multiScatteringScattering;
 	float multiScatteringExtinction;
+
 	float multiScatteringEccentricity;
 	float shadowStepLength;
-
 	float horizonBlendAmount;
 	float horizonBlendPower;
+
 	float cloudStartHeight;
 	float cloudThickness;
+	float animationMultiplier;
+	float padding0;
 
 	VolumetricCloudLayer layerFirst;
 	VolumetricCloudLayer layerSecond;
-
-	float animationMultiplier;
-	float3 padding1;
 
 	// Performance
 	int maxStepCount; // Maximum number of iterations. Higher gives better images but may be slow.
@@ -191,7 +193,8 @@ struct VolumetricCloudParameters
 
 	float shadowSampleCount;
 	float groundContributionSampleCount;
-	float2 padding2;
+	float padding1;
+	float padding2;
 
 	void init()
 	{
@@ -319,7 +322,7 @@ struct VolumetricCloudParameters
 
 };
 
-struct ShaderFog
+struct alignas(16) ShaderFog
 {
 	float start;
 	float density;
@@ -327,7 +330,7 @@ struct ShaderFog
 	float height_end;
 };
 
-struct ShaderWind
+struct alignas(16) ShaderWind
 {
 	float3 direction;
 	float speed;
@@ -338,16 +341,19 @@ struct ShaderWind
 	float padding1;
 };
 
-struct ShaderOcean
+struct alignas(16) ShaderOcean
 {
 	float4 water_color;
+	float4 extinction_color;
 	float water_height;
 	float patch_size_rcp;
 	int texture_displacementmap;
 	int texture_gradientmap;
+
+	bool IsValid() { return texture_displacementmap >= 0; }
 };
 
-struct ShaderWeather
+struct alignas(16) ShaderWeather
 {
 	float3 sun_color;
 	float stars; // number of stars (0: disable stars, >0: increase number of stars)
