@@ -1,9 +1,10 @@
 <img src="../logo_small.png" width="128px"/>
 
 # WickedEngine Documentation
-This is a reference for the C++ features of Wicked Engine
+This is the documentation for the C++ features of Wicked Engine
 
 ## Contents
+0. [Building and linking](#building-and-linking)
 1. [High Level Interface](#high-level-interface)
 	1. [Application](#application)
 	2. [RenderPath](#renderpath)
@@ -159,6 +160,36 @@ This is a reference for the C++ features of Wicked Engine
 	1. [Interop](#interop)
 	2. [Shader Compiler](#shader-compiler)
 
+## Building and linking
+Wicked Engine is a static library that can be included and linked into a standard C++ application. This comes with some differences when you try to build it for different platforms, because those have different compilers and settings. The basics of the static library will apply for all:
+
+1. You must build WickedEngine itself
+	- Windows: Use the WickedEngine.sln with Visual Studio and build the WickedEngine_Windows project
+	- Linux: Use the following commands on linux to build the solution:
+
+Ensure dependencies are installed on Linux:
+```bash
+sudo apt update
+sudo apt install libsdl2-dev
+sudo apt install build-essential
+```
+To build the engine on Linux, use `cmake` and then `make`:
+```bash
+mkdir build
+cd build
+cmake ..
+make
+```
+
+2. Set the `$(SolutionDir)WickedEngine` folder as "additional include directories" in your application's build system (for example, for me it resolves to: `C:\PROJECTS\WickedEngine\WickedEngine`)
+3. Set the `$(SolutionDir)BUILD/$(Platform)/$(Configuration)` as "additional library directories" in your application's build system (for example, for me it resolves to: `C:\PROJECTS\WickedEngine\BUILD\x64\Debug` in a Debug x64 configuration)
+4. Use `#include "WickedEngine.h` in your C++ application code
+5. Verify that you application compiles correctly and links to Wicked Engine.
+6. If succeeded, continue this guide with the [Application initialization](#application)
+
+If you have troubles, check out the Samples/Template projects which are setting up simple applications that use Wicked Engine and how they are configured.
+
+Xbox, PlayStation: The WickedEngine.sln must be used with Visual Studio similarly to Windows, but with console extension files and additional instructions which are private now, but could be offered in the future.
 
 ## High Level Interface
 The high level interface consists of classes that allow for extending the engine with custom functionality. This is usually done by overriding the classes.
@@ -166,8 +197,72 @@ The high level interface consists of classes that allow for extending the engine
 ### Application
 [[Header]](../../WickedEngine/wiApplication.h) [[Cpp]](../../WickedEngine/wiApplication.cpp)
 This is the main runtime component that has the Run() function. It should be included in the application entry point while calling Run() in an infinite loop. <br/>
-The user should call the SetWindow() function to associate it with a window of the operating system. This window will be used to render to.<br/>
-The `Application` has many uses that the user is not necessarily interested in. The most important part is that it manages the RenderPaths. There can be one active RenderPath at a time, which will be updated and rendered to the screen every frame. However, because a RenderPath is a highly customizable class, there is no limitation what can be done within the RenderPath, for example supporting multiple concurrent RenderPaths if required. RenderPaths can be switched wit ha Fade out screen easily. Loading Screen can be activated as an active Renderpath and it will load and switch to an other RenderPath if desired. A RenderPath can be simply activated with the `Application::ActivatePath()` function.<br/>
+
+To use the application, the user should at least set the operating system window to render to with the `SetWindow()`, providing the operating system-specific window handle to it. This will be the main window that the application will draw its contents to.
+
+It's also recommended to call `Initialize()` of the application if you do anything with the engine features outside of RenderPath, for example in your main function. This will kick off engine initialization immediately, instead of the first call to `Run()`. Using engine features before `application.Initialize()` was called, can be undefined behaviour. If you only use engine features within application's Update() and other overridable functions, those are ensured to be running when it is valid to do.
+
+An example of minimal application initialization:
+
+```cpp
+Application app;
+app.SetWindow(hWnd); // operating-system dependent window handle is given
+while(true)
+{
+	app.Run(); // app.Initialize() will be called in here, don't use engine features before this.
+}
+```
+
+The example above is sufficient to rely on doing things inside the startup.lua file, which - if exists - will be executed at the appropriate time.
+
+An example of minimal application initialization with extended c++ class:
+
+```cpp
+class Game : public Application
+{
+	virtual ~Game() = default; // in c++ it's recommended to always make class destructors that are used in inheritance virtual
+
+	void Update(float deltatime) override // override Application's Update function
+	{
+		Application::Update(deltatime);
+		// your per-application update logic can go here
+	}
+}
+Game game;
+game.SetWindow(hWnd);
+while(true)
+{
+	game.Run();
+}
+```
+
+An example of application initialization and some engine usage immediately:
+
+```cpp
+Application app;
+app.SetWindow(hWnd);
+app.Initialize(); // before using engine feature LoadModel, application.Initialize() will ensure all engine system initializations are kicked off. Most things are safe to use while initalization is running in the background...
+LoadModel("something.wiscene");
+while(true)
+{
+	app.Run();
+}
+```
+
+An example of initializing application and blocking until whole engine was initialized:
+
+```cpp
+Application app;
+app.SetWindow(hWnd);
+app.Initialize(); // this returns immediately, but engine sub-system begin to be initialized in the background...
+wi::initializer::WaitForInitializationsToFinish(); // block until all engine sub-systems are ready. If this is called before Run(), then initialization screen won't be shown.
+while(true)
+{
+	app.Run();
+}
+```
+
+The `Application` has many uses that the user is not necessarily interested in. The most important part is that it manages the `RenderPath`s. There can be one active `RenderPath` at a time, which will be updated and rendered to the screen every frame. However, because a RenderPath is a highly customizable class, there is no limitation what can be done within the RenderPath, for example supporting multiple concurrent RenderPaths if required. RenderPaths can be switched with a fade out screen easily. Loading Screen can be activated as an active Renderpath and it will load and switch to an other RenderPath if desired. A RenderPath can be simply activated with the `Application::ActivatePath()` function, which will also perform the fadeout when the `fadeSeconds` and `fadeColor` arguments are used.<br/>
 The `Application` does the following every frame while it is running:<br/>
 1. FixedUpdate() <br/>
 Calls FixedUpdate for the active RenderPath and wakes up scripts that are waiting for fixedupdate(). The frequency off calls will be determined by `Application::setTargetFrameRate(float framespersecond)`. By default (parameter = 60), FixedUpdate will be called 60 times per second.
@@ -180,7 +275,7 @@ Calls Compose for the active RenderPath
 
 ### RenderPath
 [[Header]](../../WickedEngine/wiRenderPath.h)
-This is an empty base class that can be activated with a `Application`. It calls its Start(), Update(), FixedUpdate(), Render(), Compose(), Stop() functions as needed. Override this to perform custom gameplay or rendering logic. The RenderPath inherits from [wiCanvas](#wicanvas), and the canvas properties will be set by the [Application](#application) when the RenderPath was activated, and while the RenderPath is active. <br/>
+This is an empty base class that can be activated with a `Application`. It calls its Start(), Update(), FixedUpdate(), Render(), Compose(), Stop(), etc. functions as needed. Override this to perform custom gameplay or rendering logic. The RenderPath inherits from [wiCanvas](#wicanvas), and the canvas properties will be set by the [Application](#application) when the RenderPath was activated, and while the RenderPath is active. <br/>
 The order in which the functions are executed every frame: <br/>
 1. PreUpdate() <br/>
 This will be called once per frame before any script that calls Update().
@@ -197,7 +292,7 @@ It is called once per frame. It is running on a single command list that it rece
 
 Apart from the functions that will be run every frame, the RenderPath has the following functions:
 1. Load() <br/> 
-Intended for loading resources before the first time the RenderPath will be used. It will be callsed by [LoadingScreen](#loadingscreen) to load resources in the background.
+Intended for loading resources before the first time the RenderPath will be used. It will be called by [LoadingScreen](#loadingscreen) to load resources in the background.
 2. Start() <br/>
 Start will always be called when a RenderPath is activated by the `Application`
 3. Stop() <br/>
@@ -228,7 +323,7 @@ The HDR and LDR post process chain are using the "ping-ponging" technique, which
 Implements a compute shader based path tracing solution. In a static scene, the rendering will converge to ground truth. When something changes in the scene (something moves, ot material changes, etc...), the convergence will be restarted from the beginning. The raytracing is implemented in [wi::renderer](#wi::renderer) and multiple [shaders](#shaders). The ray tracing is available on any GPU that supports compute shaders.
 
 #### Denoiser
-To enable denoising for path traced images, you can use the [Open Image Denoise library](https://github.com/OpenImageDenoise/oidn). To enable this functionality, the engine will try to include the "OpenImageDenoise/oidn.hpp" file. If this file could be included, it will attampt to link with OpenImageDenoise.lib and tbb.lib. It is also required to provide the OpenImageDenoise.dll and tbb.dll near the exe to correctly launch the application after this. If you satisfy these steps, the denoiser will work automatically after the path tracer reached the target sample count. The final path traced image will be denoised and presented to the screen.
+To enable denoising for path traced images, you can use the [Open Image Denoise library](https://github.com/OpenImageDenoise/oidn). To enable this functionality, the engine will try to include the "OpenImageDenoise/oidn.hpp" file. If this file could be included, it will attempt to link with OpenImageDenoise.lib and tbb.lib. It is also required to provide the OpenImageDenoise.dll and tbb.dll near the exe to correctly launch the application after this. If you satisfy these steps, the denoiser will work automatically after the path tracer reached the target sample count. The final path traced image will be denoised and presented to the screen.
 
 ### LoadingScreen
 [[Header]](../../WickedEngine/wiLoadingScreen.h) [[Cpp]](../../WickedEngine/wiLoadingScreen.cpp)
@@ -240,10 +335,86 @@ You can find out more about the Entity-Component system and other engine-level s
 [[Header]](../../WickedEngine/wiECS.h)
 
 #### ComponentManager
-This is the core entity-component relationship handler class. The purpose of this is to efficiently store, remove, add and sort components. Components can be any movable C++ structure. The best components are simple POD (plain old data) structures.
+The Component Manager is responsible of binding data (component) to an Entity (identifier). The component can be a c++ struct that contains data for an entity. It supports serialization of this data, and if this is used, then the component structs must have a Serialize() function. Otherwise the component can be any c++ struct that can be moved.
 
 #### Entity
-Entity is a number, it can reference components through ComponentManager containers. An entity is always valid if it exists. It's not required that an entity has any components. An entity has a component, if there is a ComponentManager that has a component which is associated with the same entity.
+Entity is an identifier (number) that can reference components through ComponentManager containers. An entity is always valid if it exists. It's not required that an entity has any components. An entity has a component, if there is a ComponentManager that has a component which is associated with the same entity.
+
+#### Using the entity-component system
+To use the entity-component system, you must use the ComponentManager<T> to store components of the T type, where T is an type of c++ struct. To bind a component to an entity, this procedure should be followed:
+
+```cpp
+struct MyComponent
+{
+	float3 position;
+	float speed;
+};
+ComponentManager<MyComponent> components; // create a component manager
+Entity entity = CreateEntity(); // create a new entity ID
+MyComponent& component = components.Create(entity); // create a component and bind it to the entity
+```
+
+When you create a new component, it will be added to the end of the array, in a contiguous memory allocation. The ComponentManager can be indexed and iterated efficiently:
+
+```cpp
+for(size_t i = 0; i < components.GetCount(); ++i)
+{
+	MyComponent& component = components[i];
+	Entity entity = components.GetEntity(i);
+}
+```
+
+You can see that we can both iterate through components and entities this way by the same index. It is useful when you just want to go through everything one-by one. But it is not useful when you want to query a component for an entity but you don't know its index. Indices can change when components are removed, so you cannot usually rely on remembering indices for entities yourself. However, the component manager does manage this information internally. To query a component for a given entity, use the GetComponent() function:
+
+```cpp
+MyComponent* component = components.GetComponent(entity);
+if(component != nullptr) // check for null, which can be returned if component doesn't exist for the entity
+{
+	// use component
+}
+```
+
+You can also get the index of an entity in a component manager:
+
+```cpp
+size_t index = components.GetIndex(entity);
+if(index != ~0ull) // check if it's valid. If invalid, then the index returned will be the max value of 64 bit uint
+{
+	MyComponent& component = components[index];
+}
+```
+
+It is NOT valid to use the array operator with entity ID:
+
+```cpp
+// NOT VALID! result will be undefined (could be a valid component, or overindexing crash)
+MyComponent& component = components[entity];
+```
+
+A useful pattern is to offload the iteration of a large component manager to the job system, to parallelize the work:
+
+```cpp
+wi::jobsystem::context ctx;
+wi::jobsystem::Dispatch(ctx, (uint32_t)components.GetCount(), 64, [&](wi::jobsystem::JobArgs args){
+	MyComponent& component = components[args.jobIndex];
+	Entity entity = components[args.jobIndex];
+	// Do things...
+});
+// optionally, do unrelated things here...
+wi::jobsystem::Wait(ctx); // wait for Dispatch to finish
+```
+In this example, each entity/component will be iterated by one job, and 64 batch of jobs will be executed on one thread as a group. This can greatly improve performance when iterating a large component manager.
+
+One thing that you must look out for is pointer invalidation of the Component Manager. It is always safe to use Entity IDs whenever, but it is faster to use a pointer or an index. Those can, hovewer change as components are added or removed. You must look out for index and pointer invalidation when components are removed, because the ordering of the components can change there (the component manager is always kept dense, without holes). When adding/creating components, pointers can occasionally get invalidated the same way as for example std::vector, because reallocation of memory can happen to keep everyting contiguous. This can lead to unexpected consequences:
+
+```cpp
+MyComponent& component1 = components[0];
+MyComponent& component2 = components.Create(CreateEntity()); // here the component1 reference/pointer can get invalidated
+component1.speed = 10; // POINTER INVALIDATION HAZARD!
+```
+In the example above, a new component is created while the reference to the first element is still going to be used, this can lead to crash if the memory got reallocated while creating the component2. The correct solution would be to first create all components, then use them after all creations finished. Or re-query component pointers with GetComponent(entity) after a creation happens.
+
+The Scene structure of the engine is essentially a collection of ComponentManagers, which let you access everything in the scene in the same manner.
 
 ### Scene System
 [[Header]](../../WickedEngine/wiScene.h) [[Cpp]](../../WickedEngine/wiScene.cpp)
@@ -251,7 +422,11 @@ The logical scene representation using the Entity-Component System
 - GetScene <br/>
 Returns a global scene instance. This is a convenience feature for simple applications that need a single scene. The RenderPath3D will use the global scene by default, but it can be set to a custom scene if needed.
 - LoadModel() <br/>
-There are two flavours to this. One of them immediately loads into the global scene. The other loads into a custom scene, which is usefult to manage the contents separately. This function will return an Entity that represents the root transform of the scene - if the attached parameter was true, otherwise it will return INVALID_ENTITY and no root transform will be created.
+There are two flavours to this. One of them immediately loads into the global scene. The other loads into a custom scene, which is useful to manage the contents separately. This function will return an Entity that represents the root transform of the scene - if the attached parameter was true, otherwise it will return INVALID_ENTITY and no root transform will be created.
+- LoadModel2() <br/>
+This is an alternative usage of LoadModel, which lets you give the root entity ID as a parameter. Apart from that, it works the same way as LoadModel(), just that attachments will be made to your specified root entity.
+- Intersects(Ray/Capsule/Sphere, filterMask, layerMask, lod) <br/>
+Intersection function with scene entities and primitives. You can specify various settings to filter intersections. The filterMask lets you specify an engine-defined type enum bitmask combination, so you can choose to intersect with objects, and/or colliders, and various specifications. The layerMask lets you filter the intersections with layer bits, where binary OR of the parameter and entity layers will decide active entities. The lod parameter lets you force a lod level for meshes. 
 - Pick <br/>
 Allows to pick the closest object with a RAY (closest ray intersection hit to the ray origin). The user can provide a custom scene or layermask to filter the objects to be checked.
 - SceneIntersectSphere <br/>
@@ -259,7 +434,7 @@ Performs sphere intersection with all objects and returns the first occured inte
 - SceneIntersectCapsule <br/>
 Performs capsule intersection with all objects and returns the first occured intersection immediately. The result contains the incident normal and penetration depth and the contact object entity ID.
 
-Below you will find the structures that make up the scene. These are intended to be simple strucutres that will be held in [ComponentManagers](#componentmanager). Keep these structures minimal in size to use cache efficiently when iterating a large amount of components.
+Below you will find the structures that make up the scene. These are intended to be simple structures that will be held in [ComponentManagers](#componentmanager). Keep these structures minimal in size to use cache efficiently when iterating a large amount of components.
 
 <b>Note on bools: </b> using bool in C++ structures is inefficient, because they take up more space in memory than required. Instead, bitmasks will be used in every component that can store up to 32 bool values in each bit. This also makes it easier to add bool flags and not having to worry about serializing them, because the bitfields themselves are already serialized (but the order of flags must never change without handling possible side effects with serialization versioning!). C++ enums are used in the code to manage these bool flags, and the bitmask storing these is always called `uint32_t _flags;` For example:
 
@@ -365,7 +540,7 @@ Holds a Sound and a SoundInstance, and it can be placed into the scene via a Tra
 
 #### InverseKinematicsComponent
 [[Header]](../../WickedEngine/wiScene_Components.h) [[Cpp]](../../WickedEngine/wiScene_Components.cpp)
-If an entity has an `InverseKinematicComponent` (IK), and part of a transform hierarchy (has both [TransformComponent](#transformcomponent) and a [HierarchyComponent](#hierarchycomponent)), then it can be targetted to an other [ThransformComponent](#transformcomponent). The parent transforms will be computed in order to let the IK reach the target if possible. The parent transforms will be only rotated. For example, if a hand tries to reach for an object, the hand and shoulder will move accordingly to let the hand reach.
+If an entity has an `InverseKinematicComponent` (IK), and part of a transform hierarchy (has both [TransformComponent](#transformcomponent) and a [HierarchyComponent](#hierarchycomponent)), then it can be targetted to an other [TransformComponent](#transformcomponent). The parent transforms will be computed in order to let the IK reach the target if possible. The parent transforms will be only rotated. For example, if a hand tries to reach for an object, the hand and shoulder will move accordingly to let the hand reach.
 The `chain_length` can be specified to let the IK system know how many parents should be computed. It can be greater than the real chain length, in that case there will be no more simulation steps than the length of hierarchy chain.
 The `iteration_count` can be specified to increase accuracy of the computation.
 If animations are also playing on the affected entities, the IK system will override the animations.
@@ -414,7 +589,7 @@ The event system can be used to execute system-wide tasks. Any system can "subsc
 - Subscribe <br/>
 The first parameter is the event ID. Core system events are negative numbers. The user can choose any positive number to create custom events. 
 The second parameter is a function to be executed, with a userdata argument. The userdata argument can hold any custom data that the user desires.
-The return value is a `wi::eventhandler::Handle` type. When this is object is destroyed, the event is subscription for the function will be removed.
+The return value is a `wi::eventhandler::Handle` type. When this is object is destroyed, the event subscription for the function will be removed.
 Multiple functions can be subscribed to a single event ID.
 - FireEvent <br/>
 The first argument is the event id, that says which events to invoke. 
@@ -441,7 +616,7 @@ This is the interface for the graphics API abstraction. It is higher level than 
 When creating a graphics device, it can be created in special debug mode to assist development. For this, the user can specify `debugdevice` as command line argument to the application, or set the `debuglayer` argument of the graphics device constructor to `true` when creating the device. The errors will be posted to the Console Output window in the development environment.
 
 ##### Creating resources
-Functions like `CreateTexture()`, `CreateBuffer()`, etc. can be used to create corresponding GPU resources. Using these functions is thread safe. The resources will not necessarily be created immediately, but by the time the GPU will want to use them. These functions imediately return `false` if there were any errors, such as wrong parameters being passed to the description parameters, and they will return `true` if everything is correct. If there was an error, please use the [debug device](#debug-device) functionality to get additional information. When passing a resource to these functions that is already created, it will be destroyed, then created again with the newly provided parameters.
+Functions like `CreateTexture()`, `CreateBuffer()`, etc. can be used to create corresponding GPU resources. Using these functions is thread safe. The resources will not necessarily be created immediately, but by the time the GPU will want to use them. These functions immediately return `false` if there were any errors, such as wrong parameters being passed to the description parameters, and they will return `true` if everything is correct. If there was an error, please use the [debug device](#debug-device) functionality to get additional information. When passing a resource to these functions that is already created, it will be destroyed, then created again with the newly provided parameters.
 
 ##### Destroying resources
 Resources will be destroyed automatically by the graphics device when they are no longer used.
@@ -591,7 +766,7 @@ The subresource indices are valid as long as the resource is valid that they wer
 
 The pipeline states are subject to shader compilations. Shader compilation will happen when a pipeline state is bound inside a render pass for the first time. This is required because the render target formats are necessary information for compilation, but they are not part of the pipeline state description. This choice was made for increased flexibility of defining pipeline states. However, unlike APIs where state subsets (like RasterizerDesc, or BlendStateDesc) can be bound individually, the grouping of states is more optimal regarding CPU time, because state hashes are computed only once for the whole pipeline state at creation time, as opposed to binding time for each individual state. This approach is also less prone to user error when the developer might forget setting any subset of state and the leftover state from previous render passes are incorrect. 
 
-Shaders still need to be created with `GraphicsDevice::CreateShader()` in a similar to CreateTexture(), etc. This could result in shader compilation/hashing in some graphics APIs like DirectX 11. The CreateShader() function expects a `wiGraphics::ShaderStage` enum value which will define the type of shader:
+Shaders still need to be created with `GraphicsDevice::CreateShader()` in a similar way to CreateTexture(), etc. The CreateShader() function expects a `wiGraphics::ShaderStage` enum value which will define the type of shader:
 
 - `MS`: Mesh Shader
 - `AS`: Amplification Shader, or Task Shader
@@ -605,7 +780,7 @@ Shaders still need to be created with `GraphicsDevice::CreateShader()` in a simi
 
 Depending on the graphics device implementation, the shader code must be different format. For example, DirectX expects DXIL shaders, Vulkan expects SPIR-V shaders. The engine can compile HLSL shader source code to DXIL or SPIRV format with the [Shader Compiler](#shader-compiler).
 
-Note: As an optional paramter, `CreatePipelineState()` function also accepts a `RenderPassInfo` pointer. If this is provided, then all the information will be available for pipeline creation to happen immediately. This means the pipeline will be immediately in final usable state after the function returns, but it can take longer time for this to complete. If the parameter is not provided, the pipeline could be created at a later time, when the render pass information is available on first use. This can have the effect of the longer pipeline compilation happening at an unexpected time. But in this case, the pipeline will also be compatible with more render pass types if it's used at different places.
+Note: As an optional parameter, `CreatePipelineState()` function also accepts a `RenderPassInfo` pointer. If this is provided, then all the information will be available for pipeline creation to happen immediately. This means the pipeline will be immediately in final usable state after the function returns, but it can take longer time for this to complete. If the parameter is not provided, the pipeline could be created at a later time, when the render pass information is available on first use. This can have the effect of the longer pipeline compilation happening at an unexpected time. But in this case, the pipeline will also be compatible with more render pass types if it's used at different places.
 
 ##### Render Passes
 Render passes are defining regions in GPU execution where a number of render targets or depth buffers will be used to render into them. Render targets and depth buffers are defined as `RenderPassImage`s. The `RenderPassImage`s have a pointer to the texture, state the resource type (`RENDERTARGET`, `DEPTH_STENCIL` or `RESOLVE`), state the [subresource](#subresources) index, the load and store operations, and the layout transitions for the textures.
@@ -641,7 +816,7 @@ Image barriers are stating resource state transition for [textures](#textures). 
 - BUFFER_BARRIER <br/>
 Similar to `IMAGE_BARRIER`, but for [GPU Buffer](#gpu-buffers) state transitions.
 
-It is very important to place barriers to the right places if using low level graphics devices APIs like [DirectX 12](#graphicsdevice_dx12) or [Vulkan](#graphicsdevice_vulkan). Missing a barrier could lead to corruption of rendered results, crashes and generally undefined behaviour. However, barriers don't have an effect for [DirectX 11](#graphicsdevice_dx11), they are handled automatically. The [debug layer](#debug-device) will help to detect errors and missing barriers.
+It is very important to place barriers in the right places; missing a barrier could lead to corruption of rendered results, crashes and generally undefined behaviour. The [debug layer](#debug-device) will help to detect errors and missing barriers.
 
 ##### Textures
 `Texture` type resources are used to store images which will be sampled or written by the GPU efficiently. There are a lot of texture types, such as `Texture1D`, `Texture2D`, `TextureCube`, `Texture3D`, etc. used in [shaders](#shaders), that correspond to the simple `Texture` type on the CPU. The texture type will be determined when creating the resource with `GraphicsDevice::CreateTexture(const TextureDesc*, const SubresourceData*, Texture*)` function. The first argument is the `TextureDesc` that determines the dimensions, size, format and other properties of the texture resource. The `SubresourceData` is used to initialize the texture contents, it can be left as `nullptr`, when the texture contents don't need to be initialized, such as for textures that will be rendered into. The `Texture` is the texture that will be initialized.
@@ -730,10 +905,10 @@ The renderer also hosts post process implementations. These functions are indepe
 Read about the different features of the renderer in more detail below:
 
 #### DrawScene
-Renders the scene from the camera's point of view that was specified as parameter. Only the objects withing the camera [Frustum](#frustum) will be rendered. The objects will be sorted from front-to back. This is an optimization to reduce overdraw, because for opaque objects, only the closest pixel to the camera will contribute to the rendered image. Pixels behind the frontmost pixel will be culled by the GPU using the depth buffer and not be rendered. The sorting is implemented with RenderQueue internally. The RenderQueue is responsible to sort objects by distance and mesh index, so instaced rendering (batching multiple drawable objects into one draw call) and front-to back sorting can both work together. 
+Renders the scene from the camera's point of view that was specified as parameter. Only the objects within the camera [Frustum](#frustum) will be rendered. The objects will be sorted from front-to back. This is an optimization to reduce overdraw, because for opaque objects, only the closest pixel to the camera will contribute to the rendered image. Pixels behind the frontmost pixel will be culled by the GPU using the depth buffer and not be rendered. The sorting is implemented with RenderQueue internally. The RenderQueue is responsible to sort objects by distance and mesh index, so instanced rendering (batching multiple drawable objects into one draw call) and front-to back sorting can both work together. 
 
 The `renderPass` argument will specify what kind of render pass we are using and specifies shader complexity and rendering technique.
-The `cmd` argument refers to a valid [CommandList](#work-submission)
+The `cmd` argument refers to a valid [CommandList](#work-submission).
 The `flags` argument can contain various modifiers that determine what kind of objects to render, or what kind of other properties to take into account:
 
 - `DRAWSCENE_OPAQUE`: Opaque object will be rendered
@@ -769,7 +944,7 @@ After the acceleration structures are updated, ray tracing shaders can use it af
 #### Ray tracing (legacy)
 Ray tracing can be used in multiple ways to render the scene. The `RayTraceScene()` function will render the scene with path tracing. The result will be written to a texture that is provided as parameter. The texture must have been created with `UNORDERED_ACCESS` bind flags, because it will be written in compute shaders. The scene BVH structure must have been already built to use this, it can be accomplished by calling `wi::renderer::UpdateRaytracingAccelerationStructures()`. The [RenderPath3D_Pathracing](#renderpath3d_pathtracing) uses this ray tracing functionality to render a path traced scene.
 
-Other than path tracing, the scene BVH can be rendered by using the `RayTraceSceneBVH` function. This will render the bounding box hierarchy to the screen as a heatmap. Blue colors mean that few boxes were hit per pixel, and with more bounding box hits the colors go to green, yellow, red, and finaly white. This is useful to determine how expensive a the scene is with regards to ray tracing performance.
+Other than path tracing, the scene BVH can be rendered by using the `RayTraceSceneBVH` function. This will render the bounding box hierarchy to the screen as a heatmap. Blue colors mean that few boxes were hit per pixel, and with more bounding box hits the colors go to green, yellow, red, and finally white. This is useful to determine how expensive the scene is with regards to ray tracing performance.
 
 The lightmap baking is also using ray tracing on the GPU to precompute static lighting for objects in the scene. [Objects](#objectcomponent) that contain lightmap atlas texture coordinate set can start lightmap rendering by setting `ObjectComponent::SetLightmapRenderRequest(true)`. Every object that have this flag set will have their lightmaps updated by performing ray traced rendering by the [wi::renderer](#wi::renderer) internally. Lightmap texture coordinates can be generated by a separate tool, such as the Wicked Engine Editor application. Lightmaps will be rendered to a global lightmap atlas that can be used by all shaders to read static lighting data. The global lightmap atlas texture contains lightmaps from all objects inside the scene in a compact format for performance. Apart from that, each object contains its own lightmap in a full precision texture format that can be post-processed and saved to disc for later use. To denoise lightmaps, follow the same steps as the path tracer denoiser setup described in the [Denoiser](#denoiser) section.
 
@@ -791,7 +966,7 @@ The probes also must have [TransformComponent](#transformcomponent) associated t
 #### Post processing
 There are several post processing effects implemented in the `wi::renderer`. They are all implemented in a single function with their name starting with Postprocess_, like for example: `wi::renderer::Postprocess_SSAO()`. They are aimed to be stateless functions, with their function signature clearly indicating input-output parameters and resources.
 
-The chain/order of post processes is not implemented here, only the single effects themselves. The order of post proceses is more of a user responsibility, so it should be implemented in the [High Ievel Interface](#high-level-interface). For reference, a default post processchain is implemented in [RenderPath3D::RenderPostProcessChain()](#renderpath3d) function.
+The chain/order of post processes is not implemented here, only the single effects themselves. The order of post processes is more of a user responsibility, so it should be implemented in the [High Level Interface](#high-level-interface). For reference, a default post-process chain is implemented in [RenderPath3D::RenderPostProcessChain()](#renderpath3d) function.
 
 #### Instancing
 Instanced rendering will be always used automatically when rendering objects. This means, that [ObjectComponents](#objectcomponent) that share the same [mesh](#meshcomponent) will be batched together into a single draw call, even if they have different transformations, colors, or dithering parameters. This can greatly reduce CPU overhead when lots of objects are duplicated (for example trees, rocks, props).
@@ -945,7 +1120,7 @@ A simple clickable button. Supports the OnClick event callback.
 A simple static text field.
 
 #### TextInputField
-Supports text input when activated. Pressing Enter will accept the input and fire the OnInputAccepted callback. Pressing the Escape key while active will cancel the text input and restoe the previous state. There can be only one active text input field at a time.
+Supports text input when activated. Pressing Enter will accept the input and fire the OnInputAccepted callback. Pressing the Escape key while active will cancel the text input and restore the previous state. There can be only one active text input field at a time.
 
 #### Slider
 A slider, that can represent float or integer values. The slider also accepts text input to input number values. If the number input is outside of the slider's range, it will expand its range to support the newly assigned value. Upon changing the slider value, whether by text input or sliding, the OnSlide event callback will be fired.
@@ -1071,7 +1246,7 @@ The usage of the path query at minimum is to call the `process()` function, with
 
 The path query can be additionally configured with the `flying` bool param. If you set `flying` to `true`, then the path finding will search a path in empty voxels (in the air), otherwise by default it will try to find a path that goes on the ground.
 
-The traversing entity can have a logical size, configured by the `agent_height` and `agent_width` parameters, that specify the approcimate size of traversing entity in voxels. `agent_height` will specify how many empty voxels must be above the traversed path at any waypoint. `agent_width` specifies how many empty voxels must be in the horizontal directions. With these you can specify how far the path should keep away from walls and obstacles, and also to not allow going in between tight openings that the logical size would not allow.
+The traversing entity can have a logical size, configured by the `agent_height` and `agent_width` parameters, that specify the approximate size of traversing entity in voxels. `agent_height` will specify how many empty voxels must be above the traversed path at any waypoint. `agent_width` specifies how many empty voxels must be in the horizontal directions. With these you can specify how far the path should keep away from walls and obstacles, and also to not allow going in between tight openings that the logical size would not allow.
 
 Note: processing a path query can take a long time, depending on how far the goal is from the start. Consider doing multiple path queries on multiple threads, or doing them asynchronously across the frame, the [Job System](#job-system) can be used to track completion of asynchronous tasks like this.
 

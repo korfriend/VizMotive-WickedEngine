@@ -22,6 +22,10 @@
 #include <iostream>
 #include <cstdlib>
 
+#ifdef PLATFORM_LINUX
+#include <sys/sysinfo.h>
+#endif
+
 #if defined(_WIN32)
 #include <direct.h>
 #include <Psapi.h> // GetProcessMemoryInfo
@@ -955,7 +959,7 @@ namespace wi::helper
 #define ToNativeString(x) (x)
 #endif // _WIN32
 
-	std::string GetPathRelative(const std::string& rootdir, std::string& path)
+	std::string GetPathRelative(const std::string& rootdir, const std::string& path)
 	{
 		std::string ret = path;
 		MakePathRelative(rootdir, ret);
@@ -1459,8 +1463,32 @@ namespace wi::helper
 		mem.process_physical = pmc.WorkingSetSize;
 		mem.process_virtual = pmc.PrivateUsage;
 #elif defined(PLATFORM_LINUX)
-		// TODO Linux
-#endif // _WIN32
+		struct sysinfo info;
+		constexpr int PAGE_SIZE = 4096;
+		if (sysinfo(&info) == 0)
+		{
+			unsigned long phys = info.totalram - info.totalswap;
+			mem.total_physical = phys * info.mem_unit;
+			mem.total_virtual = info.totalswap * info.mem_unit;
+		}
+		unsigned long l;
+		std::ifstream statm("/proc/self/statm");
+		// Format of statm:
+		// size resident shared trs lrs drs dt
+		// see linux Documentation/filesystems/proc.rst
+
+		// we want "resident", the second number, so just read the first one
+		// and discard it
+		statm >> l;
+		statm >> l;
+		mem.process_physical = l * PAGE_SIZE;
+		// there doesn't seem to be an easy way to determine
+		// swapped out memory
+#elif defined(PLATFORM_PS5)
+		wi::graphics::GraphicsDevice::MemoryUsage gpumem = wi::graphics::GetDevice()->GetMemoryUsage();
+		mem.process_physical = mem.total_physical = gpumem.budget;
+		mem.process_virtual = mem.total_virtual = gpumem.usage;
+#endif // defined(_WIN32)
 		return mem;
 	}
 

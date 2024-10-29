@@ -32,6 +32,7 @@ namespace wi::lua
 		int SetResolutionScale(lua_State* L);
 		int SetAO(lua_State* L);
 		int SetAOPower(lua_State* L);
+		int SetAORange(lua_State* L);
 		int SetSSREnabled(lua_State* L);
 		int SetSSGIEnabled(lua_State* L);
 		int SetRaytracedDiffuseEnabled(lua_State* L);
@@ -70,6 +71,7 @@ namespace wi::lua
 		int SetCropTop(lua_State* L);
 		int SetCropRight(lua_State* L);
 		int SetCropBottom(lua_State* L);
+		int SetVisibilityComputeShadingEnabled(lua_State* L);
 
 		int GetLastPostProcessRT(lua_State* L);
 

@@ -616,21 +616,15 @@ namespace vulkan_internal
 		{
 			ss += "[Vulkan Warning]: ";
 			ss += callback_data->pMessage;
-			wi::backlog::post(ss, wi::backlog::LogLevel::Warning);
+            ss += "\n";
+			wi::helper::DebugOut(ss, wi::helper::DebugLevel::Warning);
 		}
 		else if (message_severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
 		{
 			ss += "[Vulkan Error]: ";
 			ss += callback_data->pMessage;
-#if 1
-			wi::backlog::post(ss, wi::backlog::LogLevel::Error);
-#else
-			OutputDebugStringA(callback_data->pMessage);
-			OutputDebugStringA("\n");
-#endif
-//#ifdef _DEBUG
-//			assert(0);
-//#endif // _DEBUG
+            ss += "\n";
+			wi::helper::DebugOut(ss, wi::helper::DebugLevel::Error);
 		}
 
 		return VK_FALSE;
@@ -941,7 +935,8 @@ namespace vulkan_internal
 		VkPipelineShaderStageCreateInfo shaderStages[static_cast<size_t>(ShaderStage::Count)] = {};
 		VkPipelineInputAssemblyStateCreateInfo inputAssembly = {};
 		VkPipelineRasterizationStateCreateInfo rasterizer = {};
-		VkPipelineRasterizationDepthClipStateCreateInfoEXT depthclip = {};
+		VkPipelineRasterizationDepthClipStateCreateInfoEXT depthClipStateInfo = {};
+		VkPipelineRasterizationConservativeStateCreateInfoEXT rasterizationConservativeState = {};
 		VkPipelineViewportStateCreateInfo viewportState = {};
 		VkPipelineDepthStencilStateCreateInfo depthstencil = {};
 		VkSampleMask samplemask = {};
@@ -2435,6 +2430,10 @@ using namespace vulkan_internal;
 			{
 				instanceExtensions.push_back(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
 			}
+			else if (strcmp(availableExtension.extensionName, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME) == 0)
+			{
+				instanceExtensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+			}
 		}
 
 		instanceExtensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
@@ -2559,7 +2558,7 @@ using namespace vulkan_internal;
 
 			bool h264_decode_extension = false;
 			bool suitable = false;
-
+			bool conservativeRasterization = false;
 
 			auto checkPhysicalDeviceAndFillProperties2 = [&](VkPhysicalDevice dev) {
 				suitable = true;
@@ -2612,6 +2611,8 @@ using namespace vulkan_internal;
 				raytracing_properties = {};
 				fragment_shading_rate_properties = {};
 				mesh_shader_properties = {};
+				conservative_raster_properties = {};
+				conservativeRasterization = false;
 
 				sampler_minmax_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_FILTER_MINMAX_PROPERTIES;
 				*properties_chain = &sampler_minmax_properties;
@@ -2636,6 +2637,14 @@ using namespace vulkan_internal;
 					depth_clip_enable_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_ENABLE_FEATURES_EXT;
 					*features_chain = &depth_clip_enable_features;
 					features_chain = &depth_clip_enable_features.pNext;
+				}
+				if (checkExtensionSupport(VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME, available_deviceExtensions))
+				{
+					conservativeRasterization = true;
+					enabled_deviceExtensions.push_back(VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME);
+					conservative_raster_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CONSERVATIVE_RASTERIZATION_PROPERTIES_EXT;
+					*properties_chain = &conservative_raster_properties;
+					properties_chain = &conservative_raster_properties.pNext;
 				}
 				if (checkExtensionSupport(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, available_deviceExtensions))
 				{
@@ -2819,6 +2828,10 @@ using namespace vulkan_internal;
 			{
 				capabilities |= GraphicsDeviceCapability::TESSELLATION;
 			}
+			if (conservativeRasterization)
+			{
+				capabilities |= GraphicsDeviceCapability::CONSERVATIVE_RASTERIZATION;
+			}
 			if (features2.features.shaderStorageImageExtendedFormats == VK_TRUE)
 			{
 				capabilities |= GraphicsDeviceCapability::UAV_LOAD_FORMAT_COMMON;
@@ -2839,7 +2852,8 @@ using namespace vulkan_internal;
 			}
 			if (mesh_shader_features.meshShader == VK_TRUE && mesh_shader_features.taskShader == VK_TRUE)
 			{
-				capabilities |= GraphicsDeviceCapability::MESH_SHADER;
+				// Disable Vulkan mesh shader for now because it can crash AMD driver just by compiling shader, without any warnings
+				//capabilities |= GraphicsDeviceCapability::MESH_SHADER;
 			}
 			if (fragment_shading_rate_features.pipelineFragmentShadingRate == VK_TRUE)
 			{
@@ -5562,13 +5576,16 @@ using namespace vulkan_internal;
 		rasterizer.depthBiasClamp = 0.0f;
 		rasterizer.depthBiasSlopeFactor = 0.0f;
 
+		const void** tail = &rasterizer.pNext;
+
 		// depth clip will be enabled via Vulkan 1.1 extension VK_EXT_depth_clip_enable:
-		VkPipelineRasterizationDepthClipStateCreateInfoEXT& depthclip = internal_state->depthclip;
-		depthclip.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT;
-		depthclip.depthClipEnable = VK_TRUE;
+		VkPipelineRasterizationDepthClipStateCreateInfoEXT& depthClipStateInfo = internal_state->depthClipStateInfo;
+		depthClipStateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT;
+		depthClipStateInfo.depthClipEnable = VK_TRUE;
 		if (depth_clip_enable_features.depthClipEnable == VK_TRUE)
 		{
-			rasterizer.pNext = &depthclip;
+			*tail = &depthClipStateInfo;
+			tail = &depthClipStateInfo.pNext;
 		}
 
 		if (pso->desc.rs != nullptr)
@@ -5606,8 +5623,18 @@ using namespace vulkan_internal;
 			rasterizer.depthBiasClamp = desc.depth_bias_clamp;
 			rasterizer.depthBiasSlopeFactor = desc.slope_scaled_depth_bias;
 
-			// depth clip is extension in Vulkan 1.1:
-			depthclip.depthClipEnable = desc.depth_clip_enable ? VK_TRUE : VK_FALSE;
+			// Depth clip will be enabled via Vulkan 1.1 extension VK_EXT_depth_clip_enable:
+			depthClipStateInfo.depthClipEnable = desc.depth_clip_enable ? VK_TRUE : VK_FALSE;
+
+			VkPipelineRasterizationConservativeStateCreateInfoEXT& rasterizationConservativeState = internal_state->rasterizationConservativeState;
+			if (CheckCapability(GraphicsDeviceCapability::CONSERVATIVE_RASTERIZATION) && desc.conservative_rasterization_enable)
+			{
+				rasterizationConservativeState.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_CONSERVATIVE_STATE_CREATE_INFO_EXT;
+				rasterizationConservativeState.conservativeRasterizationMode = VK_CONSERVATIVE_RASTERIZATION_MODE_OVERESTIMATE_EXT;
+				rasterizationConservativeState.extraPrimitiveOverestimationSize = 0.0f;
+				*tail = &rasterizationConservativeState;
+				tail = &rasterizationConservativeState.pNext;
+			}
 		}
 
 		pipelineInfo.pRasterizationState = &rasterizer;
@@ -7165,6 +7192,24 @@ using namespace vulkan_internal;
 
 			const VkDeviceSize zero = {};
 			vkCmdBindVertexBuffers2(commandlist.GetCommandBuffer(), 0, 1, &nullBuffer, &zero, &zero, &zero);
+
+			if (CheckCapability(GraphicsDeviceCapability::VARIABLE_RATE_SHADING))
+			{
+				VkExtent2D fragmentSize = {};
+				fragmentSize.width = 1;
+				fragmentSize.height = 1;
+
+				VkFragmentShadingRateCombinerOpKHR combiner[] = {
+					VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR,
+					VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR
+				};
+
+				vkCmdSetFragmentShadingRateKHR(
+					commandlist.GetCommandBuffer(),
+					&fragmentSize,
+					combiner
+				);
+			}
 		}
 
 		return cmd;
@@ -9341,7 +9386,30 @@ using namespace vulkan_internal;
 		label.color[3] = 1.0f;
 		vkCmdInsertDebugUtilsLabelEXT(commandlist.GetCommandBuffer(), &label);
 	}
-
+	VkDevice GraphicsDevice_Vulkan::GetDevice()
+	{
+		return device;
+	}
+	VkImage GraphicsDevice_Vulkan::GetTextureInternalResource(const Texture* texture)
+	{
+		return to_internal(texture)->resource;
+	}
+	VkPhysicalDevice GraphicsDevice_Vulkan::GetPhysicalDevice()
+	{
+		return physicalDevice;
+	}
+	VkInstance GraphicsDevice_Vulkan::GetInstance()
+	{
+		return instance;
+	}
+	VkQueue GraphicsDevice_Vulkan::GetGraphicsCommandQueue()
+	{
+		return queues[QUEUE_GRAPHICS].queue;
+	}
+	uint32_t GraphicsDevice_Vulkan::GetGraphicsFamilyIndex()
+	{
+		return graphicsFamily;
+	}
 }
 
 #endif // WICKEDENGINE_BUILD_VULKAN

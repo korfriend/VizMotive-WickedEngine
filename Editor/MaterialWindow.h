@@ -22,6 +22,8 @@ public:
 	wi::gui::CheckBox doubleSidedCheckBox;
 	wi::gui::CheckBox outlineCheckBox;
 	wi::gui::CheckBox preferUncompressedCheckBox;
+	wi::gui::CheckBox disableStreamingCheckBox;
+	wi::gui::CheckBox coplanarCheckBox;
 	wi::gui::ComboBox shaderTypeComboBox;
 	wi::gui::ComboBox blendModeComboBox;
 	wi::gui::ComboBox shadingRateComboBox;
@@ -30,6 +32,7 @@ public:
 	wi::gui::Slider reflectanceSlider;
 	wi::gui::Slider metalnessSlider;
 	wi::gui::Slider emissiveSlider;
+	wi::gui::Slider saturationSlider;
 	wi::gui::Slider cloakSlider;
 	wi::gui::Slider chromaticAberrationSlider;
 	wi::gui::Slider transmissionSlider;

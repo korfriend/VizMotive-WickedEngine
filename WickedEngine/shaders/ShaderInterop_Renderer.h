@@ -24,11 +24,11 @@ struct alignas(16) ShaderScene
 	int BVH_primitives;
 
 	float3 aabb_min;
-	float padding3;
+	uint instanceCount;
 	float3 aabb_max;
-	float padding4;
+	uint geometryCount;
 	float3 aabb_extents;		// enclosing AABB abs(max - min)
-	float padding5;
+	uint materialCount;
 	float3 aabb_extents_rcp;	// enclosing AABB 1.0f / abs(max - min)
 	float padding6;
 
@@ -334,7 +334,7 @@ struct alignas(16) ShaderMaterial
 	uint2 subsurfaceScattering_inv;
 
 	uint2 specular_chromatic;
-	uint2 sheenColor;
+	uint2 sheenColor_saturation;
 
 	float4 texMulAdd;
 
@@ -362,7 +362,7 @@ struct alignas(16) ShaderMaterial
 		subsurfaceScattering_inv = uint2(0, 0);
 
 		specular_chromatic = uint2(0, 0);
-		sheenColor = uint2(0, 0);
+		sheenColor_saturation = uint2(0, 0);
 
 		texMulAdd = float4(1, 1, 0, 0);
 
@@ -390,7 +390,8 @@ struct alignas(16) ShaderMaterial
 	inline half GetCloak() { return unpack_half4(emissive_cloak).a; }
 	inline half3 GetSpecular() { return unpack_half3(specular_chromatic); }
 	inline half GetChromaticAberration() { return unpack_half4(specular_chromatic).w; }
-	inline half3 GetSheenColor() { return unpack_half3(sheenColor); }
+	inline half3 GetSheenColor() { return unpack_half3(sheenColor_saturation); }
+	inline half GetSaturation() { return unpack_half4(sheenColor_saturation).w; }
 	inline half GetRoughness() { return unpack_half4(roughness_reflectance_metalness_refraction).x; }
 	inline half GetReflectance() { return unpack_half4(roughness_reflectance_metalness_refraction).y; }
 	inline half GetMetalness() { return unpack_half4(roughness_reflectance_metalness_refraction).z; }
@@ -536,20 +537,20 @@ struct alignas(16) ShaderMeshlet
 
 struct ShaderClusterTriangle
 {
-	uint packed;
+	uint raw;
 	void init(uint i0, uint i1, uint i2, uint flags = 0u)
 	{
-		packed = 0;
-		packed |= i0 & 0xFF;
-		packed |= (i1 & 0xFF) << 8u;
-		packed |= (i2 & 0xFF) << 16u;
-		packed |= (flags & 0xFF) << 24u;
+		raw = 0;
+		raw |= i0 & 0xFF;
+		raw |= (i1 & 0xFF) << 8u;
+		raw |= (i2 & 0xFF) << 16u;
+		raw |= (flags & 0xFF) << 24u;
 	}
-	uint i0() { return packed & 0xFF; }
-	uint i1() { return (packed >> 8u) & 0xFF; }
-	uint i2() { return (packed >> 16u) & 0xFF; }
+	uint i0() { return raw & 0xFF; }
+	uint i1() { return (raw >> 8u) & 0xFF; }
+	uint i2() { return (raw >> 16u) & 0xFF; }
 	uint3 tri() { return uint3(i0(), i1(), i2()); }
-	uint flags() { return packed >> 24u; }
+	uint flags() { return raw >> 24u; }
 };
 struct alignas(16) ShaderCluster
 {
@@ -632,6 +633,9 @@ struct alignas(16) ShaderMeshInstance
 	int lightmap;
 	uint alphaTest_size;
 
+	uint2 rimHighlight;
+	uint2 padding;
+
 	float4 quaternion;
 	ShaderTransform transform;
 	ShaderTransform transformPrev;
@@ -657,6 +661,7 @@ struct alignas(16) ShaderMeshInstance
 		vb_wetmap = -1;
 		alphaTest_size = 0;
 		quaternion = float4(0, 0, 0, 1);
+		rimHighlight = uint2(0, 0);
 		transform.init();
 		transformPrev.init();
 		transformRaw.init();
@@ -676,6 +681,7 @@ struct alignas(16) ShaderMeshInstance
 	inline half3 GetEmissive() { return unpack_half3(emissive); }
 	inline half GetAlphaTest() { return unpack_half2(alphaTest_size).x; }
 	inline half GetSize() { return unpack_half2(alphaTest_size).y; }
+	inline half4 GetRimHighlight() { return unpack_half4(rimHighlight); }
 #endif // __cplusplus
 };
 struct ShaderMeshInstancePointer
@@ -693,6 +699,8 @@ struct ShaderMeshInstancePointer
 		data |= (camera_index & 0xF) << 24u;
 		data |= (uint(dither * 15.0f) & 0xF) << 28u;
 	}
+
+#ifndef __cplusplus
 	uint GetInstanceIndex()
 	{
 		return data & 0xFFFFFF;
@@ -701,10 +709,11 @@ struct ShaderMeshInstancePointer
 	{
 		return (data >> 24u) & 0xF;
 	}
-	float GetDither()
+	half GetDither()
 	{
-		return float((data >> 28u) & 0xF) / 15.0f;
+		return half((data >> 28u) & 0xF) / 15.0;
 	}
+#endif // __cplusplus
 };
 
 struct ObjectPushConstants
@@ -736,11 +745,11 @@ struct alignas(16) ShaderEntity
 
 #ifndef __cplusplus
 	// Shader-side:
-	inline uint GetType()
+	inline min16uint GetType()
 	{
 		return type8_flags8_range16 & 0xFF;
 	}
-	inline uint GetFlags()
+	inline min16uint GetFlags()
 	{
 		return (type8_flags8_range16 >> 8u) & 0xFF;
 	}
@@ -768,7 +777,7 @@ struct alignas(16) ShaderEntity
 	{
 		return (half)f16tof32(direction16_coneAngleCos16.y >> 16u);
 	}
-	inline uint GetShadowCascadeCount()
+	inline min16uint GetShadowCascadeCount()
 	{
 		return direction16_coneAngleCos16.y >> 16u;
 	}
@@ -797,11 +806,11 @@ struct alignas(16) ShaderEntity
 		retVal.w = (half)f16tof32(color.y >> 16u);
 		return retVal;
 	}
-	inline uint GetMatrixIndex()
+	inline min16uint GetMatrixIndex()
 	{
 		return indices & 0xFFFF;
 	}
-	inline uint GetTextureIndex()
+	inline min16uint GetTextureIndex()
 	{
 		return indices >> 16u;
 	}
@@ -920,6 +929,32 @@ struct alignas(16) ShaderFrustum
 #endif // __cplusplus
 };
 
+struct alignas(16) ShaderFrustumCorners
+{
+	// topleft, topright, bottomleft, bottomright
+	float4 cornersNEAR[4];
+	float4 cornersFAR[4];
+
+#ifndef __cplusplus
+	inline float3 screen_to_nearplane(float2 uv)
+	{
+		float3 posTOP = lerp(cornersNEAR[0], cornersNEAR[1], uv.x);
+		float3 posBOTTOM = lerp(cornersNEAR[2], cornersNEAR[3], uv.x);
+		return lerp(posTOP, posBOTTOM, uv.y);
+	}
+	inline float3 screen_to_farplane(float2 uv)
+	{
+		float3 posTOP = lerp(cornersFAR[0], cornersFAR[1], uv.x);
+		float3 posBOTTOM = lerp(cornersFAR[2], cornersFAR[3], uv.x);
+		return lerp(posTOP, posBOTTOM, uv.y);
+	}
+	inline float3 screen_to_world(float2 uv, float lineardepthNormalized)
+	{
+		return lerp(screen_to_nearplane(uv), screen_to_farplane(uv), lineardepthNormalized);
+	}
+#endif // __cplusplus
+};
+
 enum SHADER_ENTITY_TYPE
 {
 	ENTITY_TYPE_DIRECTIONALLIGHT,
@@ -958,10 +993,6 @@ struct ShaderEntityIterator
 	constexpr operator uint() const { return value; }
 #endif // __cplusplus
 
-	inline bool empty()
-	{
-		return value == 0;
-	}
 	inline uint item_offset()
 	{
 		return value & 0xFFFF;
@@ -970,13 +1001,21 @@ struct ShaderEntityIterator
 	{
 		return value >> 16u;
 	}
+	inline bool empty()
+	{
+		return item_count() == 0;
+	}
 	inline uint first_item()
 	{
 		return item_offset();
 	}
-	inline uint last_item()
+	inline uint last_item() // includes last valid item
 	{
 		return empty() ? 0 : (item_offset() + item_count() - 1);
+	}
+	inline uint end_item() // excludes last valid item
+	{
+		return empty() ? 0 : (item_offset() + item_count());
 	}
 	inline uint first_bucket()
 	{
@@ -1153,6 +1192,7 @@ struct alignas(16) ShaderCamera
 	float4x4	inverse_view_projection;
 
 	ShaderFrustum frustum;
+	ShaderFrustumCorners frustum_corners;
 
 	float2		temporalaa_jitter;
 	float2		temporalaa_jitter_prev;
@@ -1307,6 +1347,29 @@ struct alignas(16) ShaderCamera
 	inline bool is_pixel_inside_scissor(uint2 pixel)
 	{
 		return pixel.x >= scissor.x && pixel.x <= scissor.z && pixel.y >= scissor.y && pixel.y <= scissor.w;
+	}
+
+	inline bool IsOrtho() { return options & SHADERCAMERA_OPTION_ORTHO; }
+
+	inline float3 screen_to_nearplane(float4 svposition)
+	{
+		const float2 ScreenCoord = svposition.xy * internal_resolution_rcp;
+		return frustum_corners.screen_to_nearplane(ScreenCoord);
+	}
+	inline float3 screen_to_farplane(float4 svposition)
+	{
+		const float2 ScreenCoord = svposition.xy * internal_resolution_rcp;
+		return frustum_corners.screen_to_farplane(ScreenCoord);
+	}
+
+	// Convert raw screen coordinate from rasterizer to world position
+	//	Note: svposition is the SV_Position system value, the .w component can be different in different compilers
+	//	You need to ensure that the .w component is used for linear depth (Vulkan: -fvk-use-dx-position-w, Xbox: in case VRS, there is complication with this, read documentation)
+	inline float3 screen_to_world(float4 svposition)
+	{
+		const float2 ScreenCoord = svposition.xy * internal_resolution_rcp;
+		const float z = IsOrtho() ? (1 - svposition.z) : ((svposition.w - z_near) * z_range_rcp);
+		return frustum_corners.screen_to_world(ScreenCoord, z);
 	}
 #endif // __cplusplus
 };
@@ -1580,6 +1643,16 @@ CBUFFER(TrailRendererCB, CBSLOT_TRAILRENDERER)
 	float		g_xTrailDepthSoften;
 	float3		g_xTrailPadding;
 	float		g_xTrailCameraFar;
+};
+
+CBUFFER(PaintDecalCB, CBSLOT_RENDERER_MISC)
+{
+	float4x4 g_xPaintDecalMatrix;
+
+	int g_xPaintDecalTexture;
+	int g_xPaintDecalInstanceID;
+	float g_xPaintDecalSlopeBlendPower;
+	int g_xPaintDecalpadding;
 };
 
 

@@ -22,7 +22,7 @@ float4 main(VertexToPixel input) : SV_Target
 	}
 	color *= material.GetBaseColor();
 
-	float3 V = GetCamera().position - input.pos3D;
+	float3 V = input.GetViewVector();
 	float dist = length(V);
 	V /= dist;
 	half emissive = 0;
@@ -33,8 +33,8 @@ float4 main(VertexToPixel input) : SV_Target
 	Surface surface;
 	surface.init();
 	surface.create(material, color, surfacemap_simple);
-	surface.P = input.pos3D;
-	surface.N = input.nor;
+	surface.P = input.GetPos3D();
+	surface.N = input.nor_wet.xyz;
 	surface.V = V;
 	surface.pixel = input.pos.xy;
 
@@ -57,17 +57,16 @@ float4 main(VertexToPixel input) : SV_Target
 #endif // ENVMAPRENDERING
 #endif // PREPASS
 
-	if(input.wet > 0)
+	half wet = input.nor_wet.w;
+	if(wet > 0)
 	{
-		surface.albedo = lerp(surface.albedo, 0, input.wet);
+		surface.albedo = lerp(surface.albedo, 0, wet);
 	}
 
 	surface.update();
 
 	Lighting lighting;
 	lighting.create(0, 0, GetAmbient(surface.N), 0);
-
-	float depth = input.pos.z;
 
 	TiledLighting(surface, lighting, GetFlatTileIndex(pixel));
 	
@@ -78,6 +77,8 @@ float4 main(VertexToPixel input) : SV_Target
 #endif // TRANSPARENT
 	
 	ApplyFog(dist, V, color);
+
+	color.rgb = mul(saturationMatrix(material.GetSaturation()), color.rgb);
 	
 	return color;
 }

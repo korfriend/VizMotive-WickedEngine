@@ -60,6 +60,11 @@ namespace wi
 		StreamingTexture streaming_texture;
 		std::atomic<uint32_t> streaming_resolution{ 0 };
 		uint32_t streaming_unload_delay = 0;
+
+		// Virtual texture things:
+		wi::graphics::GPUBuffer tile_pool;
+		wi::graphics::Texture texture_feedback;
+		wi::graphics::Texture texture_residency;
 	};
 
 	const wi::vector<uint8_t>& Resource::GetFileData() const
@@ -132,6 +137,17 @@ namespace wi
 		ResourceInternal* resourceinternal = (ResourceInternal*)internal_state.get();
 		resourceinternal->texture = texture;
 		resourceinternal->srgb_subresource = srgb_subresource;
+	}
+	void Resource::SetTextureVirtual(const GPUBuffer& tile_pool, const Texture& residency, const Texture& feedback)
+	{
+		if (internal_state == nullptr)
+		{
+			internal_state = std::make_shared<ResourceInternal>();
+		}
+		ResourceInternal* resourceinternal = (ResourceInternal*)internal_state.get();
+		resourceinternal->tile_pool = tile_pool;
+		resourceinternal->texture_residency = residency;
+		resourceinternal->texture_feedback = feedback;
 	}
 	void Resource::SetSound(const wi::audio::Sound& sound)
 	{
@@ -1427,7 +1443,7 @@ namespace wi
 					const GraphicsDevice::MemoryUsage memory_usage = device->GetMemoryUsage();
 					const float memory_percent = float(double(memory_usage.usage) / double(memory_usage.budget));
 					const bool memory_shortage = memory_percent > streaming_threshold;
-					const bool stream_in = memory_shortage ? false : (requested_resolution >= std::min(desc.width, desc.height));
+					const bool stream_in = requested_resolution >= std::min(desc.width, desc.height);
 
 					int mip_offset = int(resource->streaming_texture.mip_count - desc.mip_levels);
 					if (stream_in)

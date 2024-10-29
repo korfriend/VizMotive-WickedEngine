@@ -4,7 +4,7 @@
 // Enable / disable FP16 shader ops here
 //	Note: when using -enable-16bit-types compile flag, half will be always FP16
 #if 1
-#ifndef __XBOX_SCARLETT // currently there is some issue on xbox
+#ifndef __XBOX_SCARLETT // fp16 forced on xbox via compiler args
 #ifndef __PSSL__ // min types are already redefined on PS5
 #define half min16float
 #define half2 min16float2
@@ -134,6 +134,12 @@ inline uint2 unpack_pixel(uint value)
 	return retVal;
 }
 
+template<typename T>
+T inverse_lerp(T value1, T value2, T pos)
+{
+	return all(value2 == value1) ? 0 : ((pos - value1) / (value2 - value1));
+}
+
 // The root signature will affect shader compilation for DX12.
 //	The shader compiler will take the defined name: WICKED_ENGINE_DEFAULT_ROOTSIGNATURE and use it as root signature
 //	If you wish to specify custom root signature, make sure that this define is not available
@@ -213,7 +219,7 @@ inline uint2 unpack_pixel(uint value)
 
 #ifndef __PSSL__
 // These are static samplers, they don't need to be bound:
-//	They are also on slots that are not bindable as sampler bind slots must be in [0,15] range!
+//	They are also on slots that are not bindable as sampler bind slots must be in [0, DESCRIPTORBINDER_SAMPLER_COUNT] range!
 SamplerState sampler_linear_clamp : register(s100);
 SamplerState sampler_linear_wrap : register(s101);
 SamplerState sampler_linear_mirror : register(s102);
@@ -435,7 +441,15 @@ inline ShaderEntity load_entity(uint entityIndex)
 {
 	return GetFrame().entityArray[entityIndex];
 }
+inline ShaderEntity load_entity(min16uint entityIndex)
+{
+	return GetFrame().entityArray[entityIndex];
+}
 inline float4x4 load_entitymatrix(uint matrixIndex)
+{
+	return GetFrame().matrixArray[matrixIndex];
+}
+inline float4x4 load_entitymatrix(min16uint matrixIndex)
 {
 	return GetFrame().matrixArray[matrixIndex];
 }
@@ -618,7 +632,9 @@ struct PrimitiveID
 #define MEDIUMP_FLT_MAX 65504.0
 
 #define sqr(a) ((a)*(a))
+#define pow4(a) ((a)*(a)*(a)*(a))
 #define pow5(a) ((a)*(a)*(a)*(a)*(a))
+#define pow8(a) ((a)*(a)*(a)*(a)*(a)*(a)*(a)*(a))
 #define arraysize(a) (sizeof(a) / sizeof(a[0]))
 #define saturateMediump(x) min(x, MEDIUMP_FLT_MAX)
 #define highp
@@ -772,12 +788,6 @@ inline half2 clipspace_to_uv(in half2 clipspace)
 inline half3 clipspace_to_uv(in half3 clipspace)
 {
 	return clipspace * half3(0.5, -0.5, 0.5) + 0.5;
-}
-
-template<typename T>
-T inverse_lerp(T value1, T value2, T pos)
-{
-	return all(value2 == value1) ? 0 : ((pos - value1) / (value2 - value1));
 }
 
 inline float3 GetSunColor() { return GetWeather().sun_color; } // sun color with intensity applied
@@ -1517,30 +1527,30 @@ inline half2x2 dither_rot2x2(in min16uint2 pixel)
 // http://mathworld.wolfram.com/Quaternion.html
 float4 qmul(float4 q1, float4 q2)
 {
-    return float4(
-        q2.xyz * q1.w + q1.xyz * q2.w + cross(q1.xyz, q2.xyz),
-        q1.w * q2.w - dot(q1.xyz, q2.xyz)
-    );
+	return float4(
+		q2.xyz * q1.w + q1.xyz * q2.w + cross(q1.xyz, q2.xyz),
+		q1.w * q2.w - dot(q1.xyz, q2.xyz)
+	);
 }
 half4 qmul(half4 q1, half4 q2)
 {
-    return half4(
-        q2.xyz * q1.w + q1.xyz * q2.w + cross(q1.xyz, q2.xyz),
-        q1.w * q2.w - dot(q1.xyz, q2.xyz)
-    );
+	return half4(
+		q2.xyz * q1.w + q1.xyz * q2.w + cross(q1.xyz, q2.xyz),
+		q1.w * q2.w - dot(q1.xyz, q2.xyz)
+	);
 }
 
 // Vector rotation with a quaternion
 // http://mathworld.wolfram.com/Quaternion.html
 float3 rotate_vector(float3 v, float4 r)
 {
-    float4 r_c = r * float4(-1, -1, -1, 1);
-    return qmul(r, qmul(float4(v, 0), r_c)).xyz;
+	float4 r_c = r * float4(-1, -1, -1, 1);
+	return qmul(r, qmul(float4(v, 0), r_c)).xyz;
 }
 half3 rotate_vector(half3 v, half4 r)
 {
-    half4 r_c = r * half4(-1, -1, -1, 1);
-    return qmul(r, qmul(half4(v, 0), r_c)).xyz;
+	half4 r_c = r * half4(-1, -1, -1, 1);
+	return qmul(r, qmul(half4(v, 0), r_c)).xyz;
 }
 
 inline float sphere_surface_area(in float radius)
@@ -1882,11 +1892,11 @@ enum class ColorSpace
 };
 
 
-static const uint NUM_PARALLAX_OCCLUSION_STEPS = 32;
-static const float NUM_PARALLAX_OCCLUSION_STEPS_RCP = 1.0 / NUM_PARALLAX_OCCLUSION_STEPS;
+static const min16uint NUM_PARALLAX_OCCLUSION_STEPS = 32;
+static const half NUM_PARALLAX_OCCLUSION_STEPS_RCP = 1.0 / NUM_PARALLAX_OCCLUSION_STEPS;
 inline void ParallaxOcclusionMapping_Impl(
 	inout float4 uvsets,		// uvsets to modify
-	in float3 V,				// view vector (pointing towards camera)
+	in half3 V,				// view vector (pointing towards camera)
 	in half3x3 TBN,				// tangent basis matrix (same that is used for normal mapping)
 	in half strength,			// material parameters
 	in Texture2D tex,			// displacement map texture
@@ -1904,23 +1914,23 @@ inline void ParallaxOcclusionMapping_Impl(
 	TBN[1] = normalize(TBN[1]);
 	TBN[2] = normalize(TBN[2]);
 	V = normalize(mul(TBN, V));
-	float curLayerHeight = 0;
-	float2 dtex = strength * V.xy * NUM_PARALLAX_OCCLUSION_STEPS_RCP;
+	half curLayerHeight = 0;
+	half2 dtex = strength * V.xy * NUM_PARALLAX_OCCLUSION_STEPS_RCP;
 	float2 currentTextureCoords = uv;
-	float heightFromTexture = 1 - tex.SampleGrad(sam, currentTextureCoords, uv_dx, uv_dy).r;
-	uint iter = 0;
+	half heightFromTexture = 1 - (half)tex.SampleGrad(sam, currentTextureCoords, uv_dx, uv_dy).r;
+	min16uint iter = 0;
 	[loop]
 	while (heightFromTexture > curLayerHeight && iter < NUM_PARALLAX_OCCLUSION_STEPS)
 	{
 		curLayerHeight += NUM_PARALLAX_OCCLUSION_STEPS_RCP;
 		currentTextureCoords -= dtex;
-		heightFromTexture = 1 - tex.SampleGrad(sam, currentTextureCoords, uv_dx, uv_dy).r;
+		heightFromTexture = 1 - (half)tex.SampleGrad(sam, currentTextureCoords, uv_dx, uv_dy).r;
 		iter++;
 	}
 	float2 prevTCoords = currentTextureCoords + dtex;
-	float nextH = heightFromTexture - curLayerHeight;
-	float prevH = 1 - tex.SampleGrad(sam, prevTCoords, uv_dx, uv_dy).r - curLayerHeight + NUM_PARALLAX_OCCLUSION_STEPS_RCP;
-	float weight = nextH / (nextH - prevH);
+	half nextH = heightFromTexture - curLayerHeight;
+	half prevH = 1 - (half)tex.SampleGrad(sam, prevTCoords, uv_dx, uv_dy).r - curLayerHeight + NUM_PARALLAX_OCCLUSION_STEPS_RCP;
+	half weight = nextH / (nextH - prevH);
 	float2 finalTextureCoords = mad(prevTCoords, weight, currentTextureCoords * (1.0 - weight));
 	float2 difference = finalTextureCoords - uv;
 	uvsets += difference.xyxy;
@@ -1937,6 +1947,23 @@ inline float3 get_up(float4x4 m)
 inline float3 get_right(float4x4 m)
 {
 	return float3(m[0][0], m[0][1], m[0][2]);
+}
+
+half3x3 saturationMatrix(half saturation)
+{
+	half3 luminance = half3(0.3086, 0.6094, 0.0820);
+	half oneMinusSat = 1.0 - saturation;
+
+	half3 red = half3(luminance * oneMinusSat);
+	red += half3(saturation, 0, 0);
+
+	half3 green = half3(luminance * oneMinusSat);
+	green += half3(0, saturation, 0);
+
+	half3 blue = half3(luminance * oneMinusSat);
+	blue += half3(0, 0, saturation);
+
+	return half3x3(red, green, blue);
 }
 
 #endif // WI_SHADER_GLOBALS_HF

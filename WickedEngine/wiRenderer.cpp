@@ -80,7 +80,7 @@ std::string SHADERSOURCEPATH = "../WickedEngine/shaders/";
 #else
 // Note: when NOT using Shader Dump, use absolute directory, to avoid the case when something (eg. file dialog) overrides working directory
 std::string SHADERPATH = wi::helper::GetCurrentPath() + "/shaders/";
-std::string SHADERSOURCEPATH = wi::helper::GetCurrentPath() + "/../WickedEngine/shaders/";
+std::string SHADERSOURCEPATH = SHADER_INTEROP_PATH;
 #endif // SHADERDUMP_ENABLED
 
 // define this to use raytracing pipeline for raytraced reflections:
@@ -170,6 +170,7 @@ wi::vector<RenderableTriangle> renderableTriangles_wireframe_depth;
 wi::vector<uint8_t> debugTextStorage; // A stream of DebugText struct + text characters
 wi::vector<PaintRadius> paintrads;
 wi::vector<PaintTextureParams> painttextures;
+wi::vector<PaintDecalParams> paintdecals;
 wi::vector<const wi::VoxelGrid*> renderableVoxelgrids;
 wi::vector<const wi::PathQuery*> renderablePathqueries;
 wi::vector<const wi::TrailRenderer*> renderableTrails;
@@ -373,10 +374,10 @@ union ObjectRenderingVariant
 	uint32_t value;
 };
 static_assert(sizeof(ObjectRenderingVariant) == sizeof(uint32_t));
-wi::unordered_map<uint32_t, PipelineState> PSO_object[RENDERPASS_COUNT][MaterialComponent::SHADERTYPE_COUNT];
 inline PipelineState* GetObjectPSO(ObjectRenderingVariant variant)
 {
-	return &PSO_object[variant.bits.renderpass][variant.bits.shadertype][variant.value];
+	static wi::unordered_map<uint32_t, PipelineState> PSO_object[RENDERPASS_COUNT][MaterialComponent::SHADERTYPE_COUNT][OBJECT_MESH_SHADER_PSO_COUNT];
+	return &PSO_object[variant.bits.renderpass][variant.bits.shadertype][variant.bits.mesh_shader][variant.value];
 }
 wi::jobsystem::context mesh_shader_ctx;
 wi::jobsystem::context object_pso_job_ctx[RENDERPASS_COUNT][OBJECT_MESH_SHADER_PSO_COUNT];
@@ -550,31 +551,6 @@ SHADERTYPE GetGSTYPE(RENDERPASS renderPass, bool alphatest, bool transparent)
 		}
 #endif // PLATFORM_PS5
 		break;
-
-	case RENDERPASS_ENVMAPCAPTURE:
-		if (device->CheckCapability(GraphicsDeviceCapability::RENDERTARGET_AND_VIEWPORT_ARRAYINDEX_WITHOUT_GS))
-			break;
-		realGS = GSTYPE_ENVMAP_EMULATION;
-		break;
-	case RENDERPASS_SHADOW:
-		if (device->CheckCapability(GraphicsDeviceCapability::RENDERTARGET_AND_VIEWPORT_ARRAYINDEX_WITHOUT_GS))
-			break;
-		if (transparent)
-		{
-			realGS = GSTYPE_SHADOW_TRANSPARENT_EMULATION;
-		}
-		else
-		{
-			if (alphatest)
-			{
-				realGS = GSTYPE_SHADOW_ALPHATEST_EMULATION;
-			}
-			else
-			{
-				realGS = GSTYPE_SHADOW_EMULATION;
-			}
-		}
-		break;
 	}
 
 	return realGS;
@@ -695,6 +671,7 @@ PipelineState PSO_lightvisualizer[LightComponent::LIGHTTYPE_COUNT];
 PipelineState PSO_volumetriclight[LightComponent::LIGHTTYPE_COUNT];
 
 PipelineState PSO_renderlightmap;
+PipelineState PSO_paintdecal;
 
 PipelineState PSO_lensflare;
 
@@ -912,6 +889,7 @@ void LoadShaders()
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::VS, shaders[VSTYPE_LENSFLARE], "lensFlareVS.cso"); });
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::VS, shaders[VSTYPE_DDGI_DEBUG], "ddgi_debugVS.cso"); });
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::VS, shaders[VSTYPE_SCREEN], "screenVS.cso"); });
+	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::VS, shaders[VSTYPE_PAINTDECAL], "paintdecalVS.cso"); });
 
 	if (device->CheckCapability(GraphicsDeviceCapability::RENDERTARGET_AND_VIEWPORT_ARRAYINDEX_WITHOUT_GS))
 	{
@@ -929,11 +907,6 @@ void LoadShaders()
 		wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::VS, shaders[VSTYPE_SHADOW_ALPHATEST], "shadowVS_alphatest_emulation.cso"); });
 		wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::VS, shaders[VSTYPE_SHADOW_TRANSPARENT], "shadowVS_transparent_emulation.cso"); });
 
-		wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::GS, shaders[GSTYPE_ENVMAP_EMULATION], "envMapGS_emulation.cso"); });
-		wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::GS, shaders[GSTYPE_ENVMAP_SKY_EMULATION], "envMap_skyGS_emulation.cso"); });
-		wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::GS, shaders[GSTYPE_SHADOW_EMULATION], "shadowGS_emulation.cso"); });
-		wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::GS, shaders[GSTYPE_SHADOW_ALPHATEST_EMULATION], "shadowGS_alphatest_emulation.cso"); });
-		wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::GS, shaders[GSTYPE_SHADOW_TRANSPARENT_EMULATION], "shadowGS_transparent_emulation.cso"); });
 	}
 
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::PS, shaders[PSTYPE_IMPOSTOR], "impostorPS.cso"); });
@@ -979,6 +952,7 @@ void LoadShaders()
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::PS, shaders[PSTYPE_POSTPROCESS_VOLUMETRICCLOUDS_UPSAMPLE], "volumetricCloud_upsamplePS.cso"); });
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::PS, shaders[PSTYPE_COPY_DEPTH], "copyDepthPS.cso"); });
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::PS, shaders[PSTYPE_COPY_STENCIL_BIT], "copyStencilBitPS.cso"); });
+	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::PS, shaders[PSTYPE_PAINTDECAL], "paintdecalPS.cso"); });
 
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::GS, shaders[GSTYPE_VOXELIZER], "objectGS_voxelizer.cso"); });
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::GS, shaders[GSTYPE_VOXEL], "voxelGS.cso"); });
@@ -992,7 +966,6 @@ void LoadShaders()
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::CS, shaders[CSTYPE_LUMINANCE_PASS2], "luminancePass2CS.cso"); });
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::CS, shaders[CSTYPE_SHADINGRATECLASSIFICATION], "shadingRateClassificationCS.cso"); });
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::CS, shaders[CSTYPE_SHADINGRATECLASSIFICATION_DEBUG], "shadingRateClassificationCS_DEBUG.cso"); });
-	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::CS, shaders[CSTYPE_TILEFRUSTUMS], "tileFrustumsCS.cso"); });
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::CS, shaders[CSTYPE_LIGHTCULLING], "lightCullingCS.cso"); });
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::CS, shaders[CSTYPE_LIGHTCULLING_DEBUG], "lightCullingCS_DEBUG.cso"); });
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) { LoadShader(ShaderStage::CS, shaders[CSTYPE_LIGHTCULLING_ADVANCED], "lightCullingCS_ADVANCED.cso"); });
@@ -1491,6 +1464,20 @@ void LoadShaders()
 		});
 	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) {
 		PipelineStateDesc desc;
+		desc.vs = &shaders[VSTYPE_PAINTDECAL];
+		desc.ps = &shaders[PSTYPE_PAINTDECAL];
+		desc.rs = &rasterizers[RSTYPE_DOUBLESIDED];
+		desc.bs = &blendStates[BSTYPE_TRANSPARENT];
+		desc.dss = &depthStencils[DSSTYPE_DEPTHDISABLED];
+
+		RenderPassInfo renderpass_info;
+		renderpass_info.rt_count = 1;
+		renderpass_info.rt_formats[0] = Format::R8G8B8A8_UNORM;
+
+		device->CreatePipelineState(&desc, &PSO_paintdecal, &renderpass_info);
+		});
+	wi::jobsystem::Execute(ctx, [](wi::jobsystem::JobArgs args) {
+		PipelineStateDesc desc;
 		desc.vs = &shaders[VSTYPE_POSTPROCESS];
 		desc.ps = &shaders[PSTYPE_DOWNSAMPLEDEPTHBUFFER];
 		desc.rs = &rasterizers[RSTYPE_DOUBLESIDED];
@@ -1583,19 +1570,11 @@ void LoadShaders()
 			desc.bs = &blendStates[BSTYPE_OPAQUE];
 			desc.vs = &shaders[VSTYPE_ENVMAP_SKY];
 			desc.ps = &shaders[PSTYPE_ENVMAP_SKY_STATIC];
-			if (!device->CheckCapability(GraphicsDeviceCapability::RENDERTARGET_AND_VIEWPORT_ARRAYINDEX_WITHOUT_GS))
-			{
-				desc.gs = &shaders[GSTYPE_ENVMAP_SKY_EMULATION];
-			}
 			break;
 		case SKYRENDERING_ENVMAPCAPTURE_DYNAMIC:
 			desc.bs = &blendStates[BSTYPE_OPAQUE];
 			desc.vs = &shaders[VSTYPE_ENVMAP_SKY];
 			desc.ps = &shaders[PSTYPE_ENVMAP_SKY_DYNAMIC];
-			if (!device->CheckCapability(GraphicsDeviceCapability::RENDERTARGET_AND_VIEWPORT_ARRAYINDEX_WITHOUT_GS))
-			{
-				desc.gs = &shaders[GSTYPE_ENVMAP_SKY_EMULATION];
-			}
 			break;
 		}
 
@@ -2104,6 +2083,12 @@ void LoadShaders()
 }
 bool IsPipelineCreationActive()
 {
+	if (wi::jobsystem::IsBusy(raytracing_ctx))
+		return true;
+	if (wi::jobsystem::IsBusy(objectps_ctx))
+		return true;
+	if (wi::jobsystem::IsBusy(mesh_shader_ctx))
+		return true;
 	for (uint32_t renderPass = 0; renderPass < RENDERPASS_COUNT; ++renderPass)
 	{
 		for (uint32_t mesh_shader = 0; mesh_shader <= (IsMeshShaderAllowed() ? 1u : 0u); ++mesh_shader)
@@ -2286,8 +2271,8 @@ void SetUpStates()
 	rs.fill_mode = FillMode::SOLID;
 	rs.cull_mode = CullMode::NONE;
 	rs.front_counter_clockwise = true;
-	rs.depth_bias = 1;
-	rs.depth_bias_clamp = 0.01f;
+	rs.depth_bias = 0;
+	rs.depth_bias_clamp = 0;
 	rs.slope_scaled_depth_bias = 0;
 	rs.depth_clip_enable = false;
 	rs.multisample_enable = false;
@@ -2682,6 +2667,17 @@ void SetShaderSourcePath(const std::string& path)
 }
 void ReloadShaders()
 {
+	wi::jobsystem::Wait(raytracing_ctx);
+	wi::jobsystem::Wait(objectps_ctx);
+	wi::jobsystem::Wait(mesh_shader_ctx);
+	for (uint32_t renderPass = 0; renderPass < RENDERPASS_COUNT; ++renderPass)
+	{
+		for (uint32_t mesh_shader = 0; mesh_shader <= (IsMeshShaderAllowed() ? 1u : 0u); ++mesh_shader)
+		{
+			wi::jobsystem::Wait(object_pso_job_ctx[renderPass][mesh_shader]);
+		}
+	}
+
 	device->ClearPipelineStateCache();
 	SHADER_ERRORS.store(0);
 	SHADER_MISSING.store(0);
@@ -3027,6 +3023,24 @@ void RenderMeshes(
 				subsetRenderable = subsetRenderable && material.IsCastingShadow();
 			}
 
+			if (material.IsCoplanarBlending())
+			{
+				if (
+					renderPass == RENDERPASS_PREPASS ||
+					renderPass == RENDERPASS_SHADOW ||
+					renderPass == RENDERPASS_RAINBLOCKER
+					)
+				{
+					// coplanar blending can be skipped from these passes
+					continue;
+				}
+				if (renderPass == RENDERPASS_MAIN)
+				{
+					// coplanar blending will be rendered in opaque main pass only
+					subsetRenderable = filterMask & FILTER_OPAQUE;
+				}
+			}
+
 			if (!subsetRenderable)
 			{
 				continue;
@@ -3360,8 +3374,14 @@ void UpdateVisibility(Visibility& vis)
 	//	then each group writes out it's local list to global memory
 	//	The shared memory approach reduces atomics and helps the list to remain
 	//	more coherent (less randomly organized compared to original order)
-	static const uint32_t groupSize = 64;
-	static const size_t sharedmemory_size = (groupSize + 1) * sizeof(uint32_t); // list + counter per group
+	static constexpr uint32_t groupSize = 63;
+	static_assert(groupSize <= 256); // groupIndex must fit into uint8_t stream compaction element
+	struct StreamCompaction
+	{
+		uint8_t list[groupSize];
+		uint8_t count;
+	};
+	static constexpr size_t sharedmemory_size = sizeof(StreamCompaction);
 
 	// Initialize visible indices:
 	vis.Clear();
@@ -3386,11 +3406,10 @@ void UpdateVisibility(Visibility& vis)
 		wi::jobsystem::Dispatch(ctx, light_loop, groupSize, [&](wi::jobsystem::JobArgs args) {
 
 			// Setup stream compaction:
-			uint32_t& group_count = *(uint32_t*)args.sharedmemory;
-			uint32_t* group_list = (uint32_t*)args.sharedmemory + 1;
+			StreamCompaction& stream_compaction = *(StreamCompaction*)args.sharedmemory;
 			if (args.isFirstJobInGroup)
 			{
-				group_count = 0; // first thread initializes local counter
+				stream_compaction.count = 0; // first thread initializes local counter
 			}
 
 			const AABB& aabb = vis.scene->aabb_lights[args.jobIndex];
@@ -3402,8 +3421,7 @@ void UpdateVisibility(Visibility& vis)
 				{
 					// Local stream compaction:
 					//	(also compute light distance for shadow priority sorting)
-					group_list[group_count] = args.jobIndex;
-					group_count++;
+					stream_compaction.list[stream_compaction.count++] = args.groupIndex;
 					if (light.IsVolumetricsEnabled())
 					{
 						vis.volumetriclight_request.store(true);
@@ -3423,12 +3441,13 @@ void UpdateVisibility(Visibility& vis)
 			}
 
 			// Global stream compaction:
-			if (args.isLastJobInGroup && group_count > 0)
+			if (args.isLastJobInGroup && stream_compaction.count > 0)
 			{
-				uint32_t prev_count = vis.light_counter.fetch_add(group_count);
-				for (uint32_t i = 0; i < group_count; ++i)
+				uint32_t prev_count = vis.light_counter.fetch_add(stream_compaction.count);
+				uint32_t groupOffset = args.groupID * groupSize;
+				for (uint32_t i = 0; i < stream_compaction.count; ++i)
 				{
-					vis.visibleLights[prev_count + i] = group_list[i];
+					vis.visibleLights[prev_count + i] = groupOffset + stream_compaction.list[i];
 				}
 			}
 
@@ -3443,11 +3462,10 @@ void UpdateVisibility(Visibility& vis)
 		wi::jobsystem::Dispatch(ctx, object_loop, groupSize, [&](wi::jobsystem::JobArgs args) {
 
 			// Setup stream compaction:
-			uint32_t& group_count = *(uint32_t*)args.sharedmemory;
-			uint32_t* group_list = (uint32_t*)args.sharedmemory + 1;
+			StreamCompaction& stream_compaction = *(StreamCompaction*)args.sharedmemory;
 			if (args.isFirstJobInGroup)
 			{
-				group_count = 0; // first thread initializes local counter
+				stream_compaction.count = 0; // first thread initializes local counter
 			}
 
 			const AABB& aabb = vis.scene->aabb_objects[args.jobIndex];
@@ -3455,7 +3473,7 @@ void UpdateVisibility(Visibility& vis)
 			if ((aabb.layerMask & vis.layerMask) && vis.frustum.CheckBoxFast(aabb))
 			{
 				// Local stream compaction:
-				group_list[group_count++] = args.jobIndex;
+				stream_compaction.list[stream_compaction.count++] = args.groupIndex;
 
 				const ObjectComponent& object = vis.scene->objects[args.jobIndex];
 				Scene::OcclusionResult& occlusion_result = vis.scene->occlusion_results_objects[args.jobIndex];
@@ -3503,12 +3521,13 @@ void UpdateVisibility(Visibility& vis)
 			}
 
 			// Global stream compaction:
-			if (args.isLastJobInGroup && group_count > 0)
+			if (args.isLastJobInGroup && stream_compaction.count > 0)
 			{
-				uint32_t prev_count = vis.object_counter.fetch_add(group_count);
-				for (uint32_t i = 0; i < group_count; ++i)
+				uint32_t prev_count = vis.object_counter.fetch_add(stream_compaction.count);
+				uint32_t groupOffset = args.groupID * groupSize;
+				for (uint32_t i = 0; i < stream_compaction.count; ++i)
 				{
-					vis.visibleObjects[prev_count + i] = group_list[i];
+					vis.visibleObjects[prev_count + i] = groupOffset + stream_compaction.list[i];
 				}
 			}
 
@@ -4880,6 +4899,12 @@ void UpdateRenderData(
 		wi::profiler::EndRange(range);
 		device->EventEnd(cmd);
 	}
+	else if(vis.scene->impostors.GetCount() > 0 && vis.scene->objects.GetCount() == 0 && vis.scene->impostorBuffer.IsValid())
+	{
+		device->ClearUAV(&vis.scene->impostorBuffer, 0, cmd);
+		barrier_stack.push_back(GPUBarrier::Buffer(&vis.scene->impostorBuffer, ResourceState::UNORDERED_ACCESS, ResourceState::SHADER_RESOURCE | ResourceState::INDIRECT_ARGUMENT));
+		barrier_stack_flush(cmd);
+	}
 
 	// Meshlets:
 	if(vis.scene->instanceArraySize > 0 && vis.scene->meshletBuffer.IsValid())
@@ -5323,7 +5348,14 @@ void OcclusionCulling_Render(const CameraComponent& camera, const Visibility& vi
 			int queryIndex = occlusion_result.occlusionQueries[query_write];
 			if (queryIndex >= 0)
 			{
-				const AABB& aabb = vis.scene->aabb_objects[instanceIndex];
+				AABB aabb = vis.scene->aabb_objects[instanceIndex];
+				// extrude the bounding box a bit:
+				aabb._min.x -= 0.001f;
+				aabb._min.y -= 0.001f;
+				aabb._min.z -= 0.001f;
+				aabb._max.x += 0.001f;
+				aabb._max.y += 0.001f;
+				aabb._max.z += 0.001f;
 				const XMMATRIX transform = aabb.getAsBoxMatrix() * VP;
 				device->PushConstants(&transform, sizeof(transform), cmd);
 
@@ -5367,16 +5399,8 @@ void OcclusionCulling_Render(const CameraComponent& camera, const Visibility& vi
 		{
 			device->EventBegin("Occlusion Culling Ocean", cmd);
 
-			AABB aabb;
-			aabb.createFromHalfWidth(
-				XMFLOAT3(vis.camera->Eye.x, vis.scene->weather.oceanParameters.waterHeight, vis.camera->Eye.z),
-				XMFLOAT3(vis.camera->zFarP, 1, vis.camera->zFarP)
-			);
-			const XMMATRIX transform = aabb.getAsBoxMatrix() * VP;
-			device->PushConstants(&transform, sizeof(transform), cmd);
-
 			device->QueryBegin(&queryHeap, queryIndex, cmd);
-			device->Draw(14, 0, cmd);
+			vis.scene->ocean.RenderForOcclusionTest(camera, cmd);
 			device->QueryEnd(&queryHeap, queryIndex, cmd);
 
 			device->EventEnd(cmd);
@@ -6275,18 +6299,19 @@ void DrawShadowmaps(
 						}
 					}
 				}
+
+				if (predicationRequest && light.occlusionquery >= 0)
+				{
+					device->PredicationBegin(
+						&vis.scene->queryPredicationBuffer,
+						(uint64_t)light.occlusionquery * sizeof(uint64_t),
+						PredicationOp::EQUAL_ZERO,
+						cmd
+					);
+				}
+
 				if (!renderQueue.empty())
 				{
-					if (predicationRequest && light.occlusionquery >= 0)
-					{
-						device->PredicationBegin(
-							&vis.scene->queryPredicationBuffer,
-							(uint64_t)light.occlusionquery * sizeof(uint64_t),
-							PredicationOp::EQUAL_ZERO,
-							cmd
-						);
-					}
-
 					XMStoreFloat4x4(&cb.cameras[0].view_projection, shcam.view_projection);
 					cb.cameras[0].output_index = 0;
 					for (int i = 0; i < arraysize(cb.cameras[0].frustum.planes); ++i)
@@ -6313,11 +6338,6 @@ void DrawShadowmaps(
 					if (transparentShadowsRequested)
 					{
 						RenderMeshes(vis, renderQueue, RENDERPASS_SHADOW, FILTER_TRANSPARENT | FILTER_WATER, cmd);
-					}
-
-					if (predicationRequest && light.occlusionquery >= 0)
-					{
-						device->PredicationEnd(cmd);
 					}
 				}
 
@@ -6355,6 +6375,10 @@ void DrawShadowmaps(
 					}
 				}
 
+				if (predicationRequest && light.occlusionquery >= 0)
+				{
+					device->PredicationEnd(cmd);
+				}
 			}
 			break;
 			case LightComponent::POINT:
@@ -6435,18 +6459,19 @@ void DrawShadowmaps(
 						}
 					}
 				}
+
+				if (predicationRequest && light.occlusionquery >= 0)
+				{
+					device->PredicationBegin(
+						&vis.scene->queryPredicationBuffer,
+						(uint64_t)light.occlusionquery * sizeof(uint64_t),
+						PredicationOp::EQUAL_ZERO,
+						cmd
+					);
+				}
+
 				if (!renderQueue.empty())
 				{
-					if (predicationRequest && light.occlusionquery >= 0)
-					{
-						device->PredicationBegin(
-							&vis.scene->queryPredicationBuffer,
-							(uint64_t)light.occlusionquery * sizeof(uint64_t),
-							PredicationOp::EQUAL_ZERO,
-							cmd
-						);
-					}
-
 					device->BindDynamicConstantBuffer(cb, CBSLOT_RENDERER_CAMERA, cmd);
 					device->BindViewports(arraysize(vp), vp, cmd);
 					device->BindScissorRects(arraysize(scissors), scissors, cmd);
@@ -6456,11 +6481,6 @@ void DrawShadowmaps(
 					if (transparentShadowsRequested)
 					{
 						RenderMeshes(vis, renderQueue, RENDERPASS_SHADOW, FILTER_TRANSPARENT | FILTER_WATER, cmd, 0, camera_count);
-					}
-
-					if (predicationRequest && light.occlusionquery >= 0)
-					{
-						device->PredicationEnd(cmd);
 					}
 				}
 
@@ -6498,6 +6518,11 @@ void DrawShadowmaps(
 							}
 						}
 					}
+				}
+
+				if (predicationRequest && light.occlusionquery >= 0)
+				{
+					device->PredicationEnd(cmd);
 				}
 
 			}
@@ -8344,6 +8369,8 @@ void RefreshEnvProbes(const Visibility& vis, CommandList cmd)
 
 	const float zNearP = vis.camera->zNearP;
 	const float zFarP = vis.camera->zFarP;
+	const float zNearPRcp = 1.0f / zNearP;
+	const float zFarPRcp = 1.0f / zFarP;
 
 	auto render_probe = [&](const EnvironmentProbeComponent& probe, const AABB& probe_aabb) {
 
@@ -8359,9 +8386,29 @@ void RefreshEnvProbes(const Visibility& vis, CommandList cmd)
 		for (uint32_t i = 0; i < arraysize(cameras); ++i)
 		{
 			XMStoreFloat4x4(&cb.cameras[i].view_projection, cameras[i].view_projection);
-			XMStoreFloat4x4(&cb.cameras[i].inverse_view_projection, cameras[i].view_projection);
+			XMMATRIX invVP = XMMatrixInverse(nullptr, cameras[i].view_projection);
+			XMStoreFloat4x4(&cb.cameras[i].inverse_view_projection, invVP);
 			cb.cameras[i].position = probe.position;
 			cb.cameras[i].output_index = i;
+			cb.cameras[i].z_near = zNearP;
+			cb.cameras[i].z_near_rcp = zNearPRcp;
+			cb.cameras[i].z_far = zFarP;
+			cb.cameras[i].z_far_rcp = zFarPRcp;
+			cb.cameras[i].z_range = abs(zFarP - zNearP);
+			cb.cameras[i].z_range_rcp = 1.0f / std::max(0.0001f, cb.cameras[i].z_range);
+			cb.cameras[i].internal_resolution = uint2(probe.texture.desc.width, probe.texture.desc.height);
+			cb.cameras[i].internal_resolution_rcp.x = 1.0f / cb.cameras[i].internal_resolution.x;
+			cb.cameras[i].internal_resolution_rcp.y = 1.0f / cb.cameras[i].internal_resolution.y;
+
+			XMStoreFloat4(&cb.cameras[i].frustum_corners.cornersNEAR[0], XMVector3TransformCoord(XMVectorSet(-1, 1, 1, 1), invVP));
+			XMStoreFloat4(&cb.cameras[i].frustum_corners.cornersNEAR[1], XMVector3TransformCoord(XMVectorSet(1, 1, 1, 1), invVP));
+			XMStoreFloat4(&cb.cameras[i].frustum_corners.cornersNEAR[2], XMVector3TransformCoord(XMVectorSet(-1, -1, 1, 1), invVP));
+			XMStoreFloat4(&cb.cameras[i].frustum_corners.cornersNEAR[3], XMVector3TransformCoord(XMVectorSet(1, -1, 1, 1), invVP));
+			XMStoreFloat4(&cb.cameras[i].frustum_corners.cornersFAR[0], XMVector3TransformCoord(XMVectorSet(-1, 1, 0, 1), invVP));
+			XMStoreFloat4(&cb.cameras[i].frustum_corners.cornersFAR[1], XMVector3TransformCoord(XMVectorSet(1, 1, 0, 1), invVP));
+			XMStoreFloat4(&cb.cameras[i].frustum_corners.cornersFAR[2], XMVector3TransformCoord(XMVectorSet(-1, -1, 0, 1), invVP));
+			XMStoreFloat4(&cb.cameras[i].frustum_corners.cornersFAR[3], XMVector3TransformCoord(XMVectorSet(1, -1, 0, 1), invVP));
+
 		}
 		device->BindDynamicConstantBuffer(cb, CBSLOT_RENDERER_CAMERA, cmd);
 
@@ -8560,7 +8607,7 @@ void RefreshEnvProbes(const Visibility& vis, CommandList cmd)
 				),
 				RenderPassImage::RenderTarget(
 					&envrenderingColorBuffer_MSAA,
-					RenderPassImage::LoadOp::DONTCARE,
+					RenderPassImage::LoadOp::CLEAR,
 					RenderPassImage::StoreOp::DONTCARE,
 					ResourceState::RENDERTARGET,
 					ResourceState::RENDERTARGET
@@ -8587,7 +8634,7 @@ void RefreshEnvProbes(const Visibility& vis, CommandList cmd)
 				),
 				RenderPassImage::RenderTarget(
 					&envrenderingColorBuffer,
-					RenderPassImage::LoadOp::DONTCARE,
+					RenderPassImage::LoadOp::CLEAR,
 					RenderPassImage::StoreOp::STORE,
 					ResourceState::SHADER_RESOURCE,
 					ResourceState::SHADER_RESOURCE
@@ -9042,6 +9089,71 @@ void RefreshImpostors(const Scene& scene, CommandList cmd)
 	device->EventEnd(cmd);
 }
 
+void PaintDecals(const Scene& scene, CommandList cmd)
+{
+	if (paintdecals.empty())
+		return;
+
+	device->EventBegin("PaintDecals", cmd);
+
+	BindCommonResources(cmd);
+
+	for (auto& paint : paintdecals)
+	{
+		if (!scene.objects.Contains(paint.objectEntity))
+			continue;
+		const ObjectComponent& object = *scene.objects.GetComponent(paint.objectEntity);
+		if (!scene.meshes.Contains(object.meshID))
+			continue;
+		const MeshComponent& mesh = *scene.meshes.GetComponent(object.meshID);
+
+		PaintDecalCB cb = {};
+		XMStoreFloat4x4(&cb.g_xPaintDecalMatrix, XMMatrixInverse(nullptr, XMLoadFloat4x4(&paint.decalMatrix)));
+		cb.g_xPaintDecalTexture = device->GetDescriptorIndex(&paint.in_texture, SubresourceType::SRV);
+		cb.g_xPaintDecalInstanceID = (uint)scene.objects.GetIndex(paint.objectEntity);
+		cb.g_xPaintDecalSlopeBlendPower = paint.slopeBlendPower;
+
+		device->BindPipelineState(&PSO_paintdecal, cmd);
+
+		device->BindDynamicConstantBuffer(cb, CB_GETBINDSLOT(PaintDecalCB), cmd);
+
+		device->BindIndexBuffer(&mesh.generalBuffer, mesh.GetIndexFormat(), mesh.ib.offset, cmd);
+
+		Viewport vp;
+		vp.width = (float)paint.out_texture.desc.width;
+		vp.height = (float)paint.out_texture.desc.height;
+		device->BindViewports(1, &vp, cmd);
+
+		uint32_t indexOffset = ~0u;
+		uint32_t indexCount = 0;
+
+		uint32_t first_subset = 0;
+		uint32_t last_subset = 0;
+		mesh.GetLODSubsetRange(0, first_subset, last_subset);
+		for (uint32_t subsetIndex = first_subset; subsetIndex < last_subset; ++subsetIndex)
+		{
+			indexOffset = std::min(indexOffset, mesh.subsets[subsetIndex].indexOffset);
+			indexCount = std::max(indexCount, mesh.subsets[subsetIndex].indexCount);
+		}
+
+		RenderPassImage rp[] = {
+			RenderPassImage::RenderTarget(&paint.out_texture)
+		};
+		device->RenderPassBegin(rp, arraysize(rp), cmd);
+
+		device->DrawIndexed(indexCount, indexOffset, 0, cmd);
+
+		device->RenderPassEnd(cmd);
+
+		MIPGEN_OPTIONS mipopt;
+		mipopt.preserve_coverage = true;
+		GenerateMipChain(paint.out_texture, MIPGENFILTER_LINEAR, cmd, mipopt);
+	}
+
+	paintdecals.clear();
+
+	device->EventEnd(cmd);
+}
 
 void CreateVXGIResources(VXGIResources& res, XMUINT2 resolution)
 {
@@ -9368,26 +9480,14 @@ void CreateTiledLightResources(TiledLightResources& res, XMUINT2 resolution)
 {
 	res.tileCount = GetEntityCullingTileCount(resolution);
 
-	{
-		GPUBufferDesc bd;
-		bd.stride = sizeof(XMFLOAT4) * 4; // storing 4 planes for every tile
-		bd.size = bd.stride * res.tileCount.x * res.tileCount.y;
-		bd.bind_flags = BindFlag::SHADER_RESOURCE | BindFlag::UNORDERED_ACCESS;
-		bd.misc_flags = ResourceMiscFlag::BUFFER_STRUCTURED;
-		bd.usage = Usage::DEFAULT;
-		device->CreateBuffer(&bd, nullptr, &res.tileFrustums);
-		device->SetName(&res.tileFrustums, "tileFrustums");
-	}
-	{
-		GPUBufferDesc bd;
-		bd.stride = sizeof(uint);
-		bd.size = res.tileCount.x * res.tileCount.y * bd.stride * SHADER_ENTITY_TILE_BUCKET_COUNT * 2; // *2: opaque and transparent arrays
-		bd.usage = Usage::DEFAULT;
-		bd.bind_flags = BindFlag::UNORDERED_ACCESS | BindFlag::SHADER_RESOURCE;
-		bd.misc_flags = ResourceMiscFlag::BUFFER_STRUCTURED;
-		device->CreateBuffer(&bd, nullptr, &res.entityTiles);
-		device->SetName(&res.entityTiles, "entityTiles");
-	}
+	GPUBufferDesc bd;
+	bd.stride = sizeof(uint);
+	bd.size = res.tileCount.x * res.tileCount.y * bd.stride * SHADER_ENTITY_TILE_BUCKET_COUNT * 2; // *2: opaque and transparent arrays
+	bd.usage = Usage::DEFAULT;
+	bd.bind_flags = BindFlag::UNORDERED_ACCESS | BindFlag::SHADER_RESOURCE;
+	bd.misc_flags = ResourceMiscFlag::BUFFER_STRUCTURED;
+	device->CreateBuffer(&bd, nullptr, &res.entityTiles);
+	device->SetName(&res.entityTiles, "entityTiles");
 }
 void ComputeTiledLightCulling(
 	const TiledLightResources& res,
@@ -9398,14 +9498,7 @@ void ComputeTiledLightCulling(
 {
 	auto range = wi::profiler::BeginRangeGPU("Entity Culling", cmd);
 
-	// Initial barriers to put all resources into UAV:
-	{
-		GPUBarrier barriers[] = {
-			GPUBarrier::Buffer(&res.tileFrustums, ResourceState::SHADER_RESOURCE, ResourceState::UNORDERED_ACCESS),
-			GPUBarrier::Buffer(&res.entityTiles, ResourceState::SHADER_RESOURCE, ResourceState::UNORDERED_ACCESS),
-		};
-		device->Barrier(barriers, arraysize(barriers), cmd);
-	}
+	device->Barrier(GPUBarrier::Buffer(&res.entityTiles, ResourceState::SHADER_RESOURCE, ResourceState::UNORDERED_ACCESS), cmd);
 
 	if (
 		vis.visibleLights.empty() &&
@@ -9414,15 +9507,8 @@ void ComputeTiledLightCulling(
 		)
 	{
 		device->EventBegin("Tiled Entity Clear Only", cmd);
-		device->ClearUAV(&res.tileFrustums, 0, cmd);
 		device->ClearUAV(&res.entityTiles, 0, cmd);
-		{
-			GPUBarrier barriers[] = {
-				GPUBarrier::Buffer(&res.tileFrustums, ResourceState::UNORDERED_ACCESS, ResourceState::SHADER_RESOURCE),
-				GPUBarrier::Buffer(&res.entityTiles, ResourceState::UNORDERED_ACCESS, ResourceState::SHADER_RESOURCE),
-			};
-			device->Barrier(barriers, arraysize(barriers), cmd);
-		}
+		device->Barrier(GPUBarrier::Buffer(&res.entityTiles, ResourceState::UNORDERED_ACCESS, ResourceState::SHADER_RESOURCE), cmd);
 		device->EventEnd(cmd);
 		wi::profiler::EndRange(range);
 		return;
@@ -9430,38 +9516,9 @@ void ComputeTiledLightCulling(
 
 	BindCommonResources(cmd);
 
-	// Frustum computation
-	{
-		device->EventBegin("Tile Frustums", cmd);
-		device->BindComputeShader(&shaders[CSTYPE_TILEFRUSTUMS], cmd);
-
-		const GPUResource* uavs[] = { 
-			&res.tileFrustums 
-		};
-		device->BindUAVs(uavs, 0, arraysize(uavs), cmd);
-
-		device->Dispatch(
-			(res.tileCount.x + TILED_CULLING_BLOCKSIZE - 1) / TILED_CULLING_BLOCKSIZE,
-			(res.tileCount.y + TILED_CULLING_BLOCKSIZE - 1) / TILED_CULLING_BLOCKSIZE,
-			1,
-			cmd
-		);
-
-		{
-			GPUBarrier barriers[] = {
-				GPUBarrier::Buffer(&res.tileFrustums, ResourceState::UNORDERED_ACCESS, ResourceState::SHADER_RESOURCE),
-			};
-			device->Barrier(barriers, arraysize(barriers), cmd);
-		}
-
-		device->EventEnd(cmd);
-	}
-
 	// Perform the culling
 	{
 		device->EventBegin("Entity Culling", cmd);
-
-		device->BindResource(&res.tileFrustums, 0, cmd);
 
 		if (GetDebugLightCulling() && debugUAV.IsValid())
 		{
@@ -9509,12 +9566,17 @@ void ResolveMSAADepthBuffer(const Texture& dst, const Texture& src, CommandList 
 	device->BindResource(&src, 0, cmd);
 	device->BindUAV(&dst, 0, cmd);
 
+	device->Barrier(GPUBarrier::Image(&dst, dst.desc.layout, ResourceState::UNORDERED_ACCESS), cmd);
+
+	device->ClearUAV(&dst, 0, cmd);
+	device->Barrier(GPUBarrier::Memory(&dst), cmd);
+
 	const TextureDesc& desc = src.GetDesc();
 
 	device->BindComputeShader(&shaders[CSTYPE_RESOLVEMSAADEPTHSTENCIL], cmd);
 	device->Dispatch((desc.width + 7) / 8, (desc.height + 7) / 8, 1, cmd);
 
-
+	device->Barrier(GPUBarrier::Image(&dst, ResourceState::UNORDERED_ACCESS, dst.desc.layout), cmd);
 
 	device->EventEnd(cmd);
 }
@@ -9923,6 +9985,9 @@ void BlockCompress(const Texture& texture_src, const Texture& texture_bc, Comman
 			bc_raw_desc.height = wi::math::GetNextPowerOfTwo(bc_raw_desc.height);
 			device->CreateTexture(&bc_raw_desc, nullptr, bc_raw);
 			device->SetName(bc_raw, "bc_raw");
+
+			device->ClearUAV(bc_raw, 0, cmd);
+			device->Barrier(GPUBarrier::Memory(bc_raw), cmd);
 
 			std::string info;
 			info += "BlockCompress created a new raw block texture to fit request: " + std::string(GetFormatString(texture_bc.desc.format)) + " (" + std::to_string(texture_bc.desc.width) + ", " + std::to_string(texture_bc.desc.height) + ")";
@@ -10384,6 +10449,12 @@ void BindCameraCB(
 	ShaderCamera& shadercam = cb.cameras[0];
 
 	shadercam.options = camera.shadercamera_options;
+	if (camera.IsOrtho())
+	{
+		shadercam.options |= SHADERCAMERA_OPTION_ORTHO;
+	}
+
+	XMMATRIX invVP = camera.GetInvViewProjection();
 
 	XMStoreFloat4x4(&shadercam.view_projection, camera.GetViewProjection());
 	XMStoreFloat4x4(&shadercam.view, camera.GetView());
@@ -10392,7 +10463,7 @@ void BindCameraCB(
 	shadercam.distance_from_origin = XMVectorGetX(XMVector3Length(XMLoadFloat3(&shadercam.position)));
 	XMStoreFloat4x4(&shadercam.inverse_view, camera.GetInvView());
 	XMStoreFloat4x4(&shadercam.inverse_projection, camera.GetInvProjection());
-	XMStoreFloat4x4(&shadercam.inverse_view_projection, camera.GetInvViewProjection());
+	XMStoreFloat4x4(&shadercam.inverse_view_projection, invVP);
 	shadercam.forward = camera.At;
 	shadercam.up = camera.Up;
 	shadercam.z_near = camera.zNearP;
@@ -10409,6 +10480,16 @@ void BindCameraCB(
 	{
 		shadercam.frustum.planes[i] = camera.frustum.planes[i];
 	}
+
+	XMStoreFloat4(&shadercam.frustum_corners.cornersNEAR[0], XMVector3TransformCoord(XMVectorSet(-1, 1, 1, 1), invVP));
+	XMStoreFloat4(&shadercam.frustum_corners.cornersNEAR[1], XMVector3TransformCoord(XMVectorSet(1, 1, 1, 1), invVP));
+	XMStoreFloat4(&shadercam.frustum_corners.cornersNEAR[2], XMVector3TransformCoord(XMVectorSet(-1, -1, 1, 1), invVP));
+	XMStoreFloat4(&shadercam.frustum_corners.cornersNEAR[3], XMVector3TransformCoord(XMVectorSet(1, -1, 1, 1), invVP));
+
+	XMStoreFloat4(&shadercam.frustum_corners.cornersFAR[0], XMVector3TransformCoord(XMVectorSet(-1, 1, 0, 1), invVP));
+	XMStoreFloat4(&shadercam.frustum_corners.cornersFAR[1], XMVector3TransformCoord(XMVectorSet(1, 1, 0, 1), invVP));
+	XMStoreFloat4(&shadercam.frustum_corners.cornersFAR[2], XMVector3TransformCoord(XMVectorSet(-1, -1, 0, 1), invVP));
+	XMStoreFloat4(&shadercam.frustum_corners.cornersFAR[3], XMVector3TransformCoord(XMVectorSet(1, -1, 0, 1), invVP));
 
 	shadercam.temporalaa_jitter = camera.jitter;
 	shadercam.temporalaa_jitter_prev = camera_previous.jitter;
@@ -15520,6 +15601,7 @@ void CreateMotionBlurResources(MotionBlurResources& res, XMUINT2 resolution)
 	device->CreateBuffer(&bufferdesc, nullptr, &res.buffer_tiles_expensive);
 }
 void Postprocess_MotionBlur(
+	float dt,
 	const MotionBlurResources& res,
 	const Texture& input,
 	const Texture& output,
@@ -15580,7 +15662,7 @@ void Postprocess_MotionBlur(
 	postprocess.resolution.y = desc.height;
 	postprocess.resolution_rcp.x = 1.0f / postprocess.resolution.x;
 	postprocess.resolution_rcp.y = 1.0f / postprocess.resolution.y;
-	motionblur_strength = strength / 60.0f; // align to shutter speed
+	motionblur_strength = dt > 0 ? (strength / 60.0f / dt) : 0; // align to shutter speed
 
 	// Compute tile max velocities (horizontal):
 	{
@@ -17945,6 +18027,10 @@ void PaintIntoTexture(const PaintTextureParams& params)
 {
 	painttextures.push_back(params);
 }
+void PaintDecalIntoObjectSpaceTexture(const PaintDecalParams& params)
+{
+	paintdecals.push_back(params);
+}
 void DrawVoxelGrid(const wi::VoxelGrid* voxelgrid)
 {
 	renderableVoxelgrids.push_back(voxelgrid);
@@ -18171,7 +18257,7 @@ wi::Resource CreatePaintableTexture(uint32_t width, uint32_t height, uint32_t mi
 		desc.mip_levels = GetMipCount(desc.width, desc.height);
 	}
 	desc.format = Format::R8G8B8A8_UNORM;
-	desc.bind_flags = BindFlag::SHADER_RESOURCE | BindFlag::UNORDERED_ACCESS;
+	desc.bind_flags = BindFlag::SHADER_RESOURCE | BindFlag::UNORDERED_ACCESS | BindFlag::RENDER_TARGET;
 	wi::vector<wi::Color> data(desc.width * desc.height);
 	std::fill(data.begin(), data.end(), initialColor);
 	SubresourceData initdata[32] = {};

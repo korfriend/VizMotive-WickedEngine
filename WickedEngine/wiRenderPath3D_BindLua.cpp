@@ -26,6 +26,7 @@ namespace wi::lua
 		lunamethod(RenderPath3D_BindLua, SetResolutionScale),
 		lunamethod(RenderPath3D_BindLua, SetAO),
 		lunamethod(RenderPath3D_BindLua, SetAOPower),
+		lunamethod(RenderPath3D_BindLua, SetAORange),
 		lunamethod(RenderPath3D_BindLua, SetSSREnabled),
 		lunamethod(RenderPath3D_BindLua, SetSSGIEnabled),
 		lunamethod(RenderPath3D_BindLua, SetRaytracedDiffuseEnabled),
@@ -60,6 +61,7 @@ namespace wi::lua
 		lunamethod(RenderPath3D_BindLua, SetFSR2Sharpness),
 		lunamethod(RenderPath3D_BindLua, SetFSR2Preset),
 		lunamethod(RenderPath3D_BindLua, SetTonemap),
+		lunamethod(RenderPath3D_BindLua, SetVisibilityComputeShadingEnabled),
 
 		lunamethod(RenderPath3D_BindLua, SetCropLeft),
 		lunamethod(RenderPath3D_BindLua, SetCropTop),
@@ -125,6 +127,22 @@ namespace wi::lua
 		}
 		else
 			wi::lua::SError(L, "SetAOPower(float value) not enough arguments!");
+		return 0;
+	}
+	int RenderPath3D_BindLua::SetAORange(lua_State* L)
+	{
+		if (component == nullptr)
+		{
+			wi::lua::SError(L, "SetAORange(float value) component is null!");
+			return 0;
+		}
+		if (wi::lua::SGetArgCount(L) > 0)
+		{
+			float value = wi::lua::SGetFloat(L, 1);
+			((RenderPath3D*)component)->setAORange(value);
+		}
+		else
+			wi::lua::SError(L, "SetAORange(float value) not enough arguments!");
 		return 0;
 	}
 	int RenderPath3D_BindLua::SetSSREnabled(lua_State* L)
@@ -623,6 +641,19 @@ namespace wi::lua
 	int RenderPath3D_BindLua::SetCropBottom(lua_State* L)
 	{
 		((RenderPath3D*)component)->crop_bottom = wi::lua::SGetFloat(L, 1);
+		return 0;
+	}
+	int RenderPath3D_BindLua::SetVisibilityComputeShadingEnabled(lua_State* L)
+	{
+		if (component == nullptr)
+		{
+			wi::lua::SError(L, "SetVisibilityComputeShadingEnabled(bool value) component is null!");
+			return 0;
+		}
+		if (wi::lua::SGetArgCount(L) > 0)
+			((RenderPath3D*)component)->setVisibilityComputeShadingEnabled(wi::lua::SGetBool(L, 1));
+		else
+			wi::lua::SError(L, "SetVisibilityComputeShadingEnabled(bool value) not enough arguments!");
 		return 0;
 	}
 

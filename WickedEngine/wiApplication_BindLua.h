@@ -43,6 +43,7 @@ namespace wi::lua
 		int GetActivePath(lua_State* L);
 		int SetActivePath(lua_State* L);
 		int SetFrameSkip(lua_State* L);
+		int SetFullScreen(lua_State* L);
 		int SetTargetFrameRate(lua_State* L);
 		int SetFrameRateLock(lua_State* L);
 		int SetInfoDisplay(lua_State* L);
@@ -54,6 +55,10 @@ namespace wi::lua
 		int SetPipelineCountDisplay(lua_State* L);
 		int SetHeapAllocationCountDisplay(lua_State* L);
 		int SetVRAMUsageDisplay(lua_State* L);
+		int SetColorGradingHelper(lua_State* L);
+
+		int IsHDRSupported(lua_State* L);
+		int SetHDR(lua_State* L);
 
 		int GetCanvas(lua_State* L);
 		int SetCanvas(lua_State* L);

@@ -53,7 +53,6 @@ wi::vector<ShaderEntry> shaders = {
 	{"upsample_bilateral_unorm1CS", wi::graphics::ShaderStage::CS},
 	{"upsample_bilateral_unorm4CS", wi::graphics::ShaderStage::CS},
 	{"temporalaaCS", wi::graphics::ShaderStage::CS},
-	{"tileFrustumsCS", wi::graphics::ShaderStage::CS},
 	{"tonemapCS", wi::graphics::ShaderStage::CS},
 	{"underwaterCS", wi::graphics::ShaderStage::CS},
 	{"fsr_upscalingCS", wi::graphics::ShaderStage::CS},
@@ -256,6 +255,7 @@ wi::vector<ShaderEntry> shaders = {
 	{"shadowPS_transparent", wi::graphics::ShaderStage::PS },
 	{"shadowPS_water", wi::graphics::ShaderStage::PS },
 	{"shadowPS_alphatest", wi::graphics::ShaderStage::PS },
+	{"paintdecalPS", wi::graphics::ShaderStage::PS },
 	{"renderlightmapPS", wi::graphics::ShaderStage::PS },
 	{"renderlightmapPS_rtapi", wi::graphics::ShaderStage::PS, wi::graphics::ShaderModel::SM_6_5 },
 	{"raytrace_debugbvhPS", wi::graphics::ShaderStage::PS },
@@ -307,6 +307,7 @@ wi::vector<ShaderEntry> shaders = {
 	{"sphereVS", wi::graphics::ShaderStage::VS },
 	{"skyVS", wi::graphics::ShaderStage::VS },
 	{"postprocessVS", wi::graphics::ShaderStage::VS },
+	{"paintdecalVS", wi::graphics::ShaderStage::VS },
 	{"renderlightmapVS", wi::graphics::ShaderStage::VS },
 	{"raytrace_screenVS", wi::graphics::ShaderStage::VS },
 	{"oceanSurfaceVS", wi::graphics::ShaderStage::VS },
@@ -318,15 +319,8 @@ wi::vector<ShaderEntry> shaders = {
 	{"forceFieldPlaneVisualizerVS", wi::graphics::ShaderStage::VS },
 	{"envMap_skyVS", wi::graphics::ShaderStage::VS },
 	{"envMapVS", wi::graphics::ShaderStage::VS },
-	{"envMap_skyVS_emulation", wi::graphics::ShaderStage::VS },
-	{"envMapVS_emulation", wi::graphics::ShaderStage::VS },
 	{"occludeeVS", wi::graphics::ShaderStage::VS },
 	{"ddgi_debugVS", wi::graphics::ShaderStage::VS },
-	{"envMap_skyGS_emulation", wi::graphics::ShaderStage::GS },
-	{"envMapGS_emulation", wi::graphics::ShaderStage::GS },
-	{"shadowGS_emulation", wi::graphics::ShaderStage::GS },
-	{"shadowGS_alphatest_emulation", wi::graphics::ShaderStage::GS },
-	{"shadowGS_transparent_emulation", wi::graphics::ShaderStage::GS },
 	{"objectGS_primitiveID_emulation", wi::graphics::ShaderStage::GS },
 	{"objectGS_primitiveID_emulation_alphatest", wi::graphics::ShaderStage::GS },
 	{"voxelGS", wi::graphics::ShaderStage::GS },
@@ -341,10 +335,7 @@ wi::vector<ShaderEntry> shaders = {
 	{"objectVS_simple_tessellation", wi::graphics::ShaderStage::VS },
 	{"shadowVS", wi::graphics::ShaderStage::VS },
 	{"shadowVS_alphatest", wi::graphics::ShaderStage::VS },
-	{"shadowVS_emulation", wi::graphics::ShaderStage::VS },
-	{"shadowVS_alphatest_emulation", wi::graphics::ShaderStage::VS },
 	{"shadowVS_transparent", wi::graphics::ShaderStage::VS },
-	{"shadowVS_transparent_emulation", wi::graphics::ShaderStage::VS },
 	{"screenVS", wi::graphics::ShaderStage::VS },
 	{"trailVS", wi::graphics::ShaderStage::VS },
 
@@ -575,12 +566,12 @@ int main(int argc, char* argv[])
 						// if shader format cannot support shader model, then we cancel the task without returning error
 						return;
 					}
-					if (target.format == ShaderFormat::PS5 && (input.minshadermodel >= ShaderModel::SM_6_5 || input.stage == ShaderStage::MS))
+					if (target.format == ShaderFormat::PS5 && (input.minshadermodel >= ShaderModel::SM_6_5 || input.stage == ShaderStage::MS || input.stage == ShaderStage::AS))
 					{
 						// TODO PS5 raytracing, mesh shader
 						return;
 					}
-					if (target.format == ShaderFormat::HLSL6_XS && input.stage == ShaderStage::MS)
+					if (target.format == ShaderFormat::HLSL6_XS && (input.stage == ShaderStage::MS || input.stage == ShaderStage::AS))
 					{
 						// TODO Xbox mesh shader
 						return;

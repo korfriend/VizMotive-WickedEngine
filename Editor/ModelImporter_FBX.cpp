@@ -207,7 +207,7 @@ void ImportModel_FBX(const std::string& filename, wi::scene::Scene& scene)
 		materialcomponent.CreateRenderData();
 	}
 
-	if (fbxscene->materials.count == 0)
+	if (fbxscene->materials.count == 0 && fbxscene->meshes.count > 0)
 	{
 		scene.Entity_CreateMaterial("fbximport_defaultmaterial");
 	}
@@ -324,8 +324,8 @@ void ImportModel_FBX(const std::string& filename, wi::scene::Scene& scene)
 							}
 							else
 							{
-								(&boneindices2.back().x)[i] = skin_weight.cluster_index;
-								(&boneweights2.back().x)[i] = skin_weight.weight;
+								(&boneindices2.back().x)[i - 4] = skin_weight.cluster_index;
+								(&boneweights2.back().x)[i - 4] = skin_weight.weight;
 							}
 						}
 						// Note: normalization of bone weights will be done in MeshComponent::CreateRenderData()
@@ -471,6 +471,39 @@ void ImportModel_FBX(const std::string& filename, wi::scene::Scene& scene)
 				morphs[i].vertex_positions.resize(num_vertices);
 				meshcomponent.morph_targets[i].vertex_positions.insert(meshcomponent.morph_targets[i].vertex_positions.end(), morphs[i].vertex_positions.begin(), morphs[i].vertex_positions.end());
 			}
+
+			if (!meshcomponent.vertex_normals.empty())
+			{
+				meshcomponent.vertex_normals.resize(meshcomponent.vertex_positions.size());
+			}
+			if (!meshcomponent.vertex_uvset_0.empty())
+			{
+				meshcomponent.vertex_uvset_0.resize(meshcomponent.vertex_positions.size());
+			}
+			if (!meshcomponent.vertex_uvset_1.empty())
+			{
+				meshcomponent.vertex_uvset_1.resize(meshcomponent.vertex_positions.size());
+			}
+			if (!meshcomponent.vertex_colors.empty())
+			{
+				meshcomponent.vertex_colors.resize(meshcomponent.vertex_positions.size());
+			}
+			if (!meshcomponent.vertex_boneindices.empty())
+			{
+				meshcomponent.vertex_boneindices.resize(meshcomponent.vertex_positions.size());
+			}
+			if (!meshcomponent.vertex_boneweights.empty())
+			{
+				meshcomponent.vertex_boneweights.resize(meshcomponent.vertex_positions.size());
+			}
+			if (!meshcomponent.vertex_boneindices2.empty())
+			{
+				meshcomponent.vertex_boneindices2.resize(meshcomponent.vertex_positions.size());
+			}
+			if (!meshcomponent.vertex_boneweights2.empty())
+			{
+				meshcomponent.vertex_boneweights2.resize(meshcomponent.vertex_positions.size());
+			}
 		}
 
 		meshcomponent.CreateRenderData();
@@ -582,6 +615,42 @@ void ImportModel_FBX(const std::string& filename, wi::scene::Scene& scene)
 			inverseBindMatrix._43 = cluster->geometry_to_bone.m23;
 
 			armature->inverseBindMatrices.push_back(inverseBindMatrix);
+
+			Import_Mixamo_Bone(scene, rootEntity, boneEntity);
+		}
+	}
+
+	if (scene.armatures.GetCount() == 0 && fbxscene->bones.count > 0)
+	{
+		// Hack: if scene has no skins but it has bones, then a global armature will be created that includes them
+		//	Unfortunately it seems that there is no way to properly find an armature in ufbx without that doesn't skin a mesh
+		//	But I want to have the ability to import armatures without mesh for example to use in an animation library
+		ArmatureComponent& armatureWithoutMesh = scene.armatures.Create(rootEntity);
+		for (const ufbx_bone* bone : fbxscene->bones)
+		{
+			const ufbx_node* node = fbxscene->nodes[bone->element_id];
+			Entity boneEntity = node_lookup[node];
+
+			armatureWithoutMesh.boneCollection.push_back(boneEntity);
+
+			XMFLOAT4X4 inverseBindMatrix = wi::math::IDENTITY_MATRIX;
+			inverseBindMatrix._11 = node->geometry_to_world.m00;
+			inverseBindMatrix._12 = node->geometry_to_world.m10;
+			inverseBindMatrix._13 = node->geometry_to_world.m20;
+
+			inverseBindMatrix._21 = node->geometry_to_world.m01;
+			inverseBindMatrix._22 = node->geometry_to_world.m11;
+			inverseBindMatrix._23 = node->geometry_to_world.m21;
+
+			inverseBindMatrix._31 = node->geometry_to_world.m02;
+			inverseBindMatrix._32 = node->geometry_to_world.m12;
+			inverseBindMatrix._33 = node->geometry_to_world.m22;
+
+			inverseBindMatrix._41 = node->geometry_to_world.m03;
+			inverseBindMatrix._42 = node->geometry_to_world.m13;
+			inverseBindMatrix._43 = node->geometry_to_world.m23;
+
+			armatureWithoutMesh.inverseBindMatrices.push_back(inverseBindMatrix);
 
 			Import_Mixamo_Bone(scene, rootEntity, boneEntity);
 		}

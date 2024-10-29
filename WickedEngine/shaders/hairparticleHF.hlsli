@@ -18,14 +18,22 @@ ShaderMaterial HairGetMaterial()
 
 struct VertexToPixel
 {
-	float4 pos : SV_POSITION;
+	precise float4 pos : SV_POSITION;
 	float clip : SV_ClipDistance0;
 	float2 tex : TEXCOORD;
 	nointerpolation float fade : DITHERFADE;
 	uint primitiveID : PRIMITIVEID;
-	float3 pos3D : POSITION3D;
-	half3 nor : NORMAL;
-	half wet : WET;
+	half4 nor_wet : NORMAL_WET;
+	
+	inline float3 GetPos3D()
+	{
+		return GetCamera().screen_to_world(pos);
+	}
+
+	inline float3 GetViewVector()
+	{
+		return GetCamera().screen_to_nearplane(pos) - GetPos3D(); // ortho support, cannot use cameraPos!
+	}
 };
 
 #endif // WI_HAIRPARTICLE_HF

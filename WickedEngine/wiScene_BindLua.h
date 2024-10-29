@@ -328,6 +328,8 @@ namespace wi::lua::scene
 		int SetNearPlane(lua_State* L);
 		int GetFarPlane(lua_State* L);
 		int SetFarPlane(lua_State* L);
+		int GetOrthoVerticalSize(lua_State* L);
+		int SetOrthoVerticalSize(lua_State* L);
 		int GetFocalLength(lua_State* L);
 		int SetFocalLength(lua_State* L);
 		int GetApertureSize(lua_State* L);
@@ -347,6 +349,8 @@ namespace wi::lua::scene
 		int SetPosition(lua_State* L);
 		int SetLookDirection(lua_State* L);
 		int SetUpDirection(lua_State* L);
+		int SetOrtho(lua_State* L);
+		int IsOrtho(lua_State* L);
 	};
 
 	class AnimationComponent_BindLua
@@ -420,6 +424,7 @@ namespace wi::lua::scene
 			Transmission = FloatProperty(&component->transmission);
 			Cloak = FloatProperty(&component->cloak);
 			ChromaticAberration = FloatProperty(&component->chromatic_aberration);
+			Saturation = FloatProperty(&component->saturation);
 			AlphaRef = FloatProperty(&component->alphaRef);
 			SheenColor = VectorProperty(&component->sheenColor);
 			SheenRoughness = FloatProperty(&component->sheenRoughness);
@@ -457,6 +462,7 @@ namespace wi::lua::scene
 		FloatProperty Transmission;
 		FloatProperty Cloak;
 		FloatProperty ChromaticAberration;
+		FloatProperty Saturation;
 		FloatProperty AlphaRef;
 		VectorProperty SheenColor;
 		FloatProperty SheenRoughness;
@@ -484,6 +490,7 @@ namespace wi::lua::scene
 		PropertyFunction(Transmission)
 		PropertyFunction(Cloak)
 		PropertyFunction(ChromaticAberration)
+		PropertyFunction(Saturation)
 		PropertyFunction(AlphaRef)
 		PropertyFunction(SheenColor)
 		PropertyFunction(SheenRoughness)
@@ -506,6 +513,8 @@ namespace wi::lua::scene
 		int GetStencilRef(lua_State* L);
 		int SetCastShadow(lua_State* L);
 		int IsCastingShadow(lua_State* L);
+		int SetCoplanarBlending(lua_State* L);
+		int IsCoplanarBlending(lua_State* L);
 
 		int SetTexture(lua_State* L);
 		int SetTextureUVSet(lua_State* L);
@@ -692,10 +701,10 @@ namespace wi::lua::scene
 			Randomness = FloatProperty(&component->randomness);
 			ViewDistance = FloatProperty(&component->viewDistance);
 		
-			SpriteSheet_Frames_X = LongLongProperty(reinterpret_cast<long long*>(&component->framesX));
-			SpriteSheet_Frames_Y = LongLongProperty(reinterpret_cast<long long*>(&component->framesY));
-			SpriteSheet_Frame_Count = LongLongProperty(reinterpret_cast<long long*>(&component->frameCount));
-			SpriteSheet_Frame_Start = LongLongProperty(reinterpret_cast<long long*>(&component->frameStart));
+			//SpriteSheet_Frames_X = LongLongProperty(reinterpret_cast<long long*>(&component->framesX));
+			//SpriteSheet_Frames_Y = LongLongProperty(reinterpret_cast<long long*>(&component->framesY));
+			//SpriteSheet_Frame_Count = LongLongProperty(reinterpret_cast<long long*>(&component->frameCount));
+			//SpriteSheet_Frame_Start = LongLongProperty(reinterpret_cast<long long*>(&component->frameStart));
 		}
 
 		HairParticleSystem_BindLua(HairParticleSystem* component) :component(component)
@@ -804,11 +813,15 @@ namespace wi::lua::scene
 		int IsNotVisibleInMainCamera(lua_State* L);
 		int IsNotVisibleInReflections(lua_State* L);
 		int IsWetmapEnabled(lua_State* L);
+		int IsRenderable(lua_State* L);
 
 		int SetMeshID(lua_State* L);
 		int SetCascadeMask(lua_State* L);
 		int SetRendertypeMask(lua_State* L);
 		int SetColor(lua_State* L);
+		int SetRimHighlightColor(lua_State* L);
+		int SetRimHighlightIntensity(lua_State* L);
+		int SetRimHighlightFalloff(lua_State* L);
 		int SetAlphaRef(lua_State* L);
 		int SetEmissiveColor(lua_State* L);
 		int SetUserStencilRef(lua_State* L);
@@ -818,6 +831,7 @@ namespace wi::lua::scene
 		int SetNotVisibleInMainCamera(lua_State* L);
 		int SetNotVisibleInReflections(lua_State* L);
 		int SetWetmapEnabled(lua_State* L);
+		int SetRenderable(lua_State* L);
 	};
 
 	class InverseKinematicsComponent_BindLua
@@ -1784,6 +1798,8 @@ namespace wi::lua::scene
 		int SetLookAt(lua_State* L);
 		int SetRagdollPhysicsEnabled(lua_State* L);
 		int IsRagdollPhysicsEnabled(lua_State* L);
+		int SetIntersectionDisabled(lua_State* L);
+		int IsIntersectionDisabled(lua_State* L);
 		int SetRagdollFatness(lua_State* L);
 		int SetRagdollHeadSize(lua_State* L);
 		int GetRagdollFatness(lua_State* L);

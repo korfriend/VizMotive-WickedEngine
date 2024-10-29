@@ -33,12 +33,13 @@ namespace wi::scene
 
 		wi::jobsystem::context ctx;
 
+		UpdateHumanoidFacings();
+
 		// Script system runs first, because it could create new entities and components
 		//	So GPU persistent resources need to be created accordingly for them too:
 		RunScriptUpdateSystem(ctx);
 
 		ScanAnimationDependencies();
-		ScanSpringDependencies();
 
 		// Terrains updates kick off:
 		if (dt > 0)
@@ -52,6 +53,8 @@ namespace wi::scene
 				terrain.Generation_Update(camera);
 			}
 		}
+
+		ScanSpringDependencies(); // after terrain, because this saves transform ptrs and terrain can add transforms
 
 		GraphicsDevice* device = wi::graphics::GetDevice();
 
@@ -898,6 +901,9 @@ namespace wi::scene
 			shaderscene.geometrybuffer = device->GetDescriptorIndex(&geometryBuffer, SubresourceType::SRV);
 			shaderscene.materialbuffer = device->GetDescriptorIndex(&materialBuffer, SubresourceType::SRV);
 		}
+		shaderscene.instanceCount = (uint)instanceArraySize;
+		shaderscene.geometryCount = (uint)geometryArraySize;
+		shaderscene.materialCount = (uint)materialArraySize;
 		shaderscene.meshletbuffer = device->GetDescriptorIndex(&meshletBuffer, SubresourceType::SRV);
 		shaderscene.texturestreamingbuffer = device->GetDescriptorIndex(&textureStreamingFeedbackBuffer, SubresourceType::UAV);
 		if (weather.skyMap.IsValid())
@@ -3168,15 +3174,24 @@ namespace wi::scene
 	}
 	void Scene::RunProceduralAnimationUpdateSystem(wi::jobsystem::context& ctx)
 	{
-		if (dt <= 0)
-			return;
-
 		auto range = wi::profiler::BeginRangeCPU("Procedural Animations");
 
 		// Character IK foot placement, should be after animations and hierarchy update:
 		for (size_t i = 0; i < characters.GetCount(); ++i)
 		{
 			CharacterComponent& character = characters[i];
+			if (!character.IsActive())
+			{
+				if (character.left_foot != INVALID_ENTITY && inverse_kinematics.Contains(character.left_foot))
+				{
+					inverse_kinematics.GetComponent(character.left_foot)->SetDisabled();
+				}
+				if (character.right_foot != INVALID_ENTITY && inverse_kinematics.Contains(character.right_foot))
+				{
+					inverse_kinematics.GetComponent(character.right_foot)->SetDisabled();
+				}
+				continue;
+			}
 			if (character.left_foot != INVALID_ENTITY && character.right_foot != INVALID_ENTITY)
 				continue;
 			HumanoidComponent* humanoid = humanoids.GetComponent(character.humanoidEntity);
@@ -3199,6 +3214,8 @@ namespace wi::scene
 		}
 		wi::jobsystem::Dispatch(ctx, (uint32_t)characters.GetCount(), 1, [&](wi::jobsystem::JobArgs args) {
 			CharacterComponent& character = characters[args.jobIndex];
+			if (!character.IsActive())
+				return;
 			if (character.left_foot == INVALID_ENTITY || character.right_foot == INVALID_ENTITY)
 				return;
 			if (character.humanoidEntity == INVALID_ENTITY)
@@ -3233,8 +3250,9 @@ namespace wi::scene
 				// Compute root offset :
 				// I determine which foot wants to step on lower ground, that will offset whole root downwards
 				// 	The other foot will be the upper foot which will be later attached an Inverse Kinematics(IK) effector
-				Ray left_ray(XMFLOAT3(left_pos.x, left_pos.y + 0.5f, left_pos.z), XMFLOAT3(0, -1, 0), 0, 1);
-				Ray right_ray(XMFLOAT3(right_pos.x, right_pos.y + 0.5f, right_pos.z), XMFLOAT3(0, -1, 0), 0, 1);
+				Capsule character_capsule = character.GetCapsule();
+				Ray left_ray(XMFLOAT3(left_pos.x, character_capsule.base.y + 0.5f, left_pos.z), XMFLOAT3(0, -1, 0), 0, 1);
+				Ray right_ray(XMFLOAT3(right_pos.x, character_capsule.base.y + 0.5f, right_pos.z), XMFLOAT3(0, -1, 0), 0, 1);
 				RayIntersectionResult left_result = Intersects(left_ray, FILTER_NAVIGATION_MESH | FILTER_COLLIDER, ~layer);
 				RayIntersectionResult right_result = Intersects(right_ray, FILTER_NAVIGATION_MESH | FILTER_COLLIDER, ~layer);
 				float left_diff = 0;
@@ -3317,21 +3335,17 @@ namespace wi::scene
 			transforms_temp = transforms.GetComponentArray(); // make copy
 		}
 
-		bool recompute_hierarchy = false;
-		for (size_t i = 0; i < inverse_kinematics.GetCount(); ++i)
-		{
-			const InverseKinematicsComponent& ik = inverse_kinematics[i];
+		std::atomic_bool recompute_hierarchy{ false };
+
+		wi::jobsystem::Dispatch(ctx,(uint32_t)inverse_kinematics.GetCount(),1,[this, &recompute_hierarchy](wi::jobsystem::JobArgs args){
+			const InverseKinematicsComponent& ik = inverse_kinematics[args.jobIndex];
 			if (ik.IsDisabled())
-			{
-				continue;
-			}
-			Entity entity = inverse_kinematics.GetEntity(i);
+				return;
+			Entity entity = inverse_kinematics.GetEntity(args.jobIndex);
 			size_t transform_index = transforms.GetIndex(entity);
 			const HierarchyComponent* hier = hierarchy.GetComponent(entity);
 			if (transform_index == ~0ull || hier == nullptr)
-			{
-				continue;
-			}
+				return;
 			TransformComponent& transform = transforms_temp[transform_index];
 
 			XMVECTOR target_pos;
@@ -3343,24 +3357,32 @@ namespace wi::scene
 			{
 				size_t target_index = transforms.GetIndex(ik.target);
 				if (target_index == ~0ull)
-				{
-					continue;
-				}
+					return;
 				TransformComponent& target = transforms_temp[target_index];
 				target_pos = target.GetPositionV();
 			}
 
+			struct ChainLink
+			{
+				TransformComponent* transform = nullptr;
+				bool constrain = false;
+				XMFLOAT3 constraint_min = XMFLOAT3(0, 0, 0);
+				XMFLOAT3 constraint_max = XMFLOAT3(0, 0, 0);
+			};
+			ChainLink stack[32] = {};
+
 			for (uint32_t iteration = 0; iteration < ik.iteration_count; ++iteration)
 			{
-				TransformComponent* stack[32] = {};
 				Entity parent_entity = hier->parentID;
 				TransformComponent* child_transform = &transform;
+
 				for (uint32_t chain = 0; chain < std::min(ik.chain_length, (uint32_t)arraysize(stack)); ++chain)
 				{
-					recompute_hierarchy = true; // any IK will trigger a full transform hierarchy recompute step at the end(**)
+					recompute_hierarchy.store(true); // any IK will trigger a full transform hierarchy recompute step at the end(**)
 
 					// stack stores all traversed chain links so far:
-					stack[chain] = child_transform;
+					ChainLink& link = stack[chain];
+					link.transform = child_transform;
 
 					// Compute required parent rotation that moves ik transform closer to target transform:
 					size_t parent_index = transforms.GetIndex(parent_entity);
@@ -3372,41 +3394,46 @@ namespace wi::scene
 					const XMVECTOR dir_parent_to_target = XMVector3Normalize(target_pos - parent_pos);
 
 					// Check if this transform is part of a humanoid and need some constraining:
-					bool constrain = false;
-					XMFLOAT3 constraint_min = XMFLOAT3(0, 0, 0);
-					XMFLOAT3 constraint_max = XMFLOAT3(0, 0, 0);
-					for (size_t humanoid_idx = 0; (humanoid_idx < humanoids.GetCount()) && !constrain; ++humanoid_idx)
+					if (iteration == 0)
 					{
-						const HumanoidComponent& humanoid = humanoids[humanoid_idx];
-						int bone_type_idx = 0;
-						for (auto& bone : humanoid.bones)
+						for (size_t humanoid_idx = 0; (humanoid_idx < humanoids.GetCount()) && !link.constrain; ++humanoid_idx)
 						{
-							if (bone == parent_entity)
+							const HumanoidComponent& humanoid = humanoids[humanoid_idx];
+							int bone_type_idx = 0;
+							for (auto& bone : humanoid.bones)
 							{
-								switch ((HumanoidComponent::HumanoidBone)bone_type_idx)
+								if (bone == parent_entity)
 								{
-								default:
-									break;
-								case HumanoidComponent::HumanoidBone::LeftUpperLeg:
-								case HumanoidComponent::HumanoidBone::RightUpperLeg:
-									constrain = true;
-									constraint_min = XMFLOAT3(XM_PI * 0.6f, XM_PI * 0.1f, XM_PI * 0.1f);
-									constraint_max = XMFLOAT3(XM_PI * 0.1f, XM_PI * 0.1f, XM_PI * 0.1f);
-									break;
-								case HumanoidComponent::HumanoidBone::LeftLowerLeg:
-								case HumanoidComponent::HumanoidBone::RightLowerLeg:
-									constrain = true;
-									constraint_min = XMFLOAT3(0, 0, 0);
-									constraint_max = XMFLOAT3(XM_PI * 0.8f, 0, 0);
-									break;
+									switch ((HumanoidComponent::HumanoidBone)bone_type_idx)
+									{
+									default:
+										break;
+									case HumanoidComponent::HumanoidBone::LeftUpperLeg:
+									case HumanoidComponent::HumanoidBone::RightUpperLeg:
+										link.constrain = true;
+										link.constraint_min = XMFLOAT3(XM_PI * 0.6f, XM_PI * 0.1f, XM_PI * 0.1f);
+										link.constraint_max = XMFLOAT3(XM_PI * 0.1f, XM_PI * 0.1f, XM_PI * 0.1f);
+										break;
+									case HumanoidComponent::HumanoidBone::LeftLowerLeg:
+									case HumanoidComponent::HumanoidBone::RightLowerLeg:
+										link.constrain = true;
+										link.constraint_min = XMFLOAT3(0, 0, 0);
+										link.constraint_max = XMFLOAT3(XM_PI * 0.8f, 0, 0);
+										break;
+									}
 								}
+								bone_type_idx++;
 							}
-							bone_type_idx++;
+
+							if (link.constrain && humanoid.knee_bending < 0)
+							{
+								std::swap(link.constraint_min, link.constraint_max);
+							}
 						}
 					}
 
 					XMVECTOR Q;
-					if (constrain)
+					if (link.constrain)
 					{
 						// Apply constrained rotation:
 						Q = XMQuaternionIdentity();
@@ -3417,8 +3444,8 @@ namespace wi::scene
 							XMFLOAT3 axis_floats = XMFLOAT3(0, 0, 0);
 							((float*)&axis_floats)[axis_idx] = 1;
 							XMVECTOR axis = XMLoadFloat3(&axis_floats);
-							const float axis_min = ((float*)&constraint_min)[axis_idx] * iteration_count_rcp;
-							const float axis_max = ((float*)&constraint_max)[axis_idx] * iteration_count_rcp;
+							const float axis_min = ((float*)&link.constraint_min)[axis_idx] * iteration_count_rcp;
+							const float axis_max = ((float*)&link.constraint_max)[axis_idx] * iteration_count_rcp;
 							axis = XMVector3Normalize(XMVector3TransformNormal(axis, W));
 							const XMVECTOR projA = XMVector3Normalize(dir_parent_to_ik - axis * XMVector3Dot(axis, dir_parent_to_ik));
 							const XMVECTOR projB = XMVector3Normalize(dir_parent_to_target - axis * XMVector3Dot(axis, dir_parent_to_target));
@@ -3469,8 +3496,8 @@ namespace wi::scene
 					const TransformComponent* recurse_parent = &parent_transform;
 					for (int recurse_chain = (int)chain; recurse_chain >= 0; --recurse_chain)
 					{
-						stack[recurse_chain]->UpdateTransform_Parented(*recurse_parent);
-						recurse_parent = stack[recurse_chain];
+						stack[recurse_chain].transform->UpdateTransform_Parented(*recurse_parent);
+						recurse_parent = stack[recurse_chain].transform;
 					}
 
 					if (hier_parent == nullptr)
@@ -3486,26 +3513,25 @@ namespace wi::scene
 
 				}
 			}
-		}
+		});
 
-		for (size_t i = 0; i < humanoids.GetCount(); ++i)
-		{
-			Entity humanoidEntity = humanoids.GetEntity(i);
-			HumanoidComponent& humanoid = humanoids[i];
+		wi::jobsystem::Dispatch(ctx, (uint32_t)humanoids.GetCount(), 1, [this, &recompute_hierarchy](wi::jobsystem::JobArgs args) {
+			Entity humanoidEntity = humanoids.GetEntity(args.jobIndex);
+			HumanoidComponent& humanoid = humanoids[args.jobIndex];
 
 			// The head is always taken as reference frame transform even for the eyes:
 			//	Note: taking eye reference frame transform for the eyes was causing issue with VRM 1.0 because eyes were rotated differently than head
 			const Entity headBone = humanoid.bones[size_t(HumanoidComponent::HumanoidBone::Head)];
 			if (headBone == INVALID_ENTITY)
-				continue;
+				return;
 			const size_t headBoneIndex = transforms.GetIndex(headBone);
 			if (headBoneIndex == ~0ull)
-				continue;
+				return;
 			const TransformComponent& head_transform = transforms_temp[headBoneIndex];
 
 			const XMVECTOR UP = XMVectorSet(0, 1, 0, 0);
 			const XMVECTOR SIDE = XMVectorSet(1, 0, 0, 0);
-			const XMVECTOR FORWARD = XMVectorSet(0, 0, GetHumanoidDefaultFacing(humanoid, humanoidEntity), 0);
+			const XMVECTOR FORWARD = XMVectorSet(0, 0, humanoid.default_facing, 0);
 
 			struct LookAtSource
 			{
@@ -3531,7 +3557,7 @@ namespace wi::scene
 
 				if (boneIndex < transforms_temp.size())
 				{
-					recompute_hierarchy = true;
+					recompute_hierarchy.store(true);
 					TransformComponent& transform = transforms_temp[boneIndex];
 					XMVECTOR Q = XMQuaternionIdentity();
 
@@ -3604,9 +3630,11 @@ namespace wi::scene
 
 				}
 			}
-		}
+		});
 
-		if (recompute_hierarchy)
+		wi::jobsystem::Wait(ctx);
+
+		if (recompute_hierarchy.load())
 		{
 			wi::jobsystem::Dispatch(ctx, (uint32_t)hierarchy.GetCount(), small_subtask_groupsize, [&](wi::jobsystem::JobArgs args) {
 
@@ -4079,7 +4107,7 @@ namespace wi::scene
 	}
 	void Scene::RunImpostorUpdateSystem(wi::jobsystem::context& ctx)
 	{
-		if (dt == 0)
+		if (instanceArrayMapped == nullptr)
 			return;
 
 		if (impostors.GetCount() > 0 && !impostorArray.IsValid())
@@ -4475,6 +4503,7 @@ namespace wi::scene
 				inst.vb_wetmap = device->GetDescriptorIndex(&object.wetmap, SubresourceType::SRV);
 				inst.alphaTest_size = wi::math::pack_half2(XMFLOAT2(1 - object.alphaRef, size));
 				inst.SetUserStencilRef(object.userStencilRef);
+				inst.rimHighlight = wi::math::pack_half4(XMFLOAT4(object.rimHighlightColor.x * object.rimHighlightColor.w, object.rimHighlightColor.y * object.rimHighlightColor.w, object.rimHighlightColor.z * object.rimHighlightColor.w, object.rimHighlightFalloff));
 
 				std::memcpy(instanceArrayMapped + args.jobIndex, &inst, sizeof(inst)); // memcpy whole structure into mapped pointer to avoid read from uncached memory
 
@@ -4573,22 +4602,18 @@ namespace wi::scene
 				aabb.layerMask = layerMask;
 
 				// parallel bounds computation using shared memory:
-				AABB* shared_bounds = (AABB*)args.sharedmemory;
+				AABB& shared_bounds = parallel_bounds[args.groupID];
 				if (args.isFirstJobInGroup)
 				{
-					*shared_bounds = aabb_objects[args.jobIndex];
+					shared_bounds = aabb_objects[args.jobIndex];
 				}
 				else
 				{
-					*shared_bounds = AABB::Merge(*shared_bounds, aabb_objects[args.jobIndex]);
-				}
-				if (args.isLastJobInGroup)
-				{
-					parallel_bounds[args.groupID] = *shared_bounds;
+					shared_bounds = AABB::Merge(shared_bounds, aabb_objects[args.jobIndex]);
 				}
 			}
 
-		}, sizeof(AABB));
+		});
 	}
 	void Scene::RunCameraUpdateSystem(wi::jobsystem::context& ctx)
 	{
@@ -4869,9 +4894,16 @@ namespace wi::scene
 			inst.meshletOffset = meshletOffset;
 			inst.vb_wetmap = hair.wetmap.descriptor_srv;
 
-			XMFLOAT4X4 remapMatrix;
-			XMStoreFloat4x4(&remapMatrix, hair.aabb.getUnormRemapMatrix());
-			inst.transform.Create(remapMatrix);
+			XMFLOAT4X4 remapMatrix = wi::math::IDENTITY_MATRIX;
+			if (IsFormatUnorm(hair.position_format))
+			{
+				XMStoreFloat4x4(&remapMatrix, hair.aabb.getUnormRemapMatrix());
+				inst.transform.Create(remapMatrix);
+			}
+			else
+			{
+				inst.transform.init();
+			}
 			inst.transformPrev = inst.transform;
 
 			const size_t instanceIndex = objects.GetCount() + args.jobIndex;
@@ -5046,6 +5078,7 @@ namespace wi::scene
 		if (weather.rain_amount > 0)
 		{
 			GraphicsDevice* device = wi::graphics::GetDevice();
+			rainEmitter.opacityCurveControlPeakStart = 0;
 			rainEmitter._flags |= wi::EmittedParticleSystem::FLAG_USE_RAIN_BLOCKER;
 			rainEmitter.shaderType = wi::EmittedParticleSystem::PARTICLESHADERTYPE::SOFT_LIGHTING;
 			rainEmitter.SetCollidersDisabled(true);
@@ -5326,7 +5359,7 @@ namespace wi::scene
 	{
 		static const XMVECTOR up = XMVectorSet(0, 1, 0, 0);
 		static const XMMATRIX rotY = XMMatrixRotationY(XM_PI);
-		static const int max_substeps = 4;
+		static const int max_substeps = 6;
 
 		character_capsules.resize(characters.GetCount());
 		for (size_t i = 0; i < characters.GetCount(); ++i)
@@ -5360,10 +5393,12 @@ namespace wi::scene
 			const float slope_threshold = character.slope_threshold;
 			const float leaning_limit = character.leaning_limit;
 			const XMVECTOR gravity = XMVectorSet(0, character.gravity * timestep, 0, 0);
+			const float delta_to_timestep = timestep / dt;
 
-			if (character.humanoidEntity == INVALID_ENTITY)
+			if (!character.humanoid_checked)
 			{
 				// Search for humanoid entity that is either this entity or a child:
+				character.humanoid_checked = true;
 				if (humanoids.Contains(entity))
 				{
 					character.humanoidEntity = entity;
@@ -5382,14 +5417,13 @@ namespace wi::scene
 			}
 			const HumanoidComponent* humanoid = humanoids.GetComponent(character.humanoidEntity);
 			if (humanoid != nullptr && humanoid->IsRagdollPhysicsEnabled())
-				return;
+				return; // if ragdoll active, don't update character movement
 
 			XMVECTOR velocity = XMLoadFloat3(&character.velocity);
+			XMVECTOR inertia = XMLoadFloat3(&character.inertia);
 			XMVECTOR movement = XMLoadFloat3(&character.movement);
 			XMVECTOR position = XMLoadFloat3(&character.position);
 			XMVECTOR height = XMVectorSet(0, character.height, 0, 0);
-			XMVECTOR platform_velocity_accumulation = XMVectorZero();
-			float platform_velocity_count = 0;
 
 			XMMATRIX facing_rot = XMMatrixLookToLH(XMVectorZero(), XMLoadFloat3(&character.facing), up);
 			
@@ -5452,6 +5486,7 @@ namespace wi::scene
 				velocity += movement;
 
 				position += velocity * timestep;
+				position += inertia * delta_to_timestep; // inertia is from moving platforms which are delta velocity from previous frame
 
 				// Check ground:
 				Capsule capsule = Capsule(position, position + height, character.width);
@@ -5465,8 +5500,15 @@ namespace wi::scene
 						character.ground_intersect = true;
 						velocity *= ground_friction;
 						position += XMVectorSet(0, result.depth, 0, 0);
-						platform_velocity_accumulation += XMLoadFloat3(&result.velocity);
-						platform_velocity_count += 1.0f;
+
+						if (std::abs(result.velocity.x) > 0.001f || std::abs(result.velocity.y) > 0.001f || std::abs(result.velocity.z) > 0.001f)
+						{
+							inertia = XMLoadFloat3(&result.velocity);
+						}
+						else
+						{
+							inertia = XMVectorZero();
+						}
 					}
 				}
 
@@ -5490,6 +5532,7 @@ namespace wi::scene
 						XMVECTOR desiredMotion = velocityNormalized - undesiredMotion;
 						velocity = desiredMotion * velocityLen;
 						position += collisionNormal * result.depth;
+						inertia = XMVectorZero();
 					}
 				}
 
@@ -5517,30 +5560,30 @@ namespace wi::scene
 							XMVECTOR desiredMotion = velocityNormalized - undesiredMotion;
 							velocity = desiredMotion * velocityLen;
 							position += collisionNormal * penetration_depth;
+							inertia = XMVectorZero();
 							break;
 						}
 					}
 				}
 
-				// Some other things also updated at fixed rate:
-				character.facing = wi::math::Lerp(character.facing, character.facing_next, 0.05f); // smooth turning
-				character.facing.y = 0;
-				XMVECTOR facing_next = XMVector3Normalize(XMLoadFloat3(&character.facing_next));
-				XMVECTOR facing = XMVector3Normalize(XMLoadFloat3(&character.facing));
-				XMStoreFloat3(&character.facing, facing);
-				XMVECTOR facediff = XMVector3TransformNormal(facing_next - facing, facing_rot);
-				float velocity_leaning = clamp(XMVectorGetX(facediff * XMVector3Length(XMVectorSetY(velocity, 0))) * 0.08f, -leaning_limit, leaning_limit);
-				character.leaning_next = lerp(character.leaning_next, velocity_leaning, 0.05f);
-				character.leaning = lerp(character.leaning, character.leaning_next, 0.05f);
 			}
 			character.accumulator = clamp(character.accumulator, 0.0f, timestep);
 			character.alpha = character.accumulator / timestep;
 
-			if (platform_velocity_count > 0)
-			{
-				position += platform_velocity_accumulation / platform_velocity_count;
-			}
 			position += XMVectorSet(0, swim_offset, 0, 0);
+
+			// Smooth facing:
+			character.facing = wi::math::Lerp(character.facing, character.facing_next, dt * 5);
+			character.facing.y = 0;
+			XMVECTOR facing_next = XMVector3Normalize(XMLoadFloat3(&character.facing_next));
+			XMVECTOR facing = XMVector3Normalize(XMLoadFloat3(&character.facing));
+			XMStoreFloat3(&character.facing, facing);
+
+			// Smooth leaning:
+			XMVECTOR facediff = XMVector3TransformNormal(facing_next - facing, facing_rot);
+			float velocity_leaning = clamp(XMVectorGetX(facediff * XMVector3Length(XMVectorSetY(velocity, 0))) * 0.08f, -leaning_limit, leaning_limit);
+			character.leaning_next = lerp(character.leaning_next, velocity_leaning, dt * 5);
+			character.leaning = lerp(character.leaning, character.leaning_next, dt * 5);
 
 			// Simple animation blending:
 			for (Entity animEntity : character.animations)
@@ -5591,6 +5634,7 @@ namespace wi::scene
 
 			XMStoreFloat3(&character.position, position);
 			XMStoreFloat3(&character.velocity, velocity);
+			XMStoreFloat3(&character.inertia, inertia);
 			character.movement = XMFLOAT3(0, 0, 0);
 
 			// Apply character transformation on transform component:
@@ -5701,7 +5745,9 @@ namespace wi::scene
 			for (size_t objectIndex = 0; objectIndex < objectCount; ++objectIndex)
 			{
 				const AABB& aabb = aabb_objects[objectIndex];
-				if (!ray.intersects(aabb) || (layerMask & aabb.layerMask) == 0)
+				if ((layerMask & aabb.layerMask) == 0)
+					continue;
+				if (!ray.intersects(aabb))
 					continue;
 
 				const ObjectComponent& object = objects[objectIndex];
@@ -5859,6 +5905,44 @@ namespace wi::scene
 			}
 		}
 
+		if (filterMask & FILTER_RAGDOLL)
+		{
+			for (size_t i = 0; i < humanoids.GetCount(); ++i)
+			{
+				Entity entity = humanoids.GetEntity(i);
+				const LayerComponent* layer = layers.GetComponent(entity);
+				if (layer != nullptr && (layer->GetLayerMask() & layerMask) == 0)
+					continue;
+
+				const HumanoidComponent& humanoid = humanoids[i];
+				if (humanoid.IsIntersectionDisabled())
+					continue;
+				if (!humanoid.ragdoll_bounds.intersects(ray))
+					continue;
+
+				for (auto& bp : humanoid.ragdoll_bodyparts)
+				{
+					float dist = 0;
+					XMFLOAT3 direction = {};
+					if (ray.intersects(bp.capsule, dist, direction) && dist < result.distance)
+					{
+						result.distance = dist;
+						result.bary = {};
+						result.entity = entity;
+						result.humanoid_bone = bp.bone;
+						result.normal = direction;
+						result.uv = {};
+						result.velocity = {};
+						XMStoreFloat3(&result.position, rayOrigin + rayDirection * dist);
+						result.subsetIndex = -1;
+						result.vertexID0 = 0;
+						result.vertexID1 = 0;
+						result.vertexID2 = 0;
+					}
+				}
+			}
+		}
+
 		result.orientation = ray.GetPlacementOrientation(result.position, result.normal);
 
 		return result;
@@ -5915,7 +5999,9 @@ namespace wi::scene
 			for (size_t objectIndex = 0; objectIndex < objectCount; ++objectIndex)
 			{
 				const AABB& aabb = aabb_objects[objectIndex];
-				if (!ray.intersects(aabb) || (layerMask & aabb.layerMask) == 0)
+				if ((layerMask & aabb.layerMask) == 0)
+					continue;
+				if (!ray.intersects(aabb))
 					continue;
 
 				const ObjectComponent& object = objects[objectIndex];
@@ -6025,6 +6111,34 @@ namespace wi::scene
 
 			}
 		}
+
+		if (filterMask & FILTER_RAGDOLL)
+		{
+			for (size_t i = 0; i < humanoids.GetCount(); ++i)
+			{
+				Entity entity = humanoids.GetEntity(i);
+				const LayerComponent* layer = layers.GetComponent(entity);
+				if (layer != nullptr && (layer->GetLayerMask() & layerMask) == 0)
+					continue;
+
+				const HumanoidComponent& humanoid = humanoids[i];
+				if (humanoid.IsIntersectionDisabled())
+					continue;
+				if (!humanoid.ragdoll_bounds.intersects(ray))
+					continue;
+
+				for (auto& bp : humanoid.ragdoll_bodyparts)
+				{
+					float dist = 0;
+					XMFLOAT3 direction = {};
+					if (ray.intersects(bp.capsule, dist, direction))
+					{
+						return true;
+					}
+				}
+			}
+		}
+
 		return result;
 	}
 	Scene::SphereIntersectionResult Scene::Intersects(const Sphere& sphere, uint32_t filterMask, uint32_t layerMask, uint32_t lod) const
@@ -6085,7 +6199,9 @@ namespace wi::scene
 			for (size_t objectIndex = 0; objectIndex < objectCount; ++objectIndex)
 			{
 				const AABB& aabb = aabb_objects[objectIndex];
-				if (!sphere.intersects(aabb) || (layerMask & aabb.layerMask) == 0)
+				if ((layerMask & aabb.layerMask) == 0)
+					continue;
+				if (!sphere.intersects(aabb))
 					continue;
 
 				const ObjectComponent& object = objects[objectIndex];
@@ -6298,6 +6414,39 @@ namespace wi::scene
 			}
 		}
 
+		if (filterMask & FILTER_RAGDOLL)
+		{
+			for (size_t i = 0; i < humanoids.GetCount(); ++i)
+			{
+				Entity entity = humanoids.GetEntity(i);
+				const LayerComponent* layer = layers.GetComponent(entity);
+				if (layer != nullptr && (layer->GetLayerMask() & layerMask) == 0)
+					continue;
+
+				const HumanoidComponent& humanoid = humanoids[i];
+				if (humanoid.IsIntersectionDisabled())
+					continue;
+				if (!humanoid.ragdoll_bounds.intersects(sphere))
+					continue;
+
+				for (auto& bp : humanoid.ragdoll_bodyparts)
+				{
+					float dist = 0;
+					XMFLOAT3 direction = {};
+					if (sphere.intersects(bp.capsule, dist, direction) && dist > result.depth)
+					{
+						result.depth = dist;
+						result.entity = entity;
+						result.humanoid_bone = bp.bone;
+						result.normal = direction;
+						result.velocity = {};
+						result.position = {};
+						result.subsetIndex = -1;
+					}
+				}
+			}
+		}
+
 		result.orientation = sphere.GetPlacementOrientation(result.position, result.normal);
 
 		return result;
@@ -6366,7 +6515,9 @@ namespace wi::scene
 			for (size_t objectIndex = 0; objectIndex < objectCount; ++objectIndex)
 			{
 				const AABB& aabb = aabb_objects[objectIndex];
-				if (capsule_aabb.intersects(aabb) == AABB::INTERSECTION_TYPE::OUTSIDE || (layerMask & aabb.layerMask) == 0)
+				if ((layerMask & aabb.layerMask) == 0)
+					continue;
+				if (capsule_aabb.intersects(aabb) == AABB::INTERSECTION_TYPE::OUTSIDE)
 					continue;
 
 				const ObjectComponent& object = objects[objectIndex];
@@ -6694,6 +6845,40 @@ namespace wi::scene
 			}
 		}
 
+		if (filterMask & FILTER_RAGDOLL)
+		{
+			for (size_t i = 0; i < humanoids.GetCount(); ++i)
+			{
+				Entity entity = humanoids.GetEntity(i);
+				const LayerComponent* layer = layers.GetComponent(entity);
+				if (layer != nullptr && (layer->GetLayerMask() & layerMask) == 0)
+					continue;
+
+				const HumanoidComponent& humanoid = humanoids[i];
+				if (humanoid.IsIntersectionDisabled())
+					continue;
+				if (!humanoid.ragdoll_bounds.intersects(capsule.getAABB()))
+					continue;
+
+				for (auto& bp : humanoid.ragdoll_bodyparts)
+				{
+					XMFLOAT3 position = {};
+					XMFLOAT3 normal = {};
+					float depth = {};
+					if (capsule.intersects(bp.capsule, position, normal, depth) && depth > result.depth)
+					{
+						result.depth = depth;
+						result.entity = entity;
+						result.humanoid_bone = bp.bone;
+						result.normal = normal;
+						result.velocity = {};
+						result.position = position;
+						result.subsetIndex = -1;
+					}
+				}
+			}
+		}
+
 		result.orientation = capsule.GetPlacementOrientation(result.position, result.normal);
 
 		return result;
@@ -6832,7 +7017,7 @@ namespace wi::scene
 		wi::jobsystem::Wait(ctx);
 	}
 
-	XMFLOAT3 Scene::GetPositionOnSurface(wi::ecs::Entity objectEntity, int vertexID0, int vertexID1, int vertexID2, const XMFLOAT2& bary) const
+	XMFLOAT3 Scene::GetPositionOnSurface(Entity objectEntity, int vertexID0, int vertexID1, int vertexID2, const XMFLOAT2& bary) const
 	{
 		const ObjectComponent* object = objects.GetComponent(objectEntity);
 		if (object == nullptr || object->meshID == INVALID_ENTITY)
@@ -6883,7 +7068,7 @@ namespace wi::scene
 		return result;
 	}
 
-	void Scene::ResetPose(wi::ecs::Entity entity)
+	void Scene::ResetPose(Entity entity)
 	{
 		// All child armatures will be also calling ResetPose, in case you give a parent entity of them, for convenience:
 		for (size_t i = 0; i < armatures.GetCount(); ++i)
@@ -7324,33 +7509,6 @@ namespace wi::scene
 		return XMMatrixIdentity();
 	}
 
-	float Scene::GetHumanoidDefaultFacing(const HumanoidComponent& humanoid, Entity humanoidEntity) const
-	{
-		if (humanoid.default_facing == 0)
-		{
-			Entity left_shoulder = humanoid.bones[(size_t)HumanoidComponent::HumanoidBone::LeftUpperArm];
-			Entity right_shoulder = humanoid.bones[(size_t)HumanoidComponent::HumanoidBone::RightUpperArm];
-			XMVECTOR left_shoulder_pos = GetRestPose(left_shoulder).r[3];
-			XMVECTOR right_shoulder_pos = GetRestPose(right_shoulder).r[3];
-			const TransformComponent* transform = transforms.GetComponent(humanoidEntity);
-			if (transform != nullptr)
-			{
-				XMVECTOR S = transform->GetScaleV();
-				left_shoulder_pos *= S;
-				right_shoulder_pos *= S;
-			}
-			if (XMVectorGetX(right_shoulder_pos) < XMVectorGetX(left_shoulder_pos))
-			{
-				humanoid.default_facing = -1;
-			}
-			else
-			{
-				humanoid.default_facing = 1;
-			}
-		}
-		return humanoid.default_facing;
-	}
-
 	void Scene::ScanAnimationDependencies()
 	{
 		if (animations.GetCount() == 0)
@@ -7654,4 +7812,47 @@ namespace wi::scene
 		}
 	}
 
+	void Scene::UpdateHumanoidFacings()
+	{
+		// A contrived way of determining default facing and knee bending directions for humanoids:
+		//	This can be slow, so it is computed only once for each, if these values are 0
+		for (size_t i = 0; i < humanoids.GetCount(); ++i)
+		{
+			HumanoidComponent& humanoid = humanoids[i];
+			Entity humanoidEntity = humanoids.GetEntity(i);
+			if (humanoid.default_facing == 0)
+			{
+				Entity left_shoulder = humanoid.bones[(size_t)HumanoidComponent::HumanoidBone::LeftUpperArm];
+				Entity right_shoulder = humanoid.bones[(size_t)HumanoidComponent::HumanoidBone::RightUpperArm];
+				XMVECTOR left_shoulder_pos = GetRestPose(left_shoulder).r[3];
+				XMVECTOR right_shoulder_pos = GetRestPose(right_shoulder).r[3];
+				const TransformComponent* transform = transforms.GetComponent(humanoidEntity);
+				if (transform != nullptr)
+				{
+					XMVECTOR S = transform->GetScaleV();
+					left_shoulder_pos *= S;
+					right_shoulder_pos *= S;
+				}
+				if (XMVectorGetX(right_shoulder_pos) < XMVectorGetX(left_shoulder_pos))
+				{
+					humanoid.default_facing = -1;
+				}
+				else
+				{
+					humanoid.default_facing = 1;
+				}
+			}
+			if (humanoid.knee_bending == 0)
+			{
+				humanoid.knee_bending = humanoid.default_facing;
+				Entity left_leg = humanoid.bones[(size_t)HumanoidComponent::HumanoidBone::LeftUpperLeg];
+				const TransformComponent* transform = transforms.GetComponent(left_leg);
+				if (transform != nullptr)
+				{
+					XMFLOAT3 roll_pitch_yaw = wi::math::QuaternionToRollPitchYaw(transform->rotation_local);
+					humanoid.knee_bending *= (roll_pitch_yaw.y / XM_PI * 180.0f) < 0 ? -1 : 1; // MIXAMO fix!
+				}
+			}
+		}
+	}
 }

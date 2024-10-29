@@ -292,11 +292,11 @@ namespace wi::scene
 
 		if (shaderType == SHADERTYPE_WATER)
 		{
-			material.sheenColor = pack_half3(XMFLOAT3(1 - extinctionColor.x, 1 - extinctionColor.y, 1 - extinctionColor.z));
+			material.sheenColor_saturation = pack_half4(XMFLOAT4(1 - extinctionColor.x, 1 - extinctionColor.y, 1 - extinctionColor.z, saturation));
 		}
 		else
 		{
-			material.sheenColor = pack_half3(XMFLOAT3(sheenColor.x, sheenColor.y, sheenColor.z));
+			material.sheenColor_saturation = pack_half4(XMFLOAT4(sheenColor.x, sheenColor.y, sheenColor.z, saturation));
 		}
 		material.transmission_sheenroughness_clearcoat_clearcoatroughness = pack_half4(transmission, sheenRoughness, clearcoat, clearcoatRoughness);
 		material.layerMask = layerMask;
@@ -833,7 +833,7 @@ namespace wi::scene
 		wi::vector<ShaderClusterBounds> cluster_bounds;
 		cluster_ranges.clear();
 
-		if (device->CheckCapability(GraphicsDeviceCapability::MESH_SHADER))
+		if (wi::renderer::IsMeshShaderAllowed())
 		{
 			const size_t max_vertices = MESHLET_VERTEX_COUNT;
 			const size_t max_triangles = MESHLET_TRIANGLE_COUNT;
@@ -1916,7 +1916,7 @@ namespace wi::scene
 				ret = last_subset;
 			}
 		}
-		if (lod_count > 0)
+		if (subsets_per_lod > 0)
 		{
 			subsets_per_lod++;
 		}
@@ -2387,6 +2387,20 @@ namespace wi::scene
 		}
 	}
 
+	void CameraComponent::CreateOrtho(float newWidth, float newHeight, float newNear, float newFar, float newVerticalSize)
+	{
+		zNearP = newNear;
+		zFarP = newFar;
+		width = newWidth;
+		height = newHeight;
+		ortho_vertical_size = newVerticalSize;
+
+		SetCustomProjectionEnabled(false);
+		SetOrtho(true);
+		SetDirty();
+
+		UpdateCamera();
+	}
 	void CameraComponent::CreatePerspective(float newWidth, float newHeight, float newNear, float newFar, float newFOV)
 	{
 		zNearP = newNear;
@@ -2396,16 +2410,48 @@ namespace wi::scene
 		fov = newFOV;
 
 		SetCustomProjectionEnabled(false);
+		SetOrtho(false);
+		SetDirty();
 
 		UpdateCamera();
+	}
+	inline float compute_inverse_lineardepth(float lin, float znear, float zfar)
+	{
+		float z_n = ((lin - 2 * zfar) * znear + zfar * lin) / (lin * znear - zfar * lin);
+		float z = (z_n + 1) * 0.5f;
+		return z;
+	}
+	float CameraComponent::ComputeOrthoVerticalSizeFromPerspective(float dist)
+	{
+		dist = std::abs(dist);
+		float z = compute_inverse_lineardepth(dist, zNearP, zFarP);
+		XMMATRIX P = XMMatrixPerspectiveFovLH(fov, width / height, zFarP, zNearP); // reverse zbuffer!
+		XMMATRIX Unproj = XMMatrixInverse(nullptr, P);
+		XMVECTOR Ptop = XMVector3TransformCoord(XMVectorSet(0, 1, z, 1), Unproj);
+		XMVECTOR Pbottom = XMVector3TransformCoord(XMVectorSet(0, -1, z, 1), Unproj);
+		return XMVectorGetX(XMVector3Length(Ptop - Pbottom));
 	}
 	void CameraComponent::UpdateCamera()
 	{
 		if (!IsCustomProjectionEnabled())
 		{
-			XMStoreFloat4x4(&Projection, XMMatrixPerspectiveFovLH(fov, width / height, zFarP, zNearP)); // reverse zbuffer!
-			Projection.m[2][0] = jitter.x;
-			Projection.m[2][1] = jitter.y;
+			XMMATRIX P;
+
+			if (IsOrtho())
+			{
+				float aspect = width / height;
+				float ortho_width = ortho_vertical_size * aspect;
+				float ortho_height = ortho_vertical_size;
+				P = XMMatrixOrthographicLH(ortho_width, ortho_height, zFarP, zNearP); // reverse zbuffer!
+			}
+			else
+			{
+				P = XMMatrixPerspectiveFovLH(fov, width / height, zFarP, zNearP); // reverse zbuffer!
+			}
+
+			P = P * XMMatrixTranslation(jitter.x, jitter.y, 0);
+
+			XMStoreFloat4x4(&Projection, P);
 		}
 
 		XMVECTOR _Eye = XMLoadFloat3(&Eye);
@@ -2557,7 +2603,7 @@ namespace wi::scene
 		if (dot < 0)
 		{
 			// help with turning around 180 degrees:
-			XMStoreFloat3(&facing, XMVector3TransformNormal(F, XMMatrixRotationY(XM_PI * 0.01f)));
+			XMStoreFloat3(&facing, XMVector3TransformNormal(F, XMMatrixRotationY(XM_PI * 0.05f)));
 		}
 		facing_next = direction;
 	}
@@ -2616,7 +2662,7 @@ namespace wi::scene
 	}
 	Capsule CharacterComponent::GetCapsule() const
 	{
-		return Capsule(Sphere(position, width), height);
+		return Capsule(position, XMFLOAT3(position.x, position.y + height, position.z), width);
 	}
 	void CharacterComponent::SetFacing(const XMFLOAT3& value)
 	{

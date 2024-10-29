@@ -320,6 +320,9 @@ namespace wi::renderer
 	void RefreshLightmaps(const wi::scene::Scene& scene, wi::graphics::CommandList cmd);
 	// Call once per frame to render wetmaps
 	void RefreshWetmaps(const Visibility& vis, wi::graphics::CommandList cmd);
+	// Call once per frame to render PaintDecalIntoMeshSpaceTexture requests
+	void PaintDecals(const wi::scene::Scene& scene, wi::graphics::CommandList cmd);
+
 	// Run a compute shader that will resolve a MSAA depth buffer to a single-sample texture
 	void ResolveMSAADepthBuffer(const wi::graphics::Texture& dst, const wi::graphics::Texture& src, wi::graphics::CommandList cmd);
 	void DownsampleDepthBuffer(const wi::graphics::Texture& src, wi::graphics::CommandList cmd);
@@ -327,7 +330,6 @@ namespace wi::renderer
 	struct TiledLightResources
 	{
 		XMUINT2 tileCount = {};
-		wi::graphics::GPUBuffer tileFrustums; // entity culling frustums
 		wi::graphics::GPUBuffer entityTiles; // culled entity indices
 	};
 	void CreateTiledLightResources(TiledLightResources& res, XMUINT2 resolution);
@@ -739,6 +741,7 @@ namespace wi::renderer
 	};
 	void CreateMotionBlurResources(MotionBlurResources& res, XMUINT2 resolution);
 	void Postprocess_MotionBlur(
+		float dt, // delta time in seconds
 		const MotionBlurResources& res,
 		const wi::graphics::Texture& input,
 		const wi::graphics::Texture& output,
@@ -1210,6 +1213,21 @@ namespace wi::renderer
 	};
 	void PaintIntoTexture(const PaintTextureParams& params);
 	wi::Resource CreatePaintableTexture(uint32_t width, uint32_t height, uint32_t mips = 0, wi::Color initialColor = wi::Color::Transparent());
+
+	struct PaintDecalParams
+	{
+		wi::ecs::Entity objectEntity = wi::ecs::INVALID_ENTITY;
+		XMFLOAT4X4 decalMatrix = wi::math::IDENTITY_MATRIX;
+		wi::graphics::Texture in_texture;
+		wi::graphics::Texture out_texture;
+		float slopeBlendPower = 0;
+	};
+	// Render a decal into a texture mapped onto a mesh (supports skinned mesh)
+	//	objectEntity : entity that has an ObjectComponent in the scene
+	//	decalMatrix : decal projection matrix in world space
+	//	in_texture : texture containing the source decal
+	//	out_texture : texture containing the result decal(s) wrapped onto the object
+	void PaintDecalIntoObjectSpaceTexture(const PaintDecalParams& params);
 
 	// Add voxel grid to be drawn in debug rendering phase.
 	//	WARNING: This retains pointer until next call to DrawDebugScene(), so voxel grid must not be destroyed until then!

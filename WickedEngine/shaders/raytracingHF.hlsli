@@ -21,14 +21,33 @@ struct RayDesc
 };
 #endif // HLSL5
 
+// Creates camera ray from clip space using the inverse projection matrix:
 inline RayDesc CreateCameraRay(float2 clipspace)
 {
-	float4 unprojected = mul(GetCamera().inverse_view_projection, float4(clipspace, 0, 1));
-	unprojected.xyz /= unprojected.w;
+	float4 unprojectedNEAR = mul(GetCamera().inverse_view_projection, float4(clipspace, 1, 1));
+	unprojectedNEAR.xyz /= unprojectedNEAR.w;
+	float4 unprojectedFAR = mul(GetCamera().inverse_view_projection, float4(clipspace, 0, 1));
+	unprojectedFAR.xyz /= unprojectedFAR.w;
 
 	RayDesc ray;
-	ray.Origin = GetCamera().position;
-	ray.Direction = normalize(unprojected.xyz - ray.Origin);
+	ray.Origin = unprojectedNEAR.xyz;
+	ray.Direction = normalize(unprojectedFAR.xyz - ray.Origin);
+	ray.TMin = 0.001;
+	ray.TMax = FLT_MAX;
+
+	return ray;
+}
+
+// Creates camera ray from pixel coordinate, not using inverse projection matrix, but frustum corners:
+inline RayDesc CreateCameraRay(uint2 pixel, float2 offset = 0)
+{
+	float4 svpos = float4(float2(pixel) + 0.5 + offset, 0, 0);
+	float3 near = GetCamera().screen_to_nearplane(svpos);
+	float3 far = GetCamera().screen_to_farplane(svpos);
+
+	RayDesc ray;
+	ray.Origin = near;
+	ray.Direction = normalize(far - ray.Origin);
 	ray.TMin = 0.001;
 	ray.TMax = FLT_MAX;
 

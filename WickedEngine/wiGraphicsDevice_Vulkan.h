@@ -60,6 +60,7 @@ namespace wi::graphics
 		VkPhysicalDeviceMeshShaderPropertiesEXT mesh_shader_properties = {};
 		VkPhysicalDeviceMemoryProperties2 memory_properties_2 = {};
 		VkPhysicalDeviceDepthStencilResolveProperties depth_stencil_resolve_properties = {};
+		VkPhysicalDeviceConservativeRasterizationPropertiesEXT conservative_raster_properties = {};
 
 		VkPhysicalDeviceFeatures2 features2 = {};
 		VkPhysicalDeviceVulkan11Features features_1_1 = {};
@@ -463,6 +464,13 @@ namespace wi::graphics
 		{
 			return GetCommandList(cmd).frame_allocators[GetBufferIndex()];
 		}
+
+		VkDevice GetDevice();
+		VkImage GetTextureInternalResource(const Texture* texture);
+		VkPhysicalDevice GetPhysicalDevice();
+		VkInstance GetInstance();
+		VkQueue GetGraphicsCommandQueue();
+		uint32_t GetGraphicsFamilyIndex();
 
 		struct AllocationHandler
 		{

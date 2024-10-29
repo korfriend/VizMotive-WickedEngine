@@ -26,7 +26,7 @@ namespace wi
 	static Shader ps_shadow;
 	static Shader ps_simple;
 	static Shader cs_simulate;
-	static DepthStencilState dss_default, dss_equal;
+	static DepthStencilState dss_default, dss_equal, dss_shadow;
 	static RasterizerState rs, ncrs, wirers, rs_shadow;
 	static BlendState bs;
 	static BlendState bs_shadow;
@@ -52,7 +52,7 @@ namespace wi
 	{
 		if (mesh.so_pos.IsValid())
 		{
-			position_format = MeshComponent::Vertex_POS32::FORMAT;
+			position_format = MeshComponent::Vertex_POS32W::FORMAT;
 		}
 		else
 		{
@@ -293,13 +293,20 @@ namespace wi
 		XMFLOAT3 _min = mesh.aabb.getMin();
 		XMFLOAT3 _max = mesh.aabb.getMax();
 
-		_max.x += length;
-		_max.y += length;
-		_max.z += length;
+		float maxlen = length;
 
-		_min.x -= length;
-		_min.y -= length;
-		_min.z -= length;
+		for (auto& x : atlas_rects)
+		{
+			maxlen = std::max(maxlen, x.size);
+		}
+
+		_max.x += maxlen;
+		_max.y += maxlen;
+		_max.z += maxlen;
+
+		_min.x -= maxlen;
+		_min.y -= maxlen;
+		_min.z -= maxlen;
 
 		aabb = AABB(_min, _max);
 		aabb = aabb.transform(world);
@@ -341,7 +348,7 @@ namespace wi
 			{
 				desc = material.textures[MaterialComponent::BASECOLORMAP].resource.GetTexture().GetDesc();
 			}
-			HairParticleCB hcb;
+			HairParticleCB hcb = {};
 			hcb.xHairTransform.Create(hair.world);
 			if (!IsFormatUnorm(mesh.position_format) || mesh.so_pos.IsValid())
 			{
@@ -353,9 +360,17 @@ namespace wi
 				XMStoreFloat4x4(&unormRemap, mesh.aabb.getUnormRemapMatrix());
 				hcb.xHairBaseMeshUnormRemap.Create(unormRemap);
 			}
-			hcb.xHairRegenerate = hair.regenerate_frame ? 1 : 0;
-			hcb.xLength = hair.length;
-			hcb.xStiffness = hair.stiffness;
+			if (IsFormatUnorm(hair.position_format))
+			{
+				hcb.xHairFlags |= HAIR_FLAG_UNORM_POS;
+			}
+			if (hair.regenerate_frame)
+			{
+				hcb.xHairFlags |= HAIR_FLAG_REGENERATE_FRAME;
+			}
+			hcb.xHairAspect = hair.width * (float)std::max(1u, desc.width) / (float)std::max(1u, desc.height);
+			hcb.xHairLength = hair.length;
+			hcb.xHairStiffness = hair.stiffness;
 			hcb.xHairRandomness = hair.randomness;
 			hcb.xHairStrandCount = hair.strandCount;
 			hcb.xHairSegmentCount = std::max(hair.segmentCount, 1u);
@@ -363,13 +378,28 @@ namespace wi
 			hcb.xHairRandomSeed = hair.randomSeed;
 			hcb.xHairViewDistance = hair.viewDistance;
 			hcb.xHairBaseMeshIndexCount = (uint)hair.indices.size();
-			hcb.xHairFramesXY = uint2(std::max(1u, hair.framesX), std::max(1u, hair.framesY));
-			hcb.xHairFrameCount = std::max(1u, hair.frameCount);
-			hcb.xHairFrameStart = hair.frameStart;
-			hcb.xHairTexMul = float2(1.0f / (float)hcb.xHairFramesXY.x, 1.0f / (float)hcb.xHairFramesXY.y);
-			hcb.xHairAspect = (float)std::max(1u, desc.width) / (float)std::max(1u, desc.height);
 			hcb.xHairLayerMask = hair.layerMask;
 			hcb.xHairInstanceIndex = item.instanceIndex;
+			if (hair.atlas_rects.empty())
+			{
+				// unspecified rects will default to view the whole texture:
+				hcb.xHairAtlasRects[0].texMulAdd = float4(1, 1, 0, 0);
+				hcb.xHairAtlasRects[0].size = 1;
+				hcb.xHairAtlasRects[0].aspect = 1;
+				hcb.xHairAtlasRectCount = 1;
+			}
+			else
+			{
+				// custom atlas rects:
+				hcb.xHairAtlasRectCount = uint(std::min(hair.atlas_rects.size(), arraysize(hcb.xHairAtlasRects)));
+				for (uint a = 0; a < hcb.xHairAtlasRectCount; ++a)
+				{
+					hcb.xHairAtlasRects[a].texMulAdd = hair.atlas_rects[a].texMulAdd;
+					hcb.xHairAtlasRects[a].size = hair.atlas_rects[a].size;
+					hcb.xHairAtlasRects[a].aspect = hcb.xHairAtlasRects[a].texMulAdd.x / hcb.xHairAtlasRects[a].texMulAdd.y;
+				}
+			}
+			hcb.xHairUniformity = hair.uniformity;
 			device->UpdateBuffer(&hair.constantBuffer, &hcb, cmd);
 			wi::renderer::PushBarrier(GPUBarrier::Buffer(&hair.constantBuffer, ResourceState::COPY_DST, ResourceState::CONSTANT_BUFFER));
 
@@ -517,16 +547,43 @@ namespace wi
 			}
 			if (archive.GetVersion() >= 42)
 			{
-				archive >> framesX;
-				archive >> framesY;
-				archive >> frameCount;
-				archive >> frameStart;
+				if (seri.GetVersion() < 1)
+				{
+					// Conversion from old frame format to new:
+					uint32_t framesX = 1;
+					uint32_t framesY = 1;
+					uint32_t frameCount = 1;
+					uint32_t frameStart = 0;
+
+					archive >> framesX;
+					archive >> framesY;
+					archive >> frameCount;
+					archive >> frameStart;
+
+					ConvertFromOLDSpriteSheet(framesX, framesY, frameCount, frameStart);
+
+				}
 			}
 
 			if (archive.GetVersion() == 48)
 			{
 				uint8_t shadingRate;
 				archive >> shadingRate; // no longer needed
+			}
+
+			if (seri.GetVersion() >= 1)
+			{
+				archive >> width;
+				archive >> uniformity;
+
+				size_t rect_count = 0;
+				archive >> rect_count;
+				atlas_rects.resize(rect_count);
+				for (size_t i = 0; i < rect_count; ++i)
+				{
+					archive >> atlas_rects[i].texMulAdd;
+					archive >> atlas_rects[i].size;
+				}
 			}
 		}
 		else
@@ -544,12 +601,17 @@ namespace wi
 			{
 				archive << vertex_lengths;
 			}
-			if (archive.GetVersion() >= 42)
+
+			if (seri.GetVersion() >= 1)
 			{
-				archive << framesX;
-				archive << framesY;
-				archive << frameCount;
-				archive << frameStart;
+				archive << width;
+				archive << uniformity;
+				archive << atlas_rects.size();
+				for (size_t i = 0; i < atlas_rects.size(); ++i)
+				{
+					archive << atlas_rects[i].texMulAdd;
+					archive << atlas_rects[i].size;
+				}
 			}
 		}
 	}
@@ -597,6 +659,7 @@ namespace wi
 						desc.ps = &ps_shadow;
 						desc.rs = &rs_shadow;
 						desc.bs = &bs_shadow;
+						desc.dss = &dss_shadow;
 						break;
 					}
 
@@ -666,6 +729,9 @@ namespace wi
 		dsd.depth_write_mask = DepthWriteMask::ALL;
 		dsd.depth_func = ComparisonFunc::GREATER;
 
+		dsd.stencil_enable = false;
+		dss_shadow = dsd;
+
 		dsd.stencil_enable = true;
 		dsd.stencil_read_mask = 0xFF;
 		dsd.stencil_write_mask = 0xFF;
@@ -697,5 +763,20 @@ namespace wi
 		HairParticleSystem_Internal::LoadShaders();
 
 		wi::backlog::post("wi::HairParticleSystem Initialized (" + std::to_string((int)std::round(timer.elapsed())) + " ms)");
+	}
+
+	void HairParticleSystem::ConvertFromOLDSpriteSheet(uint32_t framesX, uint32_t framesY, uint32_t frameCount, uint32_t frameStart)
+	{
+		framesX = std::max(1u, framesX);
+		framesY = std::max(1u, framesY);
+		width = (float)framesX / (float)framesY;
+		float2 texmul = float2(1.0f / (float)framesX, 1.0f / (float)framesY);
+		atlas_rects.resize(frameCount);
+		for (uint32_t i = 0; i < frameCount; ++i)
+		{
+			uint currentFrame = frameStart + i;
+			uint2 offset = uint2(currentFrame % framesX, currentFrame / framesY);
+			atlas_rects[i].texMulAdd = XMFLOAT4(texmul.x, texmul.y, offset.x * texmul.x, offset.y * texmul.y);
+		}
 	}
 }

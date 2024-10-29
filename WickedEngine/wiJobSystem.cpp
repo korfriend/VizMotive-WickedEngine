@@ -14,6 +14,7 @@
 
 #ifdef PLATFORM_LINUX
 #include <pthread.h>
+#include <sys/resource.h>
 #endif // PLATFORM_LINUX
 
 #ifdef PLATFORM_PS5
@@ -36,9 +37,7 @@ namespace wi::jobsystem
 			args.groupID = groupID;
 			if (sharedmemory_size > 0)
 			{
-				thread_local static wi::vector<uint8_t> shared_allocation_data;
-				shared_allocation_data.reserve(sharedmemory_size);
-				args.sharedmemory = shared_allocation_data.data();
+				args.sharedmemory = alloca(sharedmemory_size);
 			}
 			else
 			{
@@ -191,8 +190,33 @@ namespace wi::jobsystem
 
 			for (uint32_t threadID = 0; threadID < res.numThreads; ++threadID)
 			{
-				std::thread& worker = res.threads.emplace_back([threadID, &res] {
+#ifdef PLATFORM_LINUX
+				std::thread& worker = res.threads.emplace_back([threadID, priority, &res] {
 
+					switch (priority) {
+					case Priority::Low:
+					case Priority::Streaming:
+						// from the sched(2) manpage:
+						// In the current [Linux 2.6.23+] implementation, each unit of
+						// difference in the nice values of two processes results in a
+						// factor of 1.25 in the degree to which the scheduler favors
+						// the higher priority process.
+						//
+						// so 3 would mean that other (prio 0) threads are around twice as important
+						if (setpriority(PRIO_PROCESS, 0, 3) != 0)
+						{
+							perror("setpriority");
+						}
+						break;
+					case Priority::High:
+						// nothing to do
+						break;
+					default:
+						assert(0);
+					}
+#else
+				std::thread& worker = res.threads.emplace_back([threadID, &res] {
+#endif
 					while (internal_state.alive.load())
 					{
 						res.work(threadID);
@@ -273,26 +297,24 @@ namespace wi::jobsystem
 				}
 				else if (priority == Priority::Low)
 				{
-					// TODO: set lower priority
-
 					std::string thread_name = "wi::job_lo_" + std::to_string(threadID);
 					ret = pthread_setname_np(handle, thread_name.c_str());
 					if (ret != 0)
 						handle_error_en(ret, std::string(" pthread_setname_np[" + std::to_string(threadID) + ']').c_str());
+					// priority is set in the worker function
 				}
 				else if (priority == Priority::Streaming)
 				{
-					// TODO: set lower priority
-
 					std::string thread_name = "wi::job_st_" + std::to_string(threadID);
 					ret = pthread_setname_np(handle, thread_name.c_str());
 					if (ret != 0)
 						handle_error_en(ret, std::string(" pthread_setname_np[" + std::to_string(threadID) + ']').c_str());
+					// priority is set in the worker function
 				}
 
 #undef handle_error_en
 #elif defined(PLATFORM_PS5)
-				wi::jobsystem::ps5::SetupWorker(worker, threadID);
+				wi::jobsystem::ps5::SetupWorker(worker, threadID, core, priority);
 #endif // _WIN32
 			}
 		}
@@ -327,9 +349,9 @@ namespace wi::jobsystem
 		job.groupJobEnd = 1;
 		job.sharedmemory_size = 0;
 
-		if (res.numThreads <= 1)
+		if (res.numThreads < 1)
 		{
-			// If job system is not yet initialized, or only has one threads, job will be executed immediately here instead of thread:
+			// If job system is not yet initialized, job will be executed immediately here instead of thread:
 			job.execute();
 			return;
 		}
@@ -363,9 +385,9 @@ namespace wi::jobsystem
 			job.groupJobOffset = groupID * groupSize;
 			job.groupJobEnd = std::min(job.groupJobOffset + groupSize, jobCount);
 
-			if (res.numThreads <= 1)
+			if (res.numThreads < 1)
 			{
-				// If job system is not yet initialized, or only has one threads, job will be executed immediately here instead of thread:
+				// If job system is not yet initialized, job will be executed immediately here instead of thread:
 				job.execute();
 			}
 			else

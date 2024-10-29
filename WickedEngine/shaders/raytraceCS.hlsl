@@ -35,11 +35,8 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 	float3 primary_albedo = 0;
 	float3 primary_normal = 0;
 
-	// Compute screen coordinates:
-	float2 uv = (pixel + xTracePixelOffset) * xTraceResolution_rcp.xy;
-
 	// Create starting ray:
-	RayDesc ray = CreateCameraRay(uv_to_clipspace(uv));
+	RayDesc ray = CreateCameraRay(pixel, xTracePixelOffset);
 
 	// Depth of field setup:
 	float3 focal_point = ray.Origin + ray.Direction * GetCamera().focal_length;
@@ -65,9 +62,18 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 		ray.Direction = normalize(ray.Direction);
 
 		float4 additive_dist = float4(0, 0, 0, FLT_MAX);
-
+		
 #ifdef RTAPI
 		wiRayQuery q;
+#else
+		RayHit hit;
+#endif // RTAPI
+
+		bool exit_sky = GetScene().instanceCount == 0;
+
+		if(!exit_sky)
+		{
+#ifdef RTAPI
 
 		uint flags = RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES;
 #ifdef RAY_BACKFACE_CULLING
@@ -115,13 +121,15 @@ void main(uint3 DTid : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 			result += max(0, energy * additive_dist.xyz);
 		}
 
-		if (q.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
+		exit_sky = q.CommittedStatus() != COMMITTED_TRIANGLE_HIT;
 #else
-		RayHit hit = TraceRay_Closest(ray, xTraceUserData.y, rng, groupIndex);
+		hit = TraceRay_Closest(ray, xTraceUserData.y, rng, groupIndex);
 
-		if (hit.distance >= FLT_MAX - 1)
+		exit_sky = hit.distance >= FLT_MAX - 1;
 #endif // RTAPI
+		}
 
+		if (exit_sky)
 		{
 			float3 envColor;
 			[branch]

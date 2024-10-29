@@ -88,8 +88,8 @@ namespace wi
 		GraphicsDevice* device = wi::graphics::GetDevice();
 
 		XMUINT2 internalResolution = GetInternalResolution();
-
-		camera->CreatePerspective((float)internalResolution.x, (float)internalResolution.y, camera->zNearP, camera->zFarP, camera->fov);
+		camera->width = (float)internalResolution.x;
+		camera->height = (float)internalResolution.y;
 
 		// Render targets:
 
@@ -418,16 +418,12 @@ namespace wi
 		if (getFSR2Enabled())
 		{
 			camera->jitter = fsr2Resources.GetJitter();
-			camera_reflection.jitter.x = camera->jitter.x * 2;
-			camera_reflection.jitter.y = camera->jitter.x * 2;
 		}
 		else if (wi::renderer::GetTemporalAAEnabled())
 		{
 			const XMFLOAT4& halton = wi::math::GetHaltonSequence(wi::graphics::GetDevice()->GetFrameCount() % 256);
 			camera->jitter.x = (halton.x * 2 - 1) / (float)internalResolution.x;
 			camera->jitter.y = (halton.y * 2 - 1) / (float)internalResolution.y;
-			camera_reflection.jitter.x = camera->jitter.x * 2;
-			camera_reflection.jitter.y = camera->jitter.x * 2;
 			if (!temporalAAResources.IsValid())
 			{
 				wi::renderer::CreateTemporalAAResources(temporalAAResources, internalResolution);
@@ -436,9 +432,10 @@ namespace wi
 		else
 		{
 			camera->jitter = XMFLOAT2(0, 0);
-			camera_reflection.jitter = XMFLOAT2(0, 0);
 			temporalAAResources = {};
 		}
+
+		camera_reflection.jitter = XMFLOAT2(0, 0);
 
 		camera->UpdateCamera();
 		if (visibility_main.planar_reflection_visible)
@@ -746,8 +743,8 @@ namespace wi
 		camera->texture_normal_index = device->GetDescriptorIndex(&visibilityResources.texture_normals, SubresourceType::SRV);
 		camera->texture_roughness_index = device->GetDescriptorIndex(&visibilityResources.texture_roughness, SubresourceType::SRV);
 		camera->buffer_entitytiles_index = device->GetDescriptorIndex(&tiledLightResources.entityTiles, SubresourceType::SRV);
-		camera->texture_reflection_index = device->GetDescriptorIndex(&rtReflection, SubresourceType::SRV);
-		camera->texture_reflection_depth_index = device->GetDescriptorIndex(&depthBuffer_Reflection, SubresourceType::SRV);
+		camera->texture_reflection_index = device->GetDescriptorIndex(&rtReflection_resolved, SubresourceType::SRV);
+		camera->texture_reflection_depth_index = device->GetDescriptorIndex(&depthBuffer_Reflection_resolved, SubresourceType::SRV);
 		camera->texture_refraction_index = device->GetDescriptorIndex(&rtSceneCopy, SubresourceType::SRV);
 		camera->texture_waterriples_index = device->GetDescriptorIndex(&rtWaterRipple, SubresourceType::SRV);
 		camera->texture_ao_index = device->GetDescriptorIndex(&rtAO, SubresourceType::SRV);
@@ -785,7 +782,7 @@ namespace wi
 		camera_reflection.sample_count = depthBuffer_Reflection.desc.sample_count;
 		camera_reflection.shadercamera_options = SHADERCAMERA_OPTION_NONE;
 		camera_reflection.texture_primitiveID_index = -1;
-		camera_reflection.texture_depth_index = device->GetDescriptorIndex(&depthBuffer_Reflection, SubresourceType::SRV);
+		camera_reflection.texture_depth_index = device->GetDescriptorIndex(&depthBuffer_Reflection_resolved, SubresourceType::SRV);
 		camera_reflection.texture_lineardepth_index = -1;
 		camera_reflection.texture_velocity_index = -1;
 		camera_reflection.texture_normal_index = -1;
@@ -929,7 +926,7 @@ namespace wi
 			wi::renderer::DRAWSCENE_MAINCAMERA
 			;
 
-		// Main camera depth prepass + occlusion culling:
+		// Main camera depth prepass:
 		cmd = device->BeginCommandList();
 		CommandList cmd_maincamera_prepass = cmd;
 		wi::jobsystem::Execute(ctx, [this, cmd](wi::jobsystem::JobArgs args) {
@@ -942,11 +939,6 @@ namespace wi
 				camera_reflection,
 				cmd
 			);
-
-			if (getOcclusionCullingEnabled())
-			{
-				wi::renderer::OcclusionCulling_Reset(visibility_main, cmd); // must be outside renderpass!
-			}
 
 			wi::renderer::RefreshImpostors(*scene, cmd);
 
@@ -1016,19 +1008,9 @@ namespace wi
 			wi::profiler::EndRange(range);
 			device->EventEnd(cmd);
 
-			if (getOcclusionCullingEnabled())
-			{
-				wi::renderer::OcclusionCulling_Render(*camera, visibility_main, cmd);
-			}
-
 			device->RenderPassEnd(cmd);
 
-			if (getOcclusionCullingEnabled())
-			{
-				wi::renderer::OcclusionCulling_Resolve(visibility_main, cmd); // must be outside renderpass!
-			}
-
-			});
+		});
 
 		// Main camera compute effects:
 		//	(async compute, parallel to "shadow maps" and "update textures",
@@ -1156,11 +1138,61 @@ namespace wi
 
 		});
 
+		// Occlusion culling:
+		CommandList cmd_occlusionculling;
+		if (getOcclusionCullingEnabled())
+		{
+			cmd = device->BeginCommandList();
+			cmd_occlusionculling = cmd;
+			wi::jobsystem::Execute(ctx, [this, cmd](wi::jobsystem::JobArgs args) {
+
+				GraphicsDevice* device = wi::graphics::GetDevice();
+
+				device->EventBegin("Occlusion Culling", cmd);
+				ScopedGPUProfiling("Occlusion Culling", cmd);
+
+				wi::renderer::BindCameraCB(
+					*camera,
+					camera_previous,
+					camera_reflection,
+					cmd
+				);
+
+				wi::renderer::OcclusionCulling_Reset(visibility_main, cmd); // must be outside renderpass!
+
+				RenderPassImage rp[] = {
+					RenderPassImage::DepthStencil(&depthBuffer_Main),
+				};
+				device->RenderPassBegin(rp, arraysize(rp), cmd);
+
+				Rect scissor = GetScissorInternalResolution();
+				device->BindScissorRects(1, &scissor, cmd);
+
+				Viewport vp;
+				vp.width = (float)depthBuffer_Main.GetDesc().width;
+				vp.height = (float)depthBuffer_Main.GetDesc().height;
+				device->BindViewports(1, &vp, cmd);
+
+				wi::renderer::OcclusionCulling_Render(*camera, visibility_main, cmd);
+
+				device->RenderPassEnd(cmd);
+
+				wi::renderer::OcclusionCulling_Resolve(visibility_main, cmd); // must be outside renderpass!
+
+				device->EventEnd(cmd);
+			});
+		}
+
 		CommandList cmd_ocean;
 		if (scene->weather.IsOceanEnabled() && scene->ocean.IsValid())
 		{
 			// Ocean simulation can be updated async to opaque passes:
 			cmd_ocean = device->BeginCommandList(QUEUE_COMPUTE);
+			if (cmd_occlusionculling.IsValid())
+			{
+				// Ocean occlusion culling must be waited
+				device->WaitCommandList(cmd_ocean, cmd_occlusionculling);
+			}
 			wi::renderer::UpdateOcean(visibility_main, cmd_ocean);
 
 			// Copying to readback is done on copy queue to use DMA instead of compute warps:
@@ -1201,6 +1233,7 @@ namespace wi
 				);
 				wi::renderer::RefreshLightmaps(*scene, cmd);
 				wi::renderer::RefreshEnvProbes(visibility_main, cmd);
+				wi::renderer::PaintDecals(*scene, cmd);
 			});
 		}
 
@@ -1238,10 +1271,10 @@ namespace wi
 						&depthBuffer_Reflection,
 						RenderPassImage::LoadOp::CLEAR,
 						RenderPassImage::StoreOp::STORE,
-						ResourceState::DEPTHSTENCIL,
+						ResourceState::SHADER_RESOURCE,
 						ResourceState::DEPTHSTENCIL,
 						ResourceState::SHADER_RESOURCE
-					),
+					)
 				};
 				device->RenderPassBegin(rp, arraysize(rp), cmd);
 
@@ -1263,6 +1296,8 @@ namespace wi
 				);
 
 				device->RenderPassEnd(cmd);
+
+				wi::renderer::ResolveMSAADepthBuffer(depthBuffer_Reflection_resolved, depthBuffer_Reflection, cmd);
 
 				if (scene->weather.IsRealisticSky() && scene->weather.IsRealisticSkyAerialPerspective())
 				{
@@ -1317,17 +1352,20 @@ namespace wi
 				RenderPassImage rp[] = {
 					RenderPassImage::RenderTarget(
 						&rtReflection,
-						RenderPassImage::LoadOp::DONTCARE,
-						RenderPassImage::StoreOp::STORE,
-						ResourceState::SHADER_RESOURCE,
-						ResourceState::SHADER_RESOURCE
+						RenderPassImage::LoadOp::CLEAR,
+						RenderPassImage::StoreOp::DONTCARE,
+						ResourceState::RENDERTARGET,
+						ResourceState::RENDERTARGET
 					),
 					RenderPassImage::DepthStencil(
 						&depthBuffer_Reflection,
 						RenderPassImage::LoadOp::LOAD,
 						RenderPassImage::StoreOp::STORE,
+						ResourceState::SHADER_RESOURCE,
+						ResourceState::DEPTHSTENCIL,
 						ResourceState::SHADER_RESOURCE
 					),
+					RenderPassImage::Resolve(&rtReflection_resolved)
 				};
 				device->RenderPassBegin(rp, arraysize(rp), cmd);
 
@@ -2322,6 +2360,7 @@ namespace wi
 			if (getMotionBlurEnabled() && getMotionBlurStrength() > 0 && motionblurResources.IsValid())
 			{
 				wi::renderer::Postprocess_MotionBlur(
+					scene->dt,
 					motionblurResources,
 					rt_first == nullptr ? *rt_read : *rt_first,
 					*rt_write,
@@ -2734,18 +2773,34 @@ namespace wi
 				return;
 
 			TextureDesc desc;
-			desc.bind_flags = BindFlag::RENDER_TARGET | BindFlag::SHADER_RESOURCE;
+			desc.sample_count = 4;
+			desc.bind_flags = BindFlag::RENDER_TARGET;
 			desc.format = wi::renderer::format_rendertarget_main;
-			desc.width = internalResolution.x / 2;
-			desc.height = internalResolution.y / 2;
+			desc.width = internalResolution.x / 4;
+			desc.height = internalResolution.y / 4;
+			desc.misc_flags = ResourceMiscFlag::TRANSIENT_ATTACHMENT;
+			desc.layout = ResourceState::RENDERTARGET;
 			device->CreateTexture(&desc, nullptr, &rtReflection);
 			device->SetName(&rtReflection, "rtReflection");
 
+			desc.misc_flags = ResourceMiscFlag::NONE;
 			desc.bind_flags = BindFlag::DEPTH_STENCIL | BindFlag::SHADER_RESOURCE;
 			desc.format = wi::renderer::format_depthbuffer_main;
-			desc.layout = ResourceState::DEPTHSTENCIL;
+			desc.layout = ResourceState::SHADER_RESOURCE;
 			device->CreateTexture(&desc, nullptr, &depthBuffer_Reflection);
 			device->SetName(&depthBuffer_Reflection, "depthBuffer_Reflection");
+
+
+			desc.sample_count = 1;
+			desc.format = wi::renderer::format_rendertarget_main;
+			desc.bind_flags = BindFlag::RENDER_TARGET | BindFlag::SHADER_RESOURCE;
+			device->CreateTexture(&desc, nullptr, &rtReflection_resolved);
+			device->SetName(&rtReflection_resolved, "rtReflection_resolved");
+
+			desc.format = Format::R16_UNORM;
+			desc.bind_flags = BindFlag::UNORDERED_ACCESS | BindFlag::SHADER_RESOURCE;
+			device->CreateTexture(&desc, nullptr, &depthBuffer_Reflection_resolved);
+			device->SetName(&depthBuffer_Reflection_resolved, "depthBuffer_Reflection_resolved");
 
 			wi::renderer::CreateTiledLightResources(tiledLightResources_planarReflection, XMUINT2(depthBuffer_Reflection.desc.width, depthBuffer_Reflection.desc.height));
 		}
