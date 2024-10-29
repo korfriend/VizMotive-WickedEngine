@@ -504,29 +504,8 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)wiTrailRenderer_BindLua.h">
       <Filter>ENGINE\Scripting\LuaBindings</Filter>
     </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)VizComponentAPIs.h">
-      <Filter>Engine Wrapper</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)VizEngineAPIs.h">
-      <Filter>Engine Wrapper</Filter>
-    </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)vzArcBall.h">
       <Filter>ENGINE\Helpers</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)ModelImporter.h">
-      <Filter>UTILS</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)tiny_gltf.h">
-      <Filter>UTILS</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)tiny_obj_loader.h">
-      <Filter>UTILS</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)stdafx.h">
-      <Filter>UTILS</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)json.hpp">
-      <Filter>UTILS</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)wiAsync_BindLua.h">
       <Filter>ENGINE\Scripting\LuaBindings</Filter>
@@ -1404,6 +1383,13 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)Utility\meshoptimizer\meshoptimizer.h">
       <Filter>UTILITY\meshoptimizer</Filter>
     </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)json.hpp" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)ModelImporter.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)stdafx.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)tiny_gltf.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)tiny_obj_loader.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)VizComponentAPIs.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)VizEngineAPIs.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(MSBuildThisFileDirectory)LUA\lapi.c">
@@ -1750,18 +1736,6 @@
     </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)wiTrailRenderer_BindLua.cpp">
       <Filter>ENGINE\Scripting\LuaBindings</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)VizEngineAPIs.cpp">
-      <Filter>Engine Wrapper</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)ModelImporter_GLTF.cpp">
-      <Filter>UTILS</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)ModelImporter_OBJ.cpp">
-      <Filter>UTILS</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)stdafx.cpp">
-      <Filter>UTILS</Filter>
     </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)wiAsync_BindLua.cpp">
       <Filter>ENGINE\Scripting\LuaBindings</Filter>
@@ -2228,6 +2202,9 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)Utility\meshoptimizer\vfetchoptimizer.cpp">
       <Filter>UTILITY\meshoptimizer</Filter>
     </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)ModelImporter_GLTF.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)ModelImporter_OBJ.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)VizEngineAPIs.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="$(MSBuildThisFileDirectory)Utility\DirectXCollision.inl">

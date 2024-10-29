@@ -234,6 +234,11 @@ namespace wi::audio
 		audio_internal = std::make_shared<AudioInternal>();
 	}
 
+	void Deinitialize()
+	{
+		audio_internal.reset();
+	}
+
 	struct SoundInternal
 	{
 		std::shared_ptr<AudioInternal> audio;
