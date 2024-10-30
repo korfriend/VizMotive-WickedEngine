@@ -349,7 +349,7 @@ inline void light_spot(in ShaderEntity light, in Surface surface, inout Lighting
 
 inline half3 GetAmbient(in float3 N)
 {
-	half3 ambient;
+	half3 ambient = (half3)0;
 
 #ifdef ENVMAPRENDERING
 
